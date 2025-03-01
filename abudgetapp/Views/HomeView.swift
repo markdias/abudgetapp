@@ -7,6 +7,8 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
+    @State private var expandedCardID: Int? = nil
+    @State private var isAnimating: Bool = false
     
     // Computed properties for summary data
     var totalBalance: Double {
@@ -32,7 +34,7 @@ struct HomeView: View {
                 ProgressView("Loading data...")
             } else {
                 ScrollView {
-                    VStack(spacing: 20) {
+                    VStack(spacing: 0) { // Removed negative spacing
                         // Balance card
                         VStack(spacing: 4) {
                             Text("Current Balance")
@@ -52,21 +54,27 @@ struct HomeView: View {
                         .background(Color(.systemBackground))
                         .cornerRadius(12)
                         .shadow(color: .gray.opacity(0.2), radius: 5, x: 0, y: 2)
+                        .padding(.bottom, 0) // No padding between balance and accounts
                         
-                        // Account summaries
+                        // Account summaries - moved up with no space between balance section
                         accountSummaries
                         
-                        // Pots section
+                        // Add significant spacing after account cards
+                        Spacer()
+                            .frame(height: 120) // Much more space to push quick actions down
+                        
+                        // Pots section before action buttons
                         potsSection
                         
-                        // Quick action buttons
+                        // Quick action buttons - moved further down after pots
                         HStack(spacing: 20) {
                             quickActionButton(icon: "plus", title: "Add Income", action: addNewIncome)
                             quickActionButton(icon: "minus", title: "Add Expense", action: addNewExpense)
                             quickActionButton(icon: "chart.bar", title: "Reports", action: viewReports)
                         }
+                        .padding(.vertical, 20) // More vertical padding
                         
-                        // Recent transactions
+                        // Recent transactions - now below quick action buttons
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Recent Transactions")
                                 .font(.headline)
@@ -111,13 +119,227 @@ struct HomeView: View {
     }
     
     var accountSummaries: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Accounts")
-                .font(.headline)
-                .padding(.horizontal)
+        VStack(alignment: .leading, spacing: 0) { 
+            HStack {
+                Text("Accounts")
+                    .font(.headline)
+                Spacer()
+                Button(action: {
+                    // Action to add a new account
+                }) {
+                    Image(systemName: "plus.circle")
+                        .foregroundColor(.purple)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 0) // No padding between title and cards
             
-            ForEach(appState.accounts) { account in
-                AccountSummaryRow(account: account)
+            // Stacked card display with cards that can expand/collapse
+            ZStack {
+                if let expandedId = expandedCardID {
+                    // Show only the expanded card
+                    let expandedAccount = appState.accounts.first(where: { $0.id == expandedId })!
+                    AccountCard(account: expandedAccount, isExpanded: true)
+                        .zIndex(100)
+                        .onTapGesture {
+                            withAnimation(.spring()) {
+                                expandedCardID = nil
+                                isAnimating = true
+                                
+                                // Reset animation flag after a delay
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    isAnimating = false
+                                }
+                            }
+                        }
+                } else {
+                    // Show all cards stacked when none is expanded
+                    ForEach(Array(appState.accounts.enumerated()), id: \.element.id) { index, account in
+                        AccountCard(account: account, isExpanded: false)
+                            .offset(y: CGFloat(index * 60))
+                            .zIndex(Double(index))
+                            .onTapGesture {
+                                withAnimation(.spring()) {
+                                    expandedCardID = account.id
+                                    isAnimating = true
+                                    
+                                    // Reset animation flag after a delay
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                        isAnimating = false
+                                    }
+                                }
+                            }
+                            .disabled(isAnimating) // Prevent tapping during animation
+                    }
+                }
+            }
+            .padding(.top, 0) // No padding from title
+            .frame(height: expandedCardID != nil ? 180 : (appState.accounts.isEmpty ? 130 : CGFloat(130 + ((appState.accounts.count - 1) * 60))))
+            .padding(.bottom, 2) // Minimal padding at the bottom
+        }
+    }
+    
+    struct AccountCard: View {
+        let account: Account
+        let isExpanded: Bool
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                // Header with name and bank logo
+                HStack(alignment: .top) {
+                    // Account name on left
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(account.name)
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        
+                        Text(account.type.capitalized)
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    
+                    Spacer()
+                    
+                    // Balance on right
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("£\(String(format: "%.2f", abs(account.balance)))")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Balance")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+                .padding([.horizontal, .top], 16)
+                .padding(.bottom, 8)
+                
+                // Only show additional details if the card is expanded
+                if isExpanded {
+                    Divider()
+                        .background(Color.white.opacity(0.3))
+                        .padding(.horizontal, 16)
+                    
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Account Details")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        HStack {
+                            Text("Account Type:")
+                                .foregroundColor(.white.opacity(0.7))
+                            Spacer()
+                            Text(account.type.capitalized)
+                                .foregroundColor(.white)
+                        }
+                        
+                        if let creditLimit = account.credit_limit, account.type == "credit" {
+                            HStack {
+                                Text("Credit Limit:")
+                                    .foregroundColor(.white.opacity(0.7))
+                                Spacer()
+                                Text("£\(String(format: "%.2f", creditLimit))")
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        
+                        Text("Tap to collapse")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 4)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                    .padding(.top, 8)
+                } else {
+                    Spacer()
+                    
+                    // Card bottom info when not expanded
+                    HStack {
+                        // Card number
+                        Text("•••• 4321")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                        
+                        Spacer()
+                        
+                        // Card icon
+                        Image(systemName: iconForAccount(account.type))
+                            .font(.body)
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                }
+            }
+            .frame(height: isExpanded ? 220 : 130)
+            .frame(maxWidth: .infinity)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        colorGradientStartForAccount(account.type),
+                        colorGradientEndForAccount(account.type)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
+        }
+        
+        // Icons for different account types
+        private func iconForAccount(_ type: String) -> String {
+            switch type {
+            case "current":
+                return "creditcard"
+            case "credit":
+                return "creditcard.fill"
+            case "savings":
+                return "banknote"
+            case "investment":
+                return "chart.line.uptrend.xyaxis"
+            default:
+                return "dollarsign.circle"
+            }
+        }
+        
+        // Colors for account card gradients
+        private func colorGradientStartForAccount(_ type: String) -> Color {
+            switch type {
+            case "current":
+                return Color.blue
+            case "credit":
+                return Color.red
+            case "savings":
+                return Color.green
+            case "investment":
+                return Color(red: 0.5, green: 0.4, blue: 0.9) // Purple
+            default:
+                return Color.gray
+            }
+        }
+        
+        private func colorGradientEndForAccount(_ type: String) -> Color {
+            switch type {
+            case "current":
+                return Color.blue.opacity(0.6)
+            case "credit":
+                return Color.orange
+            case "savings":
+                return Color.green.opacity(0.6)
+            case "investment":
+                return Color.purple.opacity(0.6)
+            default:
+                return Color.gray.opacity(0.6)
             }
         }
     }
