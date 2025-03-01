@@ -1,0 +1,705 @@
+openapi: 3.0.0
+info:
+  title: Budget App API
+  description: API documentation for the Budget App
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+
+tags:
+  - name: Accounts
+    description: Account management endpoints
+  - name: Pots
+    description: Pot management endpoints
+  - name: Scheduled Payments
+    description: Payment scheduling and management
+  - name: Transfers
+    description: Transfer schedules and execution
+  - name: Income
+    description: Income management endpoints
+  - name: Expenses
+    description: Expense management endpoints
+  - name: System
+    description: System-wide operations
+
+paths:
+  /accounts:
+    get:
+      tags: [Accounts]
+      summary: Get all accounts
+      responses:
+        '200':
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Account'
+    
+  /add-account:
+    post:
+      tags: [Accounts]
+      summary: Add a new account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewAccount'
+      responses:
+        '200':
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+
+  /update-account:
+    put:
+      tags: [Accounts]
+      summary: Update an existing account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountId:
+                  type: integer
+                updatedAccount:
+                  $ref: '#/components/schemas/UpdateAccount'
+      responses:
+        '200':
+          description: Account updated successfully
+
+  /delete-account:
+    delete:
+      tags: [Accounts]
+      summary: Delete an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountId:
+                  type: integer
+      responses:
+        '200':
+          description: Account deleted successfully
+
+  /update-card-order:
+    post:
+      tags: [Accounts]
+      summary: Update the order of cards/accounts
+      description: Reorders the accounts based on the provided array of card IDs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cardIds
+              properties:
+                cardIds:
+                  type: array
+                  items:
+                    type: integer
+                  description: Array of card IDs in desired order
+                  example: [1, 3, 2, 4]
+      responses:
+        '200':
+          description: Card order updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Account'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+  /add-scheduled-payment:
+    post:
+      tags: [Scheduled Payments]
+      summary: Add a new scheduled payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountId:
+                  type: integer
+                payment:
+                  $ref: '#/components/schemas/NewScheduledPayment'
+      responses:
+        '200':
+          description: Payment scheduled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledPayment'
+        '400':
+          description: Invalid request data
+        '404':
+          description: Account or pot not found
+        '500':
+          description: Server error
+
+  /delete-scheduled-payment:
+    delete:
+      tags: [Scheduled Payments]
+      summary: Delete a scheduled payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountId:
+                  type: integer
+                paymentName:
+                  type: string
+                paymentDate:
+                  type: string
+                potName:
+                  type: string
+      responses:
+        '200':
+          description: Payment deleted successfully
+        '404':
+          description: Payment not found
+        '500':
+          description: Server error
+
+  /update-scheduled-payment:
+    put:
+      tags: [Scheduled Payments]
+      summary: Update a scheduled payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountId:
+                  type: integer
+                originalPayment:
+                  $ref: '#/components/schemas/ScheduledPayment'
+                updatedPayment:
+                  $ref: '#/components/schemas/UpdateScheduledPayment'
+      responses:
+        '200':
+          description: Payment updated successfully
+        '404':
+          description: Payment not found
+        '500':
+          description: Server error
+
+  /transfer-schedules:
+    get:
+      tags: [Transfers]
+      summary: Get all transfer schedules
+      responses:
+        '200':
+          description: List of transfer schedules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TransferSchedule'
+
+  /execute-transfer-schedule:
+    post:
+      tags: [Transfers]
+      summary: Execute a transfer schedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scheduleId:
+                  type: integer
+      responses:
+        '200':
+          description: Transfer executed successfully
+
+  /reset-balances:
+    post:
+      tags: [System]
+      summary: Reset all balances and schedules
+      responses:
+        '200':
+          description: Balances reset successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Account'
+
+  /pots/{accountId}:
+    get:
+      tags: [Pots]
+      summary: Get all pots for an account
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of pots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pot'
+        '404':
+          description: Account not found
+
+  /add-pot:
+    post:
+      tags: [Pots]
+      summary: Add a new pot to an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - pot
+              properties:
+                accountId:
+                  type: integer
+                pot:
+                  type: object
+                  required:
+                    - name
+                    - balance
+                  properties:
+                    name:
+                      type: string
+                    balance:
+                      type: number
+                    excludeFromReset:
+                      type: boolean
+                      default: false
+      responses:
+        '200':
+          description: Pot created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pot'
+        '404':
+          description: Account not found
+
+  /update-pot:
+    put:
+      tags: [Pots]
+      summary: Update an existing pot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - potName
+                - updates
+              properties:
+                accountId:
+                  type: integer
+                potName:
+                  type: string
+                updates:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    balance:
+                      type: number
+                    excludeFromReset:
+                      type: boolean
+      responses:
+        '200':
+          description: Pot updated successfully
+        '404':
+          description: Account or pot not found
+
+  /delete-pot:
+    delete:
+      tags: [Pots]
+      summary: Delete a pot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - potName
+              properties:
+                accountId:
+                  type: integer
+                potName:
+                  type: string
+      responses:
+        '200':
+          description: Pot deleted successfully
+        '404':
+          description: Account or pot not found
+
+  /income:
+    get:
+      tags: [Income]
+      summary: Get all income entries
+      responses:
+        '200':
+          description: List of income entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Income'
+
+  /add-income:
+    post:
+      tags: [Income]
+      summary: Add a new income entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewIncome'
+      responses:
+        '200':
+          description: Income entry created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Income'
+
+  /expenses:
+    get:
+      tags: [Expenses]
+      summary: Get all expenses
+      parameters:
+        - name: month
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Filter expenses by month (YYYY-MM)
+      responses:
+        '200':
+          description: List of expenses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Expense'
+
+  /add-expense:
+    post:
+      tags: [Expenses]
+      summary: Add a new expense
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewExpense'
+      responses:
+        '200':
+          description: Expense created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expense'
+
+components:
+  schemas:
+    NewAccount:
+      type: object
+      required:
+        - name
+        - balance
+        - type
+      properties:
+        name:
+          type: string
+        balance:
+          type: number
+        type:
+          type: string
+          enum: [current, savings, credit]
+        accountType:
+          type: string
+          enum: [personal, joint]
+          default: personal
+
+    UpdateAccount:
+      type: object
+      properties:
+        name:
+          type: string
+        balance:
+          type: number
+        type:
+          type: string
+        excludeFromReset:
+          type: boolean
+        accountType:
+          type: string
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        balance:
+          type: number
+        type:
+          type: string
+        pots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pot'
+        scheduled_payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduledPayment'
+        excludeFromReset:
+          type: boolean
+        accountType:
+          type: string
+
+    Pot:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        balance:
+          type: number
+        excludeFromReset:
+          type: boolean
+        scheduled_payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduledPayment'
+
+    ScheduledPayment:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        amount:
+          type: number
+        date:
+          type: string
+        company:
+          type: string
+        isCompleted:
+          type: boolean
+        lastExecuted:
+          type: string
+          format: date-time
+        potName:
+          type: string
+
+    TransferSchedule:
+      type: object
+      properties:
+        id:
+          type: integer
+        fromAccountId:
+          type: integer
+        toAccountId:
+          type: integer
+        amount:
+          type: number
+        description:
+          type: string
+        isCompleted:
+          type: boolean
+        lastExecuted:
+          type: string
+          format: date-time
+        toPotName:
+          type: string
+
+    NewScheduledPayment:
+      type: object
+      required:
+        - name
+        - amount
+        - date
+        - company
+      properties:
+        name:
+          type: string
+        amount:
+          type: number
+          minimum: 0
+        date:
+          type: string
+          description: Day of the month (1-31)
+        company:
+          type: string
+        potName:
+          type: string
+          description: Optional pot name for pot-specific payments
+
+    UpdateScheduledPayment:
+      type: object
+      properties:
+        name:
+          type: string
+        amount:
+          type: number
+          minimum: 0
+        date:
+          type: string
+        company:
+          type: string
+        potName:
+          type: string
+        isCompleted:
+          type: boolean
+        lastExecuted:
+          type: string
+          format: date-time
+
+    Income:
+      type: object
+      properties:
+        id:
+          type: integer
+        amount:
+          type: number
+        description:
+          type: string
+        date:
+          type: string
+          format: date-time
+        category:
+          type: string
+          enum: [salary, bonus, investment, other]
+        accountId:
+          type: integer
+
+    NewIncome:
+      type: object
+      required:
+        - amount
+        - description
+        - category
+        - accountId
+      properties:
+        amount:
+          type: number
+          minimum: 0
+        description:
+          type: string
+        category:
+          type: string
+          enum: [salary, bonus, investment, other]
+        accountId:
+          type: integer
+
+    Expense:
+      type: object
+      properties:
+        id:
+          type: integer
+        amount:
+          type: number
+        description:
+          type: string
+        date:
+          type: string
+          format: date-time
+        category:
+          type: string
+          enum: [groceries, utilities, entertainment, transport, health, other]
+        accountId:
+          type: integer
+        potName:
+          type: string
+
+    NewExpense:
+      type: object
+      required:
+        - amount
+        - description
+        - category
+        - accountId
+      properties:
+        amount:
+          type: number
+          minimum: 0
+        description:
+          type: string
+        category:
+          type: string
+          enum: [groceries, utilities, entertainment, transport, health, other]
+        accountId:
+          type: integer
+        potName:
+          type: string

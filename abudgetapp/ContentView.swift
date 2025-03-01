@@ -8,17 +8,36 @@
 import SwiftUI
 
 struct ContentView: View {
+    // Add access to the app state
+    @EnvironmentObject var appState: AppState
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        TabView {
+            HomeView()
+                .tabItem {
+                    Label("Home", systemImage: "house.fill")
+                }
+            
+            TransactionsView()
+                .tabItem {
+                    Label("Transactions", systemImage: "list.bullet")
+                }
+            
+            BudgetView()
+                .tabItem {
+                    Label("Budget", systemImage: "chart.pie.fill")
+                }
+            
+            SettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gear")
+                }
         }
-        .padding()
+        .accentColor(.purple) // Monzo-inspired color
     }
 }
 
 #Preview {
     ContentView()
+        .environmentObject(AppState()) // Add this for previews to work
 }
