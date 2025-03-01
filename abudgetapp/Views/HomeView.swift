@@ -59,46 +59,30 @@ struct HomeView: View {
                         // Account summaries - moved up with no space between balance section
                         accountSummaries
                         
-                        // Add significant spacing after account cards
-                        Spacer()
-                            .frame(height: 120) // Much more space to push quick actions down
-                        
-                        // Pots section before action buttons
-                        potsSection
-                        
-                        // Quick action buttons - moved further down after pots
-                        HStack(spacing: 20) {
-                            quickActionButton(icon: "plus", title: "Add Income", action: addNewIncome)
-                            quickActionButton(icon: "minus", title: "Add Expense", action: addNewExpense)
-                            quickActionButton(icon: "chart.bar", title: "Reports", action: viewReports)
-                        }
-                        .padding(.vertical, 20) // More vertical padding
-                        
-                        // Recent transactions - now below quick action buttons
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Recent Transactions")
-                                .font(.headline)
-                                .padding(.horizontal)
-                            
-                            if recentTransactions.isEmpty {
-                                Text("No recent transactions")
-                                    .foregroundColor(.secondary)
-                                    .padding()
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                ForEach(recentTransactions) { transaction in
-                                    TransactionRow(transaction: transaction)
-                                }
+                        if let expandedId = expandedCardID {
+                            // Only show pots and transactions for expanded account
+                            if let selectedAccount = appState.accounts.first(where: { $0.id == expandedId }) {
+                                // Pots for selected account
+                                accountPotsSection(for: selectedAccount)
+                                    .padding(.top, 20)
                                 
-                                Button("See all transactions") {
-                                    // Navigate to transactions tab
-                                    selectTransactionsTab()
-                                }
-                                .font(.subheadline)
-                                .foregroundColor(.purple)
-                                .padding(.horizontal)
-                                .padding(.top, 4)
+                                // Recent transactions for selected account
+                                accountTransactionsSection(for: selectedAccount)
+                                    .padding(.top, 20)
                             }
+                        }
+                        
+                        // Quick action buttons - only show when no card is expanded
+                        if expandedCardID == nil {
+                            Spacer()
+                                .frame(height: 120)
+                            
+                            HStack(spacing: 20) {
+                                quickActionButton(icon: "plus", title: "Add Income", action: addNewIncome)
+                                quickActionButton(icon: "minus", title: "Add Expense", action: addNewExpense)
+                                quickActionButton(icon: "chart.bar", title: "Reports", action: viewReports)
+                            }
+                            .padding(.vertical, 20)
                         }
                     }
                     .padding()
@@ -376,6 +360,107 @@ struct HomeView: View {
                 }
             }
         }
+    }
+    
+    private func accountPotsSection(for account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Account Pots")
+                .font(.headline)
+                .padding(.horizontal)
+            
+            if let pots = account.pots, !pots.isEmpty {
+                ForEach(pots) { pot in
+                    potRow(pot: pot, accountName: account.name)
+                }
+            } else {
+                Text("No pots for this account")
+                    .foregroundColor(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+    
+    private func accountTransactionsSection(for account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Account Transactions")
+                .font(.headline)
+                .padding(.horizontal)
+            
+            let accountTransactions = getAccountTransactions(for: account)
+            
+            if accountTransactions.isEmpty {
+                Text("No recent transactions")
+                    .foregroundColor(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+            } else {
+                ForEach(accountTransactions.prefix(5)) { transaction in
+                    TransactionRow(transaction: transaction)
+                }
+                
+                if accountTransactions.count > 5 {
+                    Button("See all transactions") {
+                        selectTransactionsTab()
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.purple)
+                    .padding(.horizontal)
+                    .padding(.top, 4)
+                }
+            }
+        }
+    }
+    
+    // Helper function to get transactions for a specific account
+    private func getAccountTransactions(for account: Account) -> [Transaction] {
+        return appState.transactions.filter { transaction in
+            // Check if the transaction belongs to this account
+            // by matching income, expenses, and scheduled payments
+            if let incomes = account.incomes {
+                if incomes.contains(where: { income in
+                    income.description == transaction.title &&
+                    income.amount == transaction.amount
+                }) {
+                    return true
+                }
+            }
+            
+            if let expenses = account.expenses {
+                if expenses.contains(where: { expense in
+                    expense.description == transaction.title &&
+                    expense.amount == transaction.amount
+                }) {
+                    return true
+                }
+            }
+            
+            if let payments = account.scheduled_payments {
+                if payments.contains(where: { payment in
+                    payment.name == transaction.title &&
+                    payment.amount == transaction.amount
+                }) {
+                    return true
+                }
+            }
+            
+            // Check pot payments
+            if let pots = account.pots {
+                for pot in pots {
+                    if let potPayments = pot.scheduled_payments {
+                        if potPayments.contains(where: { payment in
+                            transaction.title.contains(payment.name) &&
+                            payment.amount == transaction.amount
+                        }) {
+                            return true
+                        }
+                    }
+                }
+            }
+            
+            return false
+        }
+        .sorted(by: { $0.date > $1.date })
     }
     
     func potRow(pot: Pot, accountName: String) -> some View {
