@@ -8,36 +8,40 @@
 import SwiftUI
 
 struct ContentView: View {
-    // Add access to the app state
     @EnvironmentObject var appState: AppState
+    @State private var selectedTab = 0
     
     var body: some View {
-        TabView {
-            HomeView()
+        TabView(selection: $selectedTab) {
+            HomeView(selectedTab: $selectedTab)
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
                 }
+                .tag(0)
             
             TransactionsView()
                 .tabItem {
                     Label("Transactions", systemImage: "list.bullet")
                 }
+                .tag(1)
             
             BudgetView()
                 .tabItem {
                     Label("Budget", systemImage: "chart.pie.fill")
                 }
+                .tag(2)
             
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
+                .tag(3)
         }
-        .accentColor(.purple) // Monzo-inspired color
+        .accentColor(.purple)
     }
 }
 
 #Preview {
     ContentView()
-        .environmentObject(AppState()) // Add this for previews to work
+        .environmentObject(AppState())
 }

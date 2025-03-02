@@ -37,10 +37,12 @@ public struct Transaction: Identifiable {
 
 // Sample data for preview
 extension Transaction {
-    static let sampleData = [
-        Transaction(title: "Grocery Shopping", amount: 42.50, date: Date().addingTimeInterval(-86400), category: .food, isIncome: false),
-        Transaction(title: "Monthly Salary", amount: 2500.00, date: Date().addingTimeInterval(-172800), category: .salary, isIncome: true),
-        Transaction(title: "Netflix Subscription", amount: 9.99, date: Date().addingTimeInterval(-259200), category: .entertainment, isIncome: false),
-        Transaction(title: "Bus Ticket", amount: 2.40, date: Date(), category: .transport, isIncome: false)
-    ]
+    static let sampleData: [Transaction] = {
+        return [
+            Transaction(title: "Grocery Shopping", amount: 42.50, date: Date().addingTimeInterval(-86400), category: Category.food, isIncome: false),
+            Transaction(title: "Monthly Salary", amount: 2500.00, date: Date().addingTimeInterval(-172800), category: Category.salary, isIncome: true),
+            Transaction(title: "Netflix Subscription", amount: 9.99, date: Date().addingTimeInterval(-259200), category: Category.entertainment, isIncome: false),
+            Transaction(title: "Bus Ticket", amount: 2.40, date: Date(), category: Category.transport, isIncome: false)
+        ]
+    }()
 }

@@ -4,11 +4,15 @@
 //
 
 import SwiftUI
+import Combine
 
 struct HomeView: View {
     @EnvironmentObject var appState: AppState
     @State private var expandedCardID: Int? = nil
     @State private var isAnimating: Bool = false
+    @State private var showBalanceCard: Bool = false
+    @Binding var selectedTab: Int
+    @Environment(\.colorScheme) private var colorScheme
     
     // Computed properties for summary data
     var totalBalance: Double {
@@ -34,28 +38,35 @@ struct HomeView: View {
                 ProgressView("Loading data...")
             } else {
                 ScrollView {
-                    VStack(spacing: 0) { // Removed negative spacing
-                        // Balance card
-                        VStack(spacing: 4) {
-                            Text("Current Balance")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            Text("£\(String(format: "%.2f", totalBalance))")
-                                .font(.system(size: 34, weight: .bold))
-                            
-                            Text("Spent today: £\(String(format: "%.2f", todaySpending))")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 4)
+                    GeometryReader { geometry in
+                        if geometry.frame(in: .global).minY <= -50 {
+                            // Show balance card when pulled down enough
+                            VStack(spacing: 4) {
+                                Text("Current Balance")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                
+                                Text("£\(String(format: "%.2f", totalBalance))")
+                                    .font(.system(size: 34, weight: .bold))
+                                
+                                Text("Spent today: £\(String(format: "%.2f", todaySpending))")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                                    .padding(.top, 4)
+                            }
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(colorScheme == .dark ? Color.black : Color.white)
+                            .cornerRadius(12)
+                            .shadow(color: .gray.opacity(0.2), radius: 5, x: 0, y: 2)
+                            .padding(.bottom, 16)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .animation(.easeInOut, value: geometry.frame(in: .global).minY <= -50)
                         }
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemBackground))
-                        .cornerRadius(12)
-                        .shadow(color: .gray.opacity(0.2), radius: 5, x: 0, y: 2)
-                        .padding(.bottom, 0) // No padding between balance and accounts
-                        
+                    }
+                    .frame(height: 0) // Zero height container for geometry reader
+                    
+                    VStack(spacing: 0) { // Removed negative spacing
                         // Account summaries - moved up with no space between balance section
                         accountSummaries
                         
@@ -87,7 +98,7 @@ struct HomeView: View {
                     }
                     .padding()
                 }
-                .navigationTitle("Home")
+                .navigationTitle("")
                 .refreshable {
                     appState.fetchData()
                 }
@@ -463,7 +474,7 @@ struct HomeView: View {
         .sorted(by: { $0.date > $1.date })
     }
     
-    func potRow(pot: Pot, accountName: String) -> some View {
+    private func potRow(pot: Pot, accountName: String) -> some View {
         HStack {
             // Icon
             Image(systemName: "envelope.fill")
@@ -491,7 +502,7 @@ struct HomeView: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal)
-        .background(Color(.systemBackground))
+        .background(colorScheme == .dark ? Color.black : Color.white)
         .cornerRadius(8)
         .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
     }
@@ -527,16 +538,13 @@ struct HomeView: View {
     }
     
     private func selectTransactionsTab() {
-        // Change the selected tab to Transactions (index 1)
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let tabBarController = windowScene.windows.first?.rootViewController as? UITabBarController {
-            tabBarController.selectedIndex = 1
-        }
+        selectedTab = 1
     }
 }
 
 struct AccountSummaryRow: View {
     let account: Account
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         HStack {
@@ -565,7 +573,7 @@ struct AccountSummaryRow: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal)
-        .background(Color(.systemBackground))
+        .background(colorScheme == .dark ? Color.black : Color.white)
         .cornerRadius(8)
         .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
     }
@@ -603,6 +611,7 @@ struct AccountSummaryRow: View {
 
 struct TransactionRow: View {
     let transaction: Transaction
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         HStack {
@@ -630,13 +639,13 @@ struct TransactionRow: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal)
-        .background(Color(.systemBackground))
+        .background(colorScheme == .dark ? Color.black : Color.white)
         .cornerRadius(8)
         .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
     }
 }
 
 #Preview {
-    HomeView()
+    HomeView(selectedTab: .constant(0))
         .environmentObject(AppState())
 }
