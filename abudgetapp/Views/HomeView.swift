@@ -19,6 +19,18 @@ struct HomeView: View {
         appState.accounts.reduce(0) { $0 + $1.balance }
     }
     
+    var currentAndCreditAccounts: [Account] {
+        appState.accounts.filter { $0.type == "current" || $0.type == "credit" }
+    }
+    
+    var savingsAndInvestmentAccounts: [Account] {
+        appState.accounts.filter { $0.type == "savings" || $0.type == "investment" }
+    }
+    
+    var totalSavingsAndInvestments: Double {
+        savingsAndInvestmentAccounts.reduce(0) { $0 + $1.balance }
+    }
+    
     var todaySpending: Double {
         let today = Calendar.current.startOfDay(for: Date())
         
@@ -72,7 +84,7 @@ struct HomeView: View {
                         
                         if let expandedId = expandedCardID {
                             // Only show pots and transactions for expanded account
-                            if let selectedAccount = appState.accounts.first(where: { $0.id == expandedId }) {
+                            if let selectedAccount = currentAndCreditAccounts.first(where: { $0.id == expandedId }) {
                                 // Pots for selected account
                                 accountPotsSection(for: selectedAccount)
                                     .padding(.top, 20)
@@ -85,6 +97,28 @@ struct HomeView: View {
                         
                         // Quick action buttons - only show when no card is expanded
                         if expandedCardID == nil {
+                            // Dynamic spacing that increases with more cards
+                            let cardCount = currentAndCreditAccounts.count
+                            let dynamicSpacing = max(70, cardCount * 20) // Base spacing of 70pt, plus 20pt per card
+                            
+                            Spacer()
+                                .frame(height: CGFloat(dynamicSpacing))
+                            
+                            // Visual separator with increased prominence
+                            Divider()
+                                .background(Color.gray.opacity(0.4))
+                                .padding(.horizontal)
+                                .frame(height: 1) // Ensure divider has height
+                            
+                            Spacer()
+                                .frame(height: 20) // Space after divider
+                            
+                            potsSection
+                                .padding(.top, 24)
+                            
+                            savingsAndInvestmentsSection
+                                .padding(.top, 24)
+                            
                             Spacer()
                                 .frame(height: 120)
                             
@@ -133,7 +167,7 @@ struct HomeView: View {
             ZStack {
                 if let expandedId = expandedCardID {
                     // Show only the expanded card
-                    let expandedAccount = appState.accounts.first(where: { $0.id == expandedId })!
+                    let expandedAccount = currentAndCreditAccounts.first(where: { $0.id == expandedId })!
                     AccountCard(account: expandedAccount, isExpanded: true)
                         .zIndex(100)
                         .onTapGesture {
@@ -148,8 +182,8 @@ struct HomeView: View {
                             }
                         }
                 } else {
-                    // Show all cards stacked when none is expanded
-                    ForEach(Array(appState.accounts.enumerated()), id: \.element.id) { index, account in
+                    // Show all cards stacked when none is expanded (only current and credit accounts)
+                    ForEach(Array(currentAndCreditAccounts.enumerated()), id: \.element.id) { index, account in
                         AccountCard(account: account, isExpanded: false)
                             .offset(y: CGFloat(index * 60))
                             .zIndex(Double(index))
@@ -169,8 +203,78 @@ struct HomeView: View {
                 }
             }
             .padding(.top, 0) // No padding from title
-            .frame(height: expandedCardID != nil ? 180 : (appState.accounts.isEmpty ? 130 : CGFloat(130 + ((appState.accounts.count - 1) * 60))))
-            .padding(.bottom, 2) // Minimal padding at the bottom
+            .frame(height: expandedCardID != nil ? 180 : (currentAndCreditAccounts.isEmpty ? 130 : CGFloat(130 + ((currentAndCreditAccounts.count - 1) * 60))))
+            .padding(.bottom, 50) // Increased bottom padding for more space
+        }
+    }
+    
+    // New section for Savings & Investments
+    var savingsAndInvestmentsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with title and total
+            HStack {
+                Text("Savings & Investments")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Text("Total: £\(String(format: "%.2f", totalSavingsAndInvestments))")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.green)
+            }
+            .padding(.horizontal)
+            
+            if savingsAndInvestmentAccounts.isEmpty {
+                Text("No savings or investment accounts")
+                    .foregroundColor(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .center)
+            } else {
+                // List of savings and investment accounts as pills
+                ForEach(savingsAndInvestmentAccounts) { account in
+                    SavingsRow(account: account)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Helper Views
+    struct SavingsRow: View {
+        let account: Account
+        @Environment(\.colorScheme) private var colorScheme
+        
+        var body: some View {
+            HStack {
+                // Account name
+                Text(account.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                // Account type badge
+                Text(account.type.capitalized)
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(account.type == "savings" ? Color.green.opacity(0.2) : Color.purple.opacity(0.2))
+                    )
+                    .foregroundColor(account.type == "savings" ? Color.green : Color.purple)
+                
+                Spacer()
+                
+                // Balance
+                Text("£\(String(format: "%.2f", account.balance))")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(account.balance >= 0 ? .green : .red)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal)
+            .background(colorScheme == .dark ? Color.black : Color.white)
+            .cornerRadius(50)
+            .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
         }
     }
     
@@ -341,35 +445,79 @@ struct HomeView: View {
     
     var potsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Pots")
-                .font(.headline)
-                .padding(.horizontal)
+            HStack {
+                Text("Pots")
+                    .font(.headline)
+                Spacer()
+                // Add a button to create a new pot
+                Button(action: {
+                    // Add pot action
+                }) {
+                    Image(systemName: "plus.circle")
+                        .foregroundColor(.purple)
+                }
+            }
+            .padding(.horizontal)
             
-            // Get all pots from all accounts
+            // Get all pots from all accounts, not just current and credit accounts
             let accountsWithPots = appState.accounts.filter { $0.pots != nil && !$0.pots!.isEmpty }
             
             if accountsWithPots.isEmpty {
                 Text("No pots found")
                     .foregroundColor(.secondary)
                     .padding()
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .background(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
+                    .cornerRadius(8)
+                    .padding(.horizontal)
             } else {
+                // Group pots by account
                 ForEach(accountsWithPots) { account in
                     if let pots = account.pots {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(account.name)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .padding(.horizontal)
+                            // Account header with name and type
+                            HStack {
+                                Text(account.name)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                Text(account.type.capitalized)
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        Capsule()
+                                            .fill(colorForAccountType(account.type).opacity(0.2))
+                                    )
+                                    .foregroundColor(colorForAccountType(account.type))
+                            }
+                            .padding(.horizontal)
                             
+                            // Pots in this account
                             ForEach(pots) { pot in
                                 potRow(pot: pot, accountName: account.name)
                             }
                         }
-                        .padding(.bottom, 10)
+                        .padding(.bottom, 16)
                     }
                 }
             }
+        }
+    }
+    
+    // Helper function to get color for account type
+    private func colorForAccountType(_ type: String) -> Color {
+        switch type {
+        case "current":
+            return .blue
+        case "credit":
+            return .orange
+        case "savings":
+            return .green
+        case "investment":
+            return .purple
+        default:
+            return .gray
         }
     }
     
@@ -477,34 +625,47 @@ struct HomeView: View {
     private func potRow(pot: Pot, accountName: String) -> some View {
         HStack {
             // Icon
-            Image(systemName: "envelope.fill")
+            Image(systemName: "envelope.circle.fill")
                 .foregroundColor(.white)
+                .font(.system(size: 16))
                 .padding(10)
-                .background(Color.purple)
-                .cornerRadius(8)
+                .background(Color.purple.opacity(0.9))
+                .cornerRadius(10)
             
-            VStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(pot.name)
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                Text(accountName)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                // Show allocation info if pot has scheduled payments
+                if let payments = pot.scheduled_payments, !payments.isEmpty {
+                    let allocated = payments.reduce(0) { $0 + $1.amount }
+                    
+                    HStack(spacing: 4) {
+                        Text("Allocated:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Text("£\(String(format: "%.2f", allocated))")
+                            .font(.caption)
+                            .foregroundColor(.purple)
+                    }
+                }
             }
             
             Spacer()
             
             Text("£\(String(format: "%.2f", pot.balance))")
                 .font(.subheadline)
-                .fontWeight(.medium)
+                .fontWeight(.semibold)
                 .foregroundColor(pot.balance >= 0 ? .green : .red)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
         .background(colorScheme == .dark ? Color.black : Color.white)
-        .cornerRadius(8)
+        .cornerRadius(10)
         .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
+        .padding(.horizontal)
     }
     
     private func quickActionButton(icon: String, title: String, action: @escaping () -> Void) -> some View {

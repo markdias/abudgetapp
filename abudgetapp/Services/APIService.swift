@@ -109,8 +109,21 @@ class APIService {
     }
     
     // MARK: - Transfer Methods
-    func addTransferSchedule(transfer: TransferScheduleSubmission) -> AnyPublisher<TransferSchedule, Error> {
-        return requestPost(endpoint: "/add-transfer-schedule", encodable: transfer)
+    func addTransferSchedule(transfer: TransferScheduleSubmission) async throws -> TransferSchedule {
+        return try await withCheckedThrowingContinuation { continuation in
+            requestPost(endpoint: "/add-transfer-schedule", encodable: transfer)
+                .sink(
+                    receiveCompletion: { completion in
+                        if case .failure(let error) = completion {
+                            continuation.resume(throwing: error)
+                        }
+                    },
+                    receiveValue: { schedule in
+                        continuation.resume(returning: schedule)
+                    }
+                )
+                .store(in: &cancellables)
+        }
     }
     
     func executeTransferSchedule(scheduleId: Int) -> AnyPublisher<TransferExecutionResponse, Error> {

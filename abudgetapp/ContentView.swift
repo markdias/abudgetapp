@@ -25,9 +25,9 @@ struct ContentView: View {
                 }
                 .tag(1)
             
-            BudgetView()
+            TransferScheduleView()
                 .tabItem {
-                    Label("Budget", systemImage: "chart.pie.fill")
+                    Label("Transfers", systemImage: "arrow.left.arrow.right")
                 }
                 .tag(2)
             
