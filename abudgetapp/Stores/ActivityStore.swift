@@ -34,10 +34,15 @@ final class ActivityStore: ObservableObject {
     }
     @Published private(set) var markedIdentifiers: Set<ActivityItem.ID> = []
 
+    private let accountsStore: AccountsStore
+    private var transferSchedules: [TransferSchedule]
     private var accountsObserver: NSObjectProtocol?
+    private var transferObserver: NSObjectProtocol?
 
-    init(accountsStore: AccountsStore) {
-        let items = Self.buildActivities(from: accountsStore.accounts)
+    init(accountsStore: AccountsStore, transferStore: TransferSchedulesStore? = nil) {
+        self.accountsStore = accountsStore
+        self.transferSchedules = transferStore?.schedules ?? []
+        let items = Self.buildActivities(from: accountsStore.accounts, transferSchedules: self.transferSchedules)
         self.activities = items
         self.filteredActivities = items
         accountsObserver = NotificationCenter.default.addObserver(
@@ -47,8 +52,23 @@ final class ActivityStore: ObservableObject {
         ) { [weak self] notification in
             guard let self = self else { return }
             guard let accounts = notification.userInfo?["accounts"] as? [Account] else { return }
-            let items = Self.buildActivities(from: accounts)
+            let items = Self.buildActivities(from: accounts, transferSchedules: self.transferSchedules)
             Task { @MainActor in
+                self.activities = items
+                self.applyFilter()
+            }
+        }
+
+        if let transferStore = transferStore {
+            transferObserver = NotificationCenter.default.addObserver(
+                forName: TransferSchedulesStore.schedulesDidChangeNotification,
+                object: transferStore,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self else { return }
+                let schedules = notification.userInfo?["schedules"] as? [TransferSchedule] ?? []
+                self.transferSchedules = schedules
+                let items = Self.buildActivities(from: self.accountsStore.accounts, transferSchedules: schedules)
                 self.activities = items
                 self.applyFilter()
             }
@@ -57,6 +77,9 @@ final class ActivityStore: ObservableObject {
 
     deinit {
         if let observer = accountsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = transferObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -77,7 +100,7 @@ final class ActivityStore: ObservableObject {
         markedIdentifiers.removeAll()
     }
 
-    private nonisolated static func buildActivities(from accounts: [Account]) -> [ActivityItem] {
+    private nonisolated static func buildActivities(from accounts: [Account], transferSchedules: [TransferSchedule]) -> [ActivityItem] {
         var items: [ActivityItem] = []
         for account in accounts {
             if let incomes = account.incomes {
@@ -159,6 +182,39 @@ final class ActivityStore: ObservableObject {
                             ))
                         }
                     }
+                }
+            }
+        }
+
+        for schedule in transferSchedules {
+            guard let account = accounts.first(where: { $0.id == schedule.toAccountId }) else { continue }
+            if let scheduleItems = schedule.items {
+                for item in scheduleItems {
+                    guard let normalizedType = item.type?.lowercased(), normalizedType == "expense" else { continue }
+                    let parsedDate = (item.date.flatMap { ActivityStore.parse(dateString: $0) })
+                        ?? (schedule.lastExecuted.flatMap { ActivityStore.parse(dateString: $0) })
+                        ?? Date()
+                    let identifier: String
+                    if let itemId = item.id {
+                        identifier = "transfer-expense-\(schedule.id)-\(itemId)"
+                    } else {
+                        identifier = "transfer-expense-\(schedule.id)-\(UUID().uuidString)"
+                    }
+                    items.append(ActivityItem(
+                        id: identifier,
+                        title: item.description,
+                        amount: item.amount,
+                        date: parsedDate,
+                        accountName: account.name,
+                        potName: schedule.toPotName,
+                        company: item.company,
+                        category: .expense,
+                        metadata: [
+                            "type": normalizedType,
+                            "source": "transferSchedule",
+                            "scheduleId": String(schedule.id)
+                        ]
+                    ))
                 }
             }
         }

@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 final class TransferSchedulesStore: ObservableObject {
+    static let schedulesDidChangeNotification = Notification.Name("TransferSchedulesStoreSchedulesDidChange")
     struct Group: Identifiable {
         let id: String
         let title: String
@@ -9,7 +10,9 @@ final class TransferSchedulesStore: ObservableObject {
         let subtitle: String?
     }
 
-    @Published private(set) var schedules: [TransferSchedule] = []
+    @Published private(set) var schedules: [TransferSchedule] = [] {
+        didSet { publishSchedulesChange() }
+    }
     @Published private(set) var lastResetAt: String?
     @Published var isLoading = false
     @Published var lastMessage: StatusMessage?
@@ -173,5 +176,13 @@ final class TransferSchedulesStore: ObservableObject {
             return "Main Account Balance: \(String(format: "£%.2f", account.balance))"
         }
         return nil
+    }
+
+    private func publishSchedulesChange() {
+        NotificationCenter.default.post(
+            name: Self.schedulesDidChangeNotification,
+            object: self,
+            userInfo: ["schedules": schedules]
+        )
     }
 }

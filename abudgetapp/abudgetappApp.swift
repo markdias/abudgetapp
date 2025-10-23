@@ -20,7 +20,7 @@ struct MyBudgetApp: App {
         let incomeStore = IncomeSchedulesStore(accountsStore: accounts)
         _incomeSchedulesStore = StateObject(wrappedValue: incomeStore)
         _savingsStore = StateObject(wrappedValue: SavingsInvestmentsStore())
-        _activityStore = StateObject(wrappedValue: ActivityStore(accountsStore: accounts))
+        _activityStore = StateObject(wrappedValue: ActivityStore(accountsStore: accounts, transferStore: transferStore))
         _diagnosticsStore = StateObject(wrappedValue: DiagnosticsStore(accountsStore: accounts))
         _scheduledPaymentsStore = StateObject(wrappedValue: ScheduledPaymentsStore(accountsStore: accounts))
     }

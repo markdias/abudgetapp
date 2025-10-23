@@ -159,7 +159,6 @@ struct HomeView: View {
                         Button("Add Account", action: { showingAddAccount = true })
                         Button("Add Pot", action: { showingAddPot = true })
                         Button("Add Income", action: { showingAddIncome = true })
-                        Button("Add Expense", action: { showingAddExpense = true })
                         Divider()
                         Button("Import Data (JSON)") { showingImporter = true }
                         Button("Export Data (JSON)") { Task { await exportAllData() } }
@@ -596,23 +595,7 @@ private struct ActivityFeedSection: View {
             } else {
                 VStack(spacing: 12) {
                     ForEach(activities.prefix(6)) { activity in
-                        ActivityRow(activity: activity, isMarked: activityStore.markedIdentifiers.contains(activity.id))
-                            .onTapGesture {
-                                if activityStore.isMarking {
-                                    activityStore.toggleMark(for: activity)
-                                } else {
-                                    selectedActivity = activity
-                                }
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    Task { await deleteActivity(activity) }
-                                } label: { Label("Delete", systemImage: "trash") }
-
-                                Button {
-                                    selectedActivity = activity
-                                } label: { Label("Edit", systemImage: "pencil") }.tint(.blue)
-                            }
+                        activityRow(for: activity)
                     }
                 }
             }
@@ -624,6 +607,9 @@ private struct ActivityFeedSection: View {
     }
 
     private func deleteActivity(_ activity: ActivityItem) async {
+        if activity.metadata["source"] == "transferSchedule" {
+            return
+        }
         guard let accountId = accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id else { return }
         let parts = activity.id.split(separator: "-")
         let numericId = Int(parts.last ?? "")
@@ -636,6 +622,37 @@ private struct ActivityFeedSection: View {
             if let id = numericId, let context = scheduledPaymentsStore.items.first(where: { $0.accountId == accountId && $0.payment.id == id }) {
                 await scheduledPaymentsStore.deletePayment(context: context)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func activityRow(for activity: ActivityItem) -> some View {
+        let canEdit = activity.metadata["source"] != "transferSchedule"
+        let row = ActivityRow(
+            activity: activity,
+            isMarked: activityStore.markedIdentifiers.contains(activity.id)
+        )
+        .onTapGesture {
+            if activityStore.isMarking {
+                activityStore.toggleMark(for: activity)
+            } else {
+                selectedActivity = activity
+            }
+        }
+
+        if canEdit {
+            row
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        Task { await deleteActivity(activity) }
+                    } label: { Label("Delete", systemImage: "trash") }
+
+                    Button {
+                        selectedActivity = activity
+                    } label: { Label("Edit", systemImage: "pencil") }.tint(.blue)
+                }
+        } else {
+            row
         }
     }
 }
@@ -945,6 +962,9 @@ private struct ActivityEditorView: View {
     private var isIncome: Bool { activity.category == .income }
     private var isExpense: Bool { activity.category == .expense }
     private var isScheduled: Bool { activity.category == .scheduledPayment }
+    private var isTransferDerived: Bool { activity.metadata["source"] == "transferSchedule" }
+    private var canEditDetails: Bool { (isIncome || isExpense) && !isTransferDerived }
+    private var canDeleteItem: Bool { !isTransferDerived }
 
     private var accountId: Int? {
         accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id
@@ -975,12 +995,31 @@ private struct ActivityEditorView: View {
                     }
                 }
 
-                if isIncome || isExpense {
+                if canEditDetails {
                     Section(isIncome ? "Edit Income" : "Edit Expense") {
                         TextField("Description", text: $descriptionText)
                         if isIncome { TextField("Company", text: $company) }
                         TextField("Amount", text: $amount).keyboardType(.decimalPad)
                         TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                    }
+                } else if isTransferDerived {
+                    Section("Transfer Schedule Item") {
+                        Text(activity.title)
+                        Text(activity.date, style: .date).foregroundStyle(.secondary)
+                        if let pot = activity.potName {
+                            Text("Destination Pot: \(pot)").foregroundStyle(.secondary)
+                        }
+                        if let company = activity.company, !company.isEmpty {
+                            Text(company).foregroundStyle(.secondary)
+                        }
+                        Text("Amount: £\(String(format: "%.2f", activity.amount))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let scheduleId = activity.metadata["scheduleId"], !scheduleId.isEmpty {
+                            Text("Schedule ID: \(scheduleId)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                 } else {
                     Section("Scheduled Payment") {
@@ -994,10 +1033,12 @@ private struct ActivityEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { dismiss() } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    if isIncome || isExpense {
+                    if canEditDetails {
                         Button("Save") { Task { await save() } }.disabled(!canSave)
                     }
-                    Button(role: .destructive) { Task { await deleteItem() } } label: { Text("Delete") }
+                    if canDeleteItem {
+                        Button(role: .destructive) { Task { await deleteItem() } } label: { Text("Delete") }
+                    }
                 }
             }
             .onAppear { preload() }
@@ -1005,7 +1046,8 @@ private struct ActivityEditorView: View {
     }
 
     private var canSave: Bool {
-        Double(amount) != nil && !descriptionText.isEmpty && validDay && (isIncome ? !company.isEmpty : true)
+        guard canEditDetails else { return false }
+        return Double(amount) != nil && !descriptionText.isEmpty && validDay && (isIncome ? !company.isEmpty : true)
     }
 
     private var validDay: Bool {
@@ -1021,7 +1063,7 @@ private struct ActivityEditorView: View {
     }
 
     private func save() async {
-        guard let accountId = accountId, let id = entityId, let money = Double(amount) else { return }
+        guard canEditDetails, let accountId = accountId, let id = entityId, let money = Double(amount) else { return }
         if isIncome {
             let submission = IncomeSubmission(amount: money, description: descriptionText, company: company, date: dayOfMonth)
             await accountsStore.updateIncome(accountId: accountId, incomeId: id, submission: submission)
@@ -1033,6 +1075,7 @@ private struct ActivityEditorView: View {
     }
 
     private func deleteItem() async {
+        guard canDeleteItem else { return }
         guard let accountId = accountId else { return }
         if isIncome, let id = entityId {
             await accountsStore.deleteIncome(accountId: accountId, incomeId: id)
