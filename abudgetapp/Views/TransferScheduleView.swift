@@ -267,8 +267,7 @@ private struct TransferEditorSheet: View {
             }
             .onChange(of: toAccountId) { newValue in
                 guard destinationKind == .pot else { return }
-                let id = newValue
-                if let pots = accountsStore.account(for: id)?.pots, pots.isEmpty {
+                if let pots = accountsStore.account(for: newValue)?.pots, pots.isEmpty {
                     destinationKind = .account
                 }
             }
