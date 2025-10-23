@@ -8,9 +8,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var appState: AppState
     @State private var selectedTab = 0
-    
+
     var body: some View {
         TabView(selection: $selectedTab) {
             HomeView(selectedTab: $selectedTab)
@@ -18,30 +17,29 @@ struct ContentView: View {
                     Label("Home", systemImage: "house.fill")
                 }
                 .tag(0)
-            
+
             TransactionsView()
                 .tabItem {
-                    Label("Transactions", systemImage: "list.bullet")
+                    Label("Activity", systemImage: "list.bullet")
                 }
                 .tag(1)
-            
+
             TransferScheduleView()
                 .tabItem {
                     Label("Transfers", systemImage: "arrow.left.arrow.right")
                 }
                 .tag(2)
-            
+
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
                 .tag(3)
         }
-        .accentColor(.purple)
+        .tint(.purple)
     }
 }
 
 #Preview {
     ContentView()
-        .environmentObject(AppState())
 }

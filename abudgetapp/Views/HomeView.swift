@@ -1,812 +1,848 @@
-//
-//  HomeView.swift
-//  abudgetapp
-//
-
 import SwiftUI
-import Combine
 
 struct HomeView: View {
-    @EnvironmentObject var appState: AppState
-    @State private var expandedCardID: Int? = nil
-    @State private var isAnimating: Bool = false
-    @State private var showBalanceCard: Bool = false
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @EnvironmentObject private var potsStore: PotsStore
+    @EnvironmentObject private var transferStore: TransferSchedulesStore
+    @EnvironmentObject private var incomeStore: IncomeSchedulesStore
+    @EnvironmentObject private var savingsStore: SavingsInvestmentsStore
+    @EnvironmentObject private var activityStore: ActivityStore
+    @EnvironmentObject private var scheduledPaymentsStore: ScheduledPaymentsStore
+    @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
+
     @Binding var selectedTab: Int
-    @Environment(\.colorScheme) private var colorScheme
-    
-    // Computed properties for summary data
-    var totalBalance: Double {
-        appState.accounts.reduce(0) { $0 + $1.balance }
+
+    @State private var searchText = ""
+    @State private var showingAddAccount = false
+    @State private var showingAddPot = false
+    @State private var showingAddIncome = false
+    @State private var showingAddExpense = false
+    @State private var showingTransferComposer = false
+    @State private var showingPotsManager = false
+    @State private var showingSavings = false
+    @State private var showingTransferBoard = false
+    @State private var showingIncomeSchedules = false
+    @State private var showingSalarySorter = false
+    @State private var showingCardReorder = false
+    @State private var showingDiagnostics = false
+    @State private var selectedActivity: ActivityItem?
+
+    private let cardSpacing: CGFloat = 22
+
+    private var filteredAccounts: [Account] {
+        guard !searchText.isEmpty else { return accountsStore.accounts }
+        return accountsStore.accounts.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
-    
-    var currentAndCreditAccounts: [Account] {
-        appState.accounts.filter { $0.type == "current" || $0.type == "credit" }
+
+    private var reorderableAccounts: [Account] {
+        filteredAccounts.filter { $0.type != "savings" && $0.type != "investment" }
     }
-    
-    var savingsAndInvestmentAccounts: [Account] {
-        appState.accounts.filter { $0.type == "savings" || $0.type == "investment" }
+
+    private var totalBalance: Double {
+        accountsStore.accounts.reduce(0) { $0 + $1.balance }
     }
-    
-    var totalSavingsAndInvestments: Double {
-        savingsAndInvestmentAccounts.reduce(0) { $0 + $1.balance }
-    }
-    
-    var todaySpending: Double {
+
+    private var todaysSpending: Double {
         let today = Calendar.current.startOfDay(for: Date())
-        
-        return appState.transactions
-            .filter { !$0.isIncome && Calendar.current.isDate($0.date, inSameDayAs: today) }
+        return activityStore.activities
+            .filter { $0.category == .expense && Calendar.current.isDate($0.date, inSameDayAs: today) }
             .reduce(0) { $0 + $1.amount }
     }
-    
-    var recentTransactions: [Transaction] {
-        // Get the 5 most recent transactions
-        Array(appState.transactions.sorted(by: { $0.date > $1.date }).prefix(5))
+
+    private var filteredActivities: [ActivityItem] {
+        if searchText.isEmpty {
+            return activityStore.filteredActivities
+        }
+        return activityStore.filteredActivities.filter { activity in
+            activity.title.localizedCaseInsensitiveContains(searchText) ||
+            activity.accountName.localizedCaseInsensitiveContains(searchText) ||
+            (activity.potName?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
     }
-    
+
     var body: some View {
-        NavigationView {
-            if appState.isLoading {
-                ProgressView("Loading data...")
-            } else {
-                ScrollView {
-                    GeometryReader { geometry in
-                        if geometry.frame(in: .global).minY <= -50 {
-                            // Show balance card when pulled down enough
-                            VStack(spacing: 4) {
-                                Text("Current Balance")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                
-                                Text("£\(String(format: "%.2f", totalBalance))")
-                                    .font(.system(size: 34, weight: .bold))
-                                
-                                Text("Spent today: £\(String(format: "%.2f", todaySpending))")
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                                    .padding(.top, 4)
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
+
+                    if reorderableAccounts.isEmpty {
+                        ContentUnavailableView(
+                            "No Accounts",
+                            systemImage: "creditcard",
+                            description: Text("Use the add menu to create your first account.")
+                        )
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        StackedAccountDeck(
+                            accounts: reorderableAccounts,
+                            searchText: searchText,
+                            spacing: cardSpacing,
+                            onReorder: handleReorder,
+                            onAddPot: { account in
+                                showingAddPot = true
+                            },
+                            onAddTransaction: { account in
+                                showingAddExpense = true
+                            },
+                            onShowDetails: { account in
+                                showingCardReorder = true
+                            },
+                            onDelete: { account in
+                                Task { await accountsStore.deleteAccount(id: account.id) }
                             }
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(colorScheme == .dark ? Color.black : Color.white)
-                            .cornerRadius(12)
-                            .shadow(color: .gray.opacity(0.2), radius: 5, x: 0, y: 2)
-                            .padding(.bottom, 16)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                            .animation(.easeInOut, value: geometry.frame(in: .global).minY <= -50)
-                        }
+                        )
                     }
-                    .frame(height: 0) // Zero height container for geometry reader
-                    
-                    VStack(spacing: 0) { // Removed negative spacing
-                        // Account summaries - moved up with no space between balance section
-                        accountSummaries
-                        
-                        if let expandedId = expandedCardID {
-                            // Only show pots and transactions for expanded account
-                            if let selectedAccount = currentAndCreditAccounts.first(where: { $0.id == expandedId }) {
-                                // Pots for selected account
-                                accountPotsSection(for: selectedAccount)
-                                    .padding(.top, 20)
-                                
-                                // Recent transactions for selected account
-                                accountTransactionsSection(for: selectedAccount)
-                                    .padding(.top, 20)
-                            }
-                        }
-                        
-                        // Quick action buttons - only show when no card is expanded
-                        if expandedCardID == nil {
-                            // Dynamic spacing that increases with more cards
-                            let cardCount = currentAndCreditAccounts.count
-                            let dynamicSpacing = max(70, cardCount * 20) // Base spacing of 70pt, plus 20pt per card
-                            
-                            Spacer()
-                                .frame(height: CGFloat(dynamicSpacing))
-                            
-                            // Visual separator with increased prominence
-                            Divider()
-                                .background(Color.gray.opacity(0.4))
-                                .padding(.horizontal)
-                                .frame(height: 1) // Ensure divider has height
-                            
-                            Spacer()
-                                .frame(height: 20) // Space after divider
-                            
-                            potsSection
-                                .padding(.top, 24)
-                            
-                            savingsAndInvestmentsSection
-                                .padding(.top, 24)
-                            
-                            Spacer()
-                                .frame(height: 120)
-                            
-                            HStack(spacing: 20) {
-                                quickActionButton(icon: "plus", title: "Add Income", action: addNewIncome)
-                                quickActionButton(icon: "minus", title: "Add Expense", action: addNewExpense)
-                                quickActionButton(icon: "chart.bar", title: "Reports", action: viewReports)
-                            }
-                            .padding(.vertical, 20)
-                        }
-                    }
-                    .padding()
-                }
-                .navigationTitle("")
-                .refreshable {
-                    appState.fetchData()
-                }
-            }
-        }
-        .alert(isPresented: $appState.showingError) {
-            Alert(
-                title: Text("Error"),
-                message: Text(appState.errorMessage ?? "Unknown error"),
-                dismissButton: .default(Text("OK"))
-            )
-        }
-    }
-    
-    var accountSummaries: some View {
-        VStack(alignment: .leading, spacing: 0) { 
-            HStack {
-                Text("Accounts")
-                    .font(.headline)
-                Spacer()
-                Button(action: {
-                    // Action to add a new account
-                }) {
-                    Image(systemName: "plus.circle")
-                        .foregroundColor(.purple)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 0) // No padding between title and cards
-            
-            // Stacked card display with cards that can expand/collapse
-            ZStack {
-                if let expandedId = expandedCardID {
-                    // Show only the expanded card
-                    let expandedAccount = currentAndCreditAccounts.first(where: { $0.id == expandedId })!
-                    AccountCard(account: expandedAccount, isExpanded: true)
-                        .zIndex(100)
-                        .onTapGesture {
-                            withAnimation(.spring()) {
-                                expandedCardID = nil
-                                isAnimating = true
-                                
-                                // Reset animation flag after a delay
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    isAnimating = false
-                                }
-                            }
-                        }
-                } else {
-                    // Show all cards stacked when none is expanded (only current and credit accounts)
-                    ForEach(Array(currentAndCreditAccounts.enumerated()), id: \.element.id) { index, account in
-                        AccountCard(account: account, isExpanded: false)
-                            .offset(y: CGFloat(index * 60))
-                            .zIndex(Double(index))
-                            .onTapGesture {
-                                withAnimation(.spring()) {
-                                    expandedCardID = account.id
-                                    isAnimating = true
-                                    
-                                    // Reset animation flag after a delay
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                        isAnimating = false
-                                    }
-                                }
-                            }
-                            .disabled(isAnimating) // Prevent tapping during animation
-                    }
-                }
-            }
-            .padding(.top, 0) // No padding from title
-            .frame(height: expandedCardID != nil ? 180 : (currentAndCreditAccounts.isEmpty ? 130 : CGFloat(130 + ((currentAndCreditAccounts.count - 1) * 60))))
-            .padding(.bottom, 50) // Increased bottom padding for more space
-        }
-    }
-    
-    // New section for Savings & Investments
-    var savingsAndInvestmentsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header with title and total
-            HStack {
-                Text("Savings & Investments")
-                    .font(.headline)
-                
-                Spacer()
-                
-                Text("Total: £\(String(format: "%.2f", totalSavingsAndInvestments))")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.green)
-            }
-            .padding(.horizontal)
-            
-            if savingsAndInvestmentAccounts.isEmpty {
-                Text("No savings or investment accounts")
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else {
-                // List of savings and investment accounts as pills
-                ForEach(savingsAndInvestmentAccounts) { account in
-                    SavingsRow(account: account)
-                }
-            }
-        }
-    }
-    
-    // MARK: - Helper Views
-    struct SavingsRow: View {
-        let account: Account
-        @Environment(\.colorScheme) private var colorScheme
-        
-        var body: some View {
-            HStack {
-                // Account name
-                Text(account.name)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                // Account type badge
-                Text(account.type.capitalized)
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(account.type == "savings" ? Color.green.opacity(0.2) : Color.purple.opacity(0.2))
+
+                    QuickActionsView(
+                        onManagePots: { showingPotsManager = true },
+                        onSavings: { showingSavings = true },
+                        onTransfers: { showingTransferBoard = true },
+                        onIncome: { showingIncomeSchedules = true },
+                        onSalarySorter: { showingSalarySorter = true },
+                        onReorder: { showingCardReorder = true }
                     )
-                    .foregroundColor(account.type == "savings" ? Color.green : Color.purple)
-                
-                Spacer()
-                
-                // Balance
-                Text("£\(String(format: "%.2f", account.balance))")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(account.balance >= 0 ? .green : .red)
+
+                    ActivityFeedSection(
+                        activityStore: activityStore,
+                        activities: filteredActivities,
+                        selectedActivity: $selectedActivity,
+                        onViewAll: { selectedTab = 1 }
+                    )
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 24)
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal)
-            .background(colorScheme == .dark ? Color.black : Color.white)
-            .cornerRadius(50)
-            .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
-        }
-    }
-    
-    struct AccountCard: View {
-        let account: Account
-        let isExpanded: Bool
-        
-        var body: some View {
-            VStack(alignment: .leading, spacing: 0) {
-                // Header with name and bank logo
-                HStack(alignment: .top) {
-                    // Account name on left
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(account.name)
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        
-                        Text(account.type.capitalized)
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.7))
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Dashboard")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: refreshAllData) {
+                        Image(systemName: "arrow.clockwise")
                     }
-                    
-                    Spacer()
-                    
-                    // Balance on right
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("£\(String(format: "%.2f", abs(account.balance)))")
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                        
-                        Text("Balance")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
+                    .help("Refresh data")
+                }
+
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button(action: { activityStore.isMarking.toggle() }) {
+                        Image(systemName: activityStore.isMarking ? "checkmark.circle.fill" : "checkmark.circle")
+                    }
+                    .help("Toggle mark mode")
+
+                    Button(action: { showingTransferComposer = true }) {
+                        Image(systemName: "arrowtriangle.right.fill")
+                    }
+                    .help("New transfer schedule")
+
+                    Menu {
+                        Button("Add Account", action: { showingAddAccount = true })
+                        Button("Add Pot", action: { showingAddPot = true })
+                        Button("Add Income", action: { showingAddIncome = true })
+                        Button("Add Expense", action: { showingAddExpense = true })
+                        Divider()
+                        Button("Run Diagnostics", action: { showingDiagnostics = true })
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
                     }
                 }
-                .padding([.horizontal, .top], 16)
-                .padding(.bottom, 8)
-                
-                // Only show additional details if the card is expanded
-                if isExpanded {
-                    Divider()
-                        .background(Color.white.opacity(0.3))
-                        .padding(.horizontal, 16)
-                    
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Account Details")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        
-                        HStack {
-                            Text("Account Type:")
-                                .foregroundColor(.white.opacity(0.7))
-                            Spacer()
-                            Text(account.type.capitalized)
-                                .foregroundColor(.white)
-                        }
-                        
-                        if let creditLimit = account.credit_limit, account.type == "credit" {
-                            HStack {
-                                Text("Credit Limit:")
-                                    .foregroundColor(.white.opacity(0.7))
-                                Spacer()
-                                Text("£\(String(format: "%.2f", creditLimit))")
-                                    .foregroundColor(.white)
-                            }
-                        }
-                        
-                        Text("Tap to collapse")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 4)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-                    .padding(.top, 8)
-                } else {
-                    Spacer()
-                    
-                    // Card bottom info when not expanded
-                    HStack {
-                        // Card number
-                        Text("•••• 4321")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
-                        
-                        Spacer()
-                        
-                        // Card icon
-                        Image(systemName: iconForAccount(account.type))
-                            .font(.body)
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                }
             }
-            .frame(height: isExpanded ? 220 : 130)
-            .frame(maxWidth: .infinity)
-            .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        colorGradientStartForAccount(account.type),
-                        colorGradientEndForAccount(account.type)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.3), radius: 8, x: 0, y: 4)
-        }
-        
-        // Icons for different account types
-        private func iconForAccount(_ type: String) -> String {
-            switch type {
-            case "current":
-                return "creditcard"
-            case "credit":
-                return "creditcard.fill"
-            case "savings":
-                return "banknote"
-            case "investment":
-                return "chart.line.uptrend.xyaxis"
-            default:
-                return "dollarsign.circle"
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic))
+            .sheet(isPresented: $showingAddAccount) {
+                AccountFormView(isPresented: $showingAddAccount)
             }
-        }
-        
-        // Colors for account card gradients
-        private func colorGradientStartForAccount(_ type: String) -> Color {
-            switch type {
-            case "current":
-                return Color.blue
-            case "credit":
-                return Color.red
-            case "savings":
-                return Color.green
-            case "investment":
-                return Color(red: 0.5, green: 0.4, blue: 0.9) // Purple
-            default:
-                return Color.gray
+            .sheet(isPresented: $showingAddPot) {
+                PotFormView(isPresented: $showingAddPot)
             }
-        }
-        
-        private func colorGradientEndForAccount(_ type: String) -> Color {
-            switch type {
-            case "current":
-                return Color.blue.opacity(0.6)
-            case "credit":
-                return Color.orange
-            case "savings":
-                return Color.green.opacity(0.6)
-            case "investment":
-                return Color.purple.opacity(0.6)
-            default:
-                return Color.gray.opacity(0.6)
+            .sheet(isPresented: $showingAddIncome) {
+                IncomeFormView(isPresented: $showingAddIncome)
+            }
+            .sheet(isPresented: $showingAddExpense) {
+                ExpenseFormView(isPresented: $showingAddExpense)
+            }
+            .sheet(isPresented: $showingTransferComposer) {
+                TransferComposerView(isPresented: $showingTransferComposer)
+            }
+            .sheet(isPresented: $showingPotsManager) {
+                PotsManagementView(isPresented: $showingPotsManager)
+            }
+            .sheet(isPresented: $showingSavings) {
+                SavingsInvestmentsView(isPresented: $showingSavings)
+            }
+            .sheet(isPresented: $showingTransferBoard) {
+                TransferBoardView(isPresented: $showingTransferBoard)
+            }
+            .sheet(isPresented: $showingIncomeSchedules) {
+                IncomeSchedulesBoardView(isPresented: $showingIncomeSchedules)
+            }
+            .sheet(isPresented: $showingSalarySorter) {
+                SalarySorterView(isPresented: $showingSalarySorter)
+            }
+            .sheet(isPresented: $showingCardReorder) {
+                CardReorderView(isPresented: $showingCardReorder)
+            }
+            .sheet(isPresented: $showingDiagnostics) {
+                DiagnosticsRunnerView(isPresented: $showingDiagnostics)
+            }
+            .popover(item: $selectedActivity) { activity in
+                ActivityDetailPopover(activity: activity)
             }
         }
     }
-    
-    var potsSection: some View {
+
+    private func refreshAllData() {
+        Task {
+            await accountsStore.loadAccounts()
+            await savingsStore.load()
+            await transferStore.load()
+            await incomeStore.load()
+        }
+    }
+
+    private func handleReorder(from sourceIndex: Int, to destinationIndex: Int) {
+        let target = destinationIndex > sourceIndex ? destinationIndex + 1 : destinationIndex
+        Task {
+            await accountsStore.reorderAccounts(fromOffsets: IndexSet(integer: sourceIndex), toOffset: max(target, 0))
+        }
+    }
+}
+
+// MARK: - Summary Card
+
+private struct BalanceSummaryCard: View {
+    let totalBalance: Double
+    let todaysSpending: Double
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Current Balance")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("£\(String(format: "%.2f", totalBalance))")
+                .font(.system(size: 36, weight: .bold))
+
             HStack {
-                Text("Pots")
-                    .font(.headline)
+                Label("Spent today", systemImage: "sun.max")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Spacer()
-                // Add a button to create a new pot
-                Button(action: {
-                    // Add pot action
-                }) {
-                    Image(systemName: "plus.circle")
-                        .foregroundColor(.purple)
-                }
-            }
-            .padding(.horizontal)
-            
-            // Get all pots from all accounts, not just current and credit accounts
-            let accountsWithPots = appState.accounts.filter { $0.pots != nil && !$0.pots!.isEmpty }
-            
-            if accountsWithPots.isEmpty {
-                Text("No pots found")
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .background(colorScheme == .dark ? Color(.systemGray6) : Color(.systemGray6))
-                    .cornerRadius(8)
-                    .padding(.horizontal)
-            } else {
-                // Group pots by account
-                ForEach(accountsWithPots) { account in
-                    if let pots = account.pots {
-                        VStack(alignment: .leading, spacing: 8) {
-                            // Account header with name and type
-                            HStack {
-                                Text(account.name)
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                
-                                Text(account.type.capitalized)
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(
-                                        Capsule()
-                                            .fill(colorForAccountType(account.type).opacity(0.2))
-                                    )
-                                    .foregroundColor(colorForAccountType(account.type))
-                            }
-                            .padding(.horizontal)
-                            
-                            // Pots in this account
-                            ForEach(pots) { pot in
-                                potRow(pot: pot, accountName: account.name)
-                            }
-                        }
-                        .padding(.bottom, 16)
-                    }
-                }
+
+                Text("£\(String(format: "%.2f", todaysSpending))")
+                    .font(.caption)
+                    .foregroundColor(.red)
             }
         }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 6)
     }
-    
-    // Helper function to get color for account type
-    private func colorForAccountType(_ type: String) -> Color {
-        switch type {
+}
+
+// MARK: - Stacked Account Deck
+
+private struct StackedAccountDeck: View {
+    let accounts: [Account]
+    let searchText: String
+    let spacing: CGFloat
+    let onReorder: (Int, Int) -> Void
+    let onAddPot: (Account) -> Void
+    let onAddTransaction: (Account) -> Void
+    let onShowDetails: (Account) -> Void
+    let onDelete: (Account) -> Void
+
+    @State private var draggingAccount: Account?
+    @State private var dragOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
+                AccountCardView(account: account)
+                    .offset(y: CGFloat(index) * spacing)
+                    .offset(draggingAccount?.id == account.id ? dragOffset : .zero)
+                    .zIndex(draggingAccount?.id == account.id ? 99 : Double(index))
+                    .shadow(color: .black.opacity(0.12), radius: draggingAccount?.id == account.id ? 12 : 4, x: 0, y: 6)
+                    .gesture(dragGesture(for: account, at: index))
+                    .contextMenu {
+                        Button("Add Pot") { onAddPot(account) }
+                        Button("New Transaction") { onAddTransaction(account) }
+                        Button("Reorder Cards") { onShowDetails(account) }
+                        Divider()
+                        Button(role: .destructive) { onDelete(account) } label: {
+                            Text("Delete")
+                            Image(systemName: "trash")
+                        }
+                    }
+            }
+        }
+        .padding(.top, spacing)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: draggingAccount?.id)
+    }
+
+    private func dragGesture(for account: Account, at index: Int) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                draggingAccount = account
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                let offset = Int(round(value.translation.height / spacing))
+                let targetIndex = max(min(index + offset, accounts.count - 1), 0)
+                if targetIndex != index {
+                    onReorder(index, targetIndex)
+                }
+                draggingAccount = nil
+                dragOffset = .zero
+            }
+    }
+}
+
+private struct AccountCardView: View {
+    let account: Account
+
+    private var gradient: LinearGradient {
+        let start: Color
+        let end: Color
+        switch account.type {
         case "current":
-            return .blue
+            start = Color.blue
+            end = Color.blue.opacity(0.7)
         case "credit":
-            return .orange
+            start = Color.orange
+            end = Color.red.opacity(0.8)
         case "savings":
-            return .green
-        case "investment":
-            return .purple
+            start = Color.green
+            end = Color.green.opacity(0.6)
         default:
-            return .gray
+            start = Color.purple
+            end = Color.purple.opacity(0.6)
         }
+        return LinearGradient(colors: [start, end], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
-    
-    private func accountPotsSection(for account: Account) -> some View {
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(account.name)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text(account.type.capitalized)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.75))
+                }
+                Spacer()
+                VStack(alignment: .trailing) {
+                    Text("£\(String(format: "%.2f", account.balance))")
+                        .font(.title3.bold())
+                        .foregroundColor(.white)
+                    Text(account.accountType ?? "Personal")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
+
+            HStack {
+                if let limit = account.credit_limit, account.type == "credit" {
+                    Label("Limit £\(String(format: "%.0f", limit))", systemImage: "creditcard")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                Spacer()
+                Label("Manage", systemImage: "slider.horizontal.3")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.8))
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(gradient)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+// MARK: - Quick Actions
+
+private struct QuickActionsView: View {
+    let onManagePots: () -> Void
+    let onSavings: () -> Void
+    let onTransfers: () -> Void
+    let onIncome: () -> Void
+    let onSalarySorter: () -> Void
+    let onReorder: () -> Void
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Account Pots")
+            Text("Shortcuts")
                 .font(.headline)
-                .padding(.horizontal)
-            
-            if let pots = account.pots, !pots.isEmpty {
-                ForEach(pots) { pot in
-                    potRow(pot: pot, accountName: account.name)
-                }
-            } else {
-                Text("No pots for this account")
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 16) {
+                QuickActionButton(icon: "tray.and.arrow.down", title: "Pots", action: onManagePots)
+                QuickActionButton(icon: "banknote", title: "Savings", action: onSavings)
+                QuickActionButton(icon: "arrow.left.arrow.right", title: "Transfers", action: onTransfers)
+            }
+            HStack(spacing: 16) {
+                QuickActionButton(icon: "calendar.badge.clock", title: "Incomes", action: onIncome)
+                QuickActionButton(icon: "chart.pie", title: "Salary", action: onSalarySorter)
+                QuickActionButton(icon: "rectangle.stack", title: "Reorder", action: onReorder)
             }
         }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
-    
-    private func accountTransactionsSection(for account: Account) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Account Transactions")
-                .font(.headline)
-                .padding(.horizontal)
-            
-            let accountTransactions = getAccountTransactions(for: account)
-            
-            if accountTransactions.isEmpty {
-                Text("No recent transactions")
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-            } else {
-                ForEach(accountTransactions.prefix(5)) { transaction in
-                    TransactionRow(transaction: transaction)
-                }
-                
-                if accountTransactions.count > 5 {
-                    Button("See all transactions") {
-                        selectTransactionsTab()
-                    }
-                    .font(.subheadline)
-                    .foregroundColor(.purple)
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-                }
-            }
-        }
-    }
-    
-    // Helper function to get transactions for a specific account
-    private func getAccountTransactions(for account: Account) -> [Transaction] {
-        return appState.transactions.filter { transaction in
-            // Check if the transaction belongs to this account
-            // by matching income, expenses, and scheduled payments
-            if let incomes = account.incomes {
-                if incomes.contains(where: { income in
-                    income.description == transaction.title &&
-                    income.amount == transaction.amount
-                }) {
-                    return true
-                }
-            }
-            
-            if let expenses = account.expenses {
-                if expenses.contains(where: { expense in
-                    expense.description == transaction.title &&
-                    expense.amount == transaction.amount
-                }) {
-                    return true
-                }
-            }
-            
-            if let payments = account.scheduled_payments {
-                if payments.contains(where: { payment in
-                    payment.name == transaction.title &&
-                    payment.amount == transaction.amount
-                }) {
-                    return true
-                }
-            }
-            
-            // Check pot payments
-            if let pots = account.pots {
-                for pot in pots {
-                    if let potPayments = pot.scheduled_payments {
-                        if potPayments.contains(where: { payment in
-                            transaction.title.contains(payment.name) &&
-                            payment.amount == transaction.amount
-                        }) {
-                            return true
-                        }
-                    }
-                }
-            }
-            
-            return false
-        }
-        .sorted(by: { $0.date > $1.date })
-    }
-    
-    private func potRow(pot: Pot, accountName: String) -> some View {
-        HStack {
-            // Icon
-            Image(systemName: "envelope.circle.fill")
-                .foregroundColor(.white)
-                .font(.system(size: 16))
-                .padding(10)
-                .background(Color.purple.opacity(0.9))
-                .cornerRadius(10)
-            
-            VStack(alignment: .leading, spacing: 3) {
-                Text(pot.name)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                // Show allocation info if pot has scheduled payments
-                if let payments = pot.scheduled_payments, !payments.isEmpty {
-                    let allocated = payments.reduce(0) { $0 + $1.amount }
-                    
-                    HStack(spacing: 4) {
-                        Text("Allocated:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        Text("£\(String(format: "%.2f", allocated))")
-                            .font(.caption)
-                            .foregroundColor(.purple)
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            Text("£\(String(format: "%.2f", pot.balance))")
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .foregroundColor(pot.balance >= 0 ? .green : .red)
-        }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 12)
-        .background(colorScheme == .dark ? Color.black : Color.white)
-        .cornerRadius(10)
-        .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
-        .padding(.horizontal)
-    }
-    
-    private func quickActionButton(icon: String, title: String, action: @escaping () -> Void) -> some View {
+}
+
+private struct QuickActionButton: View {
+    let icon: String
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
-            VStack {
+            VStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.title2)
                     .foregroundColor(.white)
                     .frame(width: 50, height: 50)
                     .background(Color.purple)
-                    .cornerRadius(25)
-                
+                    .clipShape(Circle())
                 Text(title)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity)
         }
-    }
-    
-    // MARK: - Action Methods
-    private func addNewIncome() {
-        // Will implement later
-    }
-    
-    private func addNewExpense() {
-        // Will implement later
-    }
-    
-    private func viewReports() {
-        // Will implement later
-    }
-    
-    private func selectTransactionsTab() {
-        selectedTab = 1
+        .buttonStyle(.plain)
     }
 }
 
-struct AccountSummaryRow: View {
-    let account: Account
-    @Environment(\.colorScheme) private var colorScheme
-    
+// MARK: - Activity Feed
+
+private struct ActivityFeedSection: View {
+    @ObservedObject var activityStore: ActivityStore
+    let activities: [ActivityItem]
+    @Binding var selectedActivity: ActivityItem?
+    let onViewAll: () -> Void
+
     var body: some View {
-        HStack {
-            // Icon based on account type
-            Image(systemName: iconForAccount(account.type))
-                .foregroundColor(.white)
-                .padding(10)
-                .background(colorForAccount(account.type))
-                .cornerRadius(8)
-            
-            VStack(alignment: .leading) {
-                Text(account.name)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Activity Feed")
+                    .font(.headline)
+                Spacer()
+                Button("View All", action: onViewAll)
+                    .font(.caption)
+            }
+
+            ActivityFilterChips(activityStore: activityStore)
+
+            if activities.isEmpty {
+                ContentUnavailableView(
+                    "No Activity",
+                    systemImage: "calendar",
+                    description: Text("Transactions and scheduled payments will appear here once available.")
+                )
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(activities.prefix(6)) { activity in
+                        ActivityRow(activity: activity, isMarked: activityStore.markedIdentifiers.contains(activity.id))
+                            .onTapGesture {
+                                if activityStore.isMarking {
+                                    activityStore.toggleMark(for: activity)
+                                } else {
+                                    selectedActivity = activity
+                                }
+                            }
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct ActivityFilterChips: View {
+    @ObservedObject var activityStore: ActivityStore
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(ActivityStore.Filter.allCases) { filter in
+                    Button {
+                        activityStore.filter = filter
+                    } label: {
+                        Text(filter.rawValue)
+                            .font(.caption)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(activityStore.filter == filter ? Color.purple.opacity(0.2) : Color.clear)
+                            .foregroundColor(activityStore.filter == filter ? .purple : .primary)
+                            .clipShape(Capsule())
+                    }
+                }
+                if activityStore.isMarking {
+                    Button("Mark All", action: activityStore.markAllFiltered)
+                        .font(.caption)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.purple.opacity(0.1))
+                        .clipShape(Capsule())
+                    Button("Clear", action: activityStore.clearMarks)
+                        .font(.caption)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.red.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+            }
+        }
+    }
+}
+
+struct ActivityRow: View {
+    let activity: ActivityItem
+    let isMarked: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(color(for: activity.category))
+                .frame(width: 44, height: 44)
+                .overlay(Image(systemName: icon(for: activity.category)).foregroundColor(.white))
+                .overlay(
+                    Group {
+                        if isMarked {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.white)
+                                .offset(x: 16, y: -16)
+                        }
+                    }
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(activity.title)
                     .font(.subheadline)
                     .fontWeight(.medium)
-                
-                Text(account.type.capitalized)
+                Text("\(activity.accountName)\(activity.potName != nil ? " · \(activity.potName!)" : "")")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
-            
-            Spacer()
-            
-            Text(account.formattedBalance)
-                .font(.subheadline)
-                .foregroundColor(account.balance >= 0 ? (account.type == "credit" ? .orange : .green) : .red)
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal)
-        .background(colorScheme == .dark ? Color.black : Color.white)
-        .cornerRadius(8)
-        .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
-    }
-    
-    private func iconForAccount(_ type: String) -> String {
-        switch type {
-        case "current":
-            return "creditcard"
-        case "credit":
-            return "creditcard.fill"
-        case "savings":
-            return "banknote"
-        case "investment":
-            return "chart.line.uptrend.xyaxis"
-        default:
-            return "dollarsign.circle"
-        }
-    }
-    
-    private func colorForAccount(_ type: String) -> Color {
-        switch type {
-        case "current":
-            return .blue
-        case "credit":
-            return .orange
-        case "savings":
-            return .green
-        case "investment":
-            return .purple
-        default:
-            return .gray
-        }
-    }
-}
 
-struct TransactionRow: View {
-    let transaction: Transaction
-    @Environment(\.colorScheme) private var colorScheme
-    
-    var body: some View {
-        HStack {
-            Image(systemName: transaction.category.icon)
-                .foregroundColor(.white)
-                .padding(10)
-                .background(Color.purple)
-                .cornerRadius(8)
-            
-            VStack(alignment: .leading) {
-                Text(transaction.title)
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(activity.formattedAmount)
                     .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text(transaction.category.rawValue)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(activity.category == .income ? .green : .primary)
+                Text(activity.date, style: .date)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            
-            Spacer()
-            
-            Text(transaction.formattedAmount)
-                .font(.subheadline)
-                .foregroundColor(transaction.isIncome ? .green : .red)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal)
-        .background(colorScheme == .dark ? Color.black : Color.white)
-        .cornerRadius(8)
-        .shadow(color: .gray.opacity(0.1), radius: 2, x: 0, y: 1)
+        .padding(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+    }
+
+    private func color(for category: ActivityCategory) -> Color {
+        switch category {
+        case .income: return .green
+        case .expense: return .red
+        case .scheduledPayment: return .purple
+        }
+    }
+
+    private func icon(for category: ActivityCategory) -> String {
+        switch category {
+        case .income: return "arrow.down.circle.fill"
+        case .expense: return "arrow.up.circle.fill"
+        case .scheduledPayment: return "calendar"
+        }
     }
 }
 
-#Preview {
-    HomeView(selectedTab: .constant(0))
-        .environmentObject(AppState())
+private struct ActivityDetailPopover: View {
+    let activity: ActivityItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(activity.title)
+                .font(.headline)
+            Text(activity.formattedAmount)
+                .font(.title3)
+                .bold()
+            Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                Label(activity.accountName, systemImage: "creditcard")
+                if let pot = activity.potName {
+                    Label(pot, systemImage: "tray")
+                }
+                if let company = activity.company, !company.isEmpty {
+                    Label(company, systemImage: "building.2")
+                }
+                Label {
+                    Text(activity.date, style: .date)
+                } icon: {
+                    Image(systemName: "calendar")
+                }
+            }
+            if !activity.metadata.isEmpty {
+                Divider()
+                ForEach(activity.metadata.keys.sorted(), id: \.self) { key in
+                    HStack {
+                        Text(key.capitalized)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(activity.metadata[key] ?? "")
+                            .font(.caption)
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(width: 280)
+    }
+}
+
+// MARK: - Dedicated Screens
+
+struct PotsManagementView: View {
+    @EnvironmentObject private var potsStore: PotsStore
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(accountsStore.accounts) { account in
+                    Section(account.name) {
+                        if let pots = potsStore.potsByAccount[account.id], !pots.isEmpty {
+                            ForEach(pots, id: \.id) { pot in
+                                VStack(alignment: .leading) {
+                                    Text(pot.name)
+                                    Text("£\(String(format: "%.2f", pot.balance))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } else {
+                            Text("No pots")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Pots")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { isPresented = false }
+                }
+            }
+        }
+    }
+}
+
+struct SavingsInvestmentsView: View {
+    @EnvironmentObject private var savingsStore: SavingsInvestmentsStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Total") {
+                    Text("£\(String(format: "%.2f", savingsStore.totalBalance))")
+                        .font(.title3)
+                }
+                ForEach(savingsStore.accounts) { account in
+                    VStack(alignment: .leading) {
+                        Text(account.name)
+                        Text(account.type.capitalized)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Savings & Investments")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { isPresented = false } }
+            }
+        }
+    }
+}
+
+struct TransferBoardView: View {
+    @EnvironmentObject private var transferStore: TransferSchedulesStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(transferStore.groupsByDestination()) { group in
+                    Section(group.title) {
+                        if let subtitle = group.subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(group.schedules) { schedule in
+                            VStack(alignment: .leading) {
+                                Text(schedule.description)
+                                Text("£\(String(format: "%.2f", schedule.amount))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Transfer Schedules")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { isPresented = false } }
+            }
+        }
+    }
+}
+
+struct IncomeSchedulesBoardView: View {
+    @EnvironmentObject private var incomeStore: IncomeSchedulesStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(incomeStore.schedules) { schedule in
+                    VStack(alignment: .leading) {
+                        Text(schedule.description)
+                        Text("£\(String(format: "%.2f", schedule.amount))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Income Schedules")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { isPresented = false } }
+            }
+        }
+    }
+}
+
+struct SalarySorterView: View {
+    @EnvironmentObject private var activityStore: ActivityStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Salary Sorter")
+                    .font(.title3.bold())
+                Text("Breakdown of incoming salary allocations across pots and accounts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                List {
+                    ForEach(activityStore.activities.filter { $0.category == .income }) { income in
+                        VStack(alignment: .leading) {
+                            Text(income.title)
+                            Text(income.date, style: .date)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding()
+            .navigationTitle("Salary Sorter")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { isPresented = false } }
+            }
+        }
+    }
+}
+
+struct CardReorderView: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(accountsStore.accounts) { account in
+                    Text(account.name)
+                }
+                .onMove { indices, newOffset in
+                    Task { await accountsStore.reorderAccounts(fromOffsets: indices, toOffset: newOffset) }
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Reorder Cards")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
+            }
+        }
+    }
+}
+
+struct DiagnosticsRunnerView: View {
+    @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(diagnosticsStore.steps) { step in
+                    VStack(alignment: .leading) {
+                        HStack {
+                            Text(step.name)
+                            Spacer()
+                            switch step.status {
+                            case .pending:
+                                Image(systemName: "circle")
+                            case .running:
+                                ProgressView()
+                            case .success(let message):
+                                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                                if let message {
+                                    Text(message)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            case .failure(let message):
+                                Image(systemName: "xmark.circle.fill").foregroundColor(.red)
+                                Text(message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let duration = step.duration {
+                            Text("Duration: \(String(format: "%.2f s", duration))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Diagnostics")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Run Again") {
+                        Task { await diagnosticsStore.runFullSuite() }
+                    }
+                    .disabled(diagnosticsStore.isRunning)
+                }
+            }
+            .task {
+                await diagnosticsStore.runFullSuite()
+            }
+        }
+    }
 }

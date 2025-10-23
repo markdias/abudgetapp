@@ -51,10 +51,136 @@ public struct TransferExecutionResponse: Codable {
 public struct IncomeExecutionResponse: Codable {
     public let accounts: [Account]
     public let executed_count: Int
-    
+
     public init(accounts: [Account], executed_count: Int) {
         self.accounts = accounts
         self.executed_count = executed_count
+    }
+}
+
+public struct CardOrderResponse: Codable {
+    public let success: Bool
+    public let message: String?
+    public let accounts: [Account]?
+
+    public init(success: Bool, message: String? = nil, accounts: [Account]? = nil) {
+        self.success = success
+        self.message = message
+        self.accounts = accounts
+    }
+}
+
+public struct AvailableTransfers: Codable {
+    public let byAccount: [AvailableAccountTransfer]
+    public let byPot: [AvailablePotTransfer]
+
+    public init(byAccount: [AvailableAccountTransfer], byPot: [AvailablePotTransfer]) {
+        self.byAccount = byAccount
+        self.byPot = byPot
+    }
+}
+
+public struct AvailableAccountTransfer: Codable, Identifiable {
+    public let id = UUID()
+    public let destinationId: Int
+    public let destinationType: String
+    public let destinationName: String
+    public let accountName: String
+    public let totalAmount: Double
+    public let items: [AvailableTransferItem]
+
+    enum CodingKeys: String, CodingKey {
+        case destinationId
+        case destinationType
+        case destinationName
+        case accountName
+        case totalAmount
+        case items
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.destinationId = try container.decode(Int.self, forKey: .destinationId)
+        self.destinationType = try container.decode(String.self, forKey: .destinationType)
+        self.destinationName = try container.decode(String.self, forKey: .destinationName)
+        self.accountName = try container.decode(String.self, forKey: .accountName)
+        self.totalAmount = try container.decode(Double.self, forKey: .totalAmount)
+        self.items = try container.decode([AvailableTransferItem].self, forKey: .items)
+    }
+
+    public init(destinationId: Int, destinationType: String, destinationName: String, accountName: String, totalAmount: Double, items: [AvailableTransferItem]) {
+        self.destinationId = destinationId
+        self.destinationType = destinationType
+        self.destinationName = destinationName
+        self.accountName = accountName
+        self.totalAmount = totalAmount
+        self.items = items
+    }
+}
+
+public struct AvailablePotTransfer: Codable, Identifiable {
+    public let id = UUID()
+    public let destinationId: Int
+    public let destinationType: String
+    public let destinationName: String
+    public let accountName: String
+    public let totalAmount: Double
+    public let items: AvailablePotTransferItems
+
+    enum CodingKeys: String, CodingKey {
+        case destinationId
+        case destinationType
+        case destinationName
+        case accountName
+        case totalAmount
+        case items
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.destinationId = try container.decode(Int.self, forKey: .destinationId)
+        self.destinationType = try container.decode(String.self, forKey: .destinationType)
+        self.destinationName = try container.decode(String.self, forKey: .destinationName)
+        self.accountName = try container.decode(String.self, forKey: .accountName)
+        self.totalAmount = try container.decode(Double.self, forKey: .totalAmount)
+        self.items = try container.decode(AvailablePotTransferItems.self, forKey: .items)
+    }
+
+    public init(destinationId: Int, destinationType: String, destinationName: String, accountName: String, totalAmount: Double, items: AvailablePotTransferItems) {
+        self.destinationId = destinationId
+        self.destinationType = destinationType
+        self.destinationName = destinationName
+        self.accountName = accountName
+        self.totalAmount = totalAmount
+        self.items = items
+    }
+}
+
+public struct AvailablePotTransferItems: Codable {
+    public let directDebits: [AvailableTransferItem]
+    public let cardPayments: [AvailableTransferItem]
+
+    public init(directDebits: [AvailableTransferItem], cardPayments: [AvailableTransferItem]) {
+        self.directDebits = directDebits
+        self.cardPayments = cardPayments
+    }
+}
+
+public struct AvailableTransferItem: Codable, Identifiable {
+    public let id: Int
+    public let amount: Double
+    public let description: String
+    public let date: String?
+    public let company: String?
+    public let type: String
+
+    public init(id: Int, amount: Double, description: String, date: String? = nil, company: String? = nil, type: String) {
+        self.id = id
+        self.amount = amount
+        self.description = description
+        self.date = date
+        self.company = company
+        self.type = type
     }
 }
 
