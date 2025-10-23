@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct HomeView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
@@ -26,8 +27,12 @@ struct HomeView: View {
     @State private var showingCardReorder = false
     @State private var showingDiagnostics = false
     @State private var selectedActivity: ActivityItem?
+    @State private var selectedAccountId: Int? = nil
+    @State private var showingImporter = false
+    @State private var showingExporter = false
+    @State private var exportDocument = JSONDocument()
 
-    private let cardSpacing: CGFloat = 22
+    private let cardSpacing: CGFloat = 72
 
     private var filteredAccounts: [Account] {
         guard !searchText.isEmpty else { return accountsStore.accounts }
@@ -35,7 +40,8 @@ struct HomeView: View {
     }
 
     private var reorderableAccounts: [Account] {
-        filteredAccounts.filter { $0.type != "savings" && $0.type != "investment" }
+        // Show all accounts including savings/investments in the card stack
+        filteredAccounts
     }
 
     private var totalBalance: Double {
@@ -50,10 +56,18 @@ struct HomeView: View {
     }
 
     private var filteredActivities: [ActivityItem] {
-        if searchText.isEmpty {
-            return activityStore.filteredActivities
+        // Start from store-level category filtering
+        var items = activityStore.filteredActivities
+
+        // If an account is selected, show only that account's items
+        if let selectedId = selectedAccountId,
+           let account = accountsStore.accounts.first(where: { $0.id == selectedId }) {
+            items = items.filter { $0.accountName == account.name }
         }
-        return activityStore.filteredActivities.filter { activity in
+
+        // Apply text search if present
+        if searchText.isEmpty { return items }
+        return items.filter { activity in
             activity.title.localizedCaseInsensitiveContains(searchText) ||
             activity.accountName.localizedCaseInsensitiveContains(searchText) ||
             (activity.potName?.localizedCaseInsensitiveContains(searchText) ?? false)
@@ -63,7 +77,7 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
+                VStack(spacing: 16) {
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
 
                     if reorderableAccounts.isEmpty {
@@ -76,18 +90,13 @@ struct HomeView: View {
                     } else {
                         StackedAccountDeck(
                             accounts: reorderableAccounts,
+                            selectedAccountId: $selectedAccountId,
                             searchText: searchText,
                             spacing: cardSpacing,
                             onReorder: handleReorder,
-                            onAddPot: { account in
-                                showingAddPot = true
-                            },
-                            onAddTransaction: { account in
-                                showingAddExpense = true
-                            },
-                            onShowDetails: { account in
-                                showingCardReorder = true
-                            },
+                            onAddPot: { _ in showingAddPot = true },
+                            onAddTransaction: { _ in showingAddExpense = true },
+                            onManageCards: { showingCardReorder = true },
                             onDelete: { account in
                                 Task { await accountsStore.deleteAccount(id: account.id) }
                             }
@@ -111,7 +120,7 @@ struct HomeView: View {
                     )
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 24)
+                .padding(.vertical, 16)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Dashboard")
@@ -140,6 +149,9 @@ struct HomeView: View {
                         Button("Add Income", action: { showingAddIncome = true })
                         Button("Add Expense", action: { showingAddExpense = true })
                         Divider()
+                        Button("Import Data (JSON)") { showingImporter = true }
+                        Button("Export Data (JSON)") { Task { await exportAllData() } }
+                        Divider()
                         Button("Run Diagnostics", action: { showingDiagnostics = true })
                     } label: {
                         Image(systemName: "plus.circle.fill")
@@ -147,6 +159,39 @@ struct HomeView: View {
                 }
             }
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic))
+            .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    Task {
+                        do {
+                            let data = try Data(contentsOf: url)
+                            _ = try await APIService.shared.importBudgetState(from: data)
+                            await refreshAllAfterImport()
+                        } catch {
+                            print("Import failed: \(error)")
+                        }
+                    }
+                case .failure(let error):
+                    print("Importer error: \(error)")
+                }
+            }
+            .fileExporter(isPresented: $showingExporter, document: exportDocument, contentType: .json, defaultFilename: "budget_state") { result in
+                if case .failure(let error) = result { print("Export failed: \(error)") }
+            }
+            .toolbar { // chip to clear selected account when active
+                if let selectedId = selectedAccountId,
+                   let account = accountsStore.accounts.first(where: { $0.id == selectedId }) {
+                    ToolbarItem(placement: .bottomBar) {
+                        Button {
+                            selectedAccountId = nil
+                        } label: {
+                            Label("Showing: \(account.name) — Clear", systemImage: "xmark.circle.fill")
+                        }
+                        .font(.footnote)
+                    }
+                }
+            }
             .sheet(isPresented: $showingAddAccount) {
                 AccountFormView(isPresented: $showingAddAccount)
             }
@@ -183,8 +228,8 @@ struct HomeView: View {
             .sheet(isPresented: $showingDiagnostics) {
                 DiagnosticsRunnerView(isPresented: $showingDiagnostics)
             }
-            .popover(item: $selectedActivity) { activity in
-                ActivityDetailPopover(activity: activity)
+            .sheet(item: $selectedActivity) { activity in
+                ActivityEditorSheet(activity: activity)
             }
         }
     }
@@ -195,6 +240,23 @@ struct HomeView: View {
             await savingsStore.load()
             await transferStore.load()
             await incomeStore.load()
+        }
+    }
+
+    private func refreshAllAfterImport() async {
+        await accountsStore.loadAccounts()
+        await transferStore.load()
+        await incomeStore.load()
+        await savingsStore.load()
+    }
+
+    private func exportAllData() async {
+        do {
+            let data = try await APIService.shared.exportBudgetState()
+            exportDocument = JSONDocument(data: data)
+            showingExporter = true
+        } catch {
+            print("Export failed: \(error)")
         }
     }
 
@@ -245,12 +307,13 @@ private struct BalanceSummaryCard: View {
 
 private struct StackedAccountDeck: View {
     let accounts: [Account]
+    @Binding var selectedAccountId: Int?
     let searchText: String
     let spacing: CGFloat
     let onReorder: (Int, Int) -> Void
     let onAddPot: (Account) -> Void
     let onAddTransaction: (Account) -> Void
-    let onShowDetails: (Account) -> Void
+    let onManageCards: () -> Void
     let onDelete: (Account) -> Void
 
     @State private var draggingAccount: Account?
@@ -258,36 +321,59 @@ private struct StackedAccountDeck: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-                AccountCardView(account: account)
-                    .offset(y: CGFloat(index) * spacing)
-                    .offset(draggingAccount?.id == account.id ? dragOffset : .zero)
-                    .zIndex(draggingAccount?.id == account.id ? 99 : Double(index))
-                    .shadow(color: .black.opacity(0.12), radius: draggingAccount?.id == account.id ? 12 : 4, x: 0, y: 6)
-                    .gesture(dragGesture(for: account, at: index))
-                    .contextMenu {
-                        Button("Add Pot") { onAddPot(account) }
-                        Button("New Transaction") { onAddTransaction(account) }
-                        Button("Reorder Cards") { onShowDetails(account) }
-                        Divider()
-                        Button(role: .destructive) { onDelete(account) } label: {
-                            Text("Delete")
-                            Image(systemName: "trash")
+            // When a card is selected, show only that card; otherwise show the whole stack
+            let visibleAccounts: [Account] = {
+                if let id = selectedAccountId, let a = accounts.first(where: { $0.id == id }) {
+                    return [a]
+                }
+                return accounts
+            }()
+
+            ForEach(Array(visibleAccounts.enumerated()), id: \.element.id) { index, account in
+                AccountCardView(
+                    account: account,
+                    onTap: {
+                        if selectedAccountId == account.id {
+                            selectedAccountId = nil
+                        } else {
+                            selectedAccountId = account.id
                         }
+                    },
+                    onManage: onManageCards
+                )
+                .offset(y: CGFloat(index) * spacing)
+                .offset(draggingAccount?.id == account.id ? dragOffset : .zero)
+                .zIndex(draggingAccount?.id == account.id ? 99 : Double(index))
+                .shadow(color: .black.opacity(0.12), radius: draggingAccount?.id == account.id ? 12 : 4, x: 0, y: 6)
+                .gesture(dragGesture(for: account, at: index))
+                .contextMenu {
+                    Button("Add Pot") { onAddPot(account) }
+                    Button("New Transaction") { onAddTransaction(account) }
+                    Button("Manage Cards") { onManageCards() }
+                    Divider()
+                    Button(role: .destructive) { onDelete(account) } label: {
+                        Text("Delete")
+                        Image(systemName: "trash")
                     }
+                }
             }
         }
-        .padding(.top, spacing)
+        // Reserve vertical space for the stacked offsets so content below doesn't overlap
+        .frame(height: 160 + CGFloat(max((selectedAccountId == nil ? accounts.count : 1) - 1, 0)) * spacing, alignment: .top)
+        // Keep small top padding so the deck sits closer to the balance card
+        .padding(.top, 10)
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: draggingAccount?.id)
     }
 
     private func dragGesture(for account: Account, at index: Int) -> some Gesture {
         DragGesture()
             .onChanged { value in
+                guard selectedAccountId == nil else { return }
                 draggingAccount = account
                 dragOffset = value.translation
             }
             .onEnded { value in
+                guard selectedAccountId == nil else { return }
                 let offset = Int(round(value.translation.height / spacing))
                 let targetIndex = max(min(index + offset, accounts.count - 1), 0)
                 if targetIndex != index {
@@ -301,65 +387,90 @@ private struct StackedAccountDeck: View {
 
 private struct AccountCardView: View {
     let account: Account
+    var onTap: (() -> Void)? = nil
+    var onManage: (() -> Void)? = nil
 
     private var gradient: LinearGradient {
         let start: Color
         let end: Color
         switch account.type {
-        case "current":
-            start = Color.blue
-            end = Color.blue.opacity(0.7)
         case "credit":
-            start = Color.orange
-            end = Color.red.opacity(0.8)
+            start = Color.blue
+            end = Color.indigo
+        case "current":
+            start = Color.red
+            end = Color.orange
         case "savings":
             start = Color.green
-            end = Color.green.opacity(0.6)
+            end = Color.mint
         default:
             start = Color.purple
-            end = Color.purple.opacity(0.6)
+            end = Color.indigo
         }
         return LinearGradient(colors: [start, end], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center) {
+                Label {
                     Text(account.name)
-                        .font(.headline)
-                        .foregroundColor(.white)
-                    Text(account.type.capitalized)
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.75))
+                        .font(.system(size: 18, weight: .semibold))
+                } icon: {
+                    Image(systemName: "person.fill")
+                        .foregroundColor(.white.opacity(0.95))
                 }
+                .foregroundColor(.white)
+
                 Spacer()
-                VStack(alignment: .trailing) {
+
+                VStack(alignment: .trailing, spacing: 2) {
                     Text("£\(String(format: "%.2f", account.balance))")
-                        .font(.title3.bold())
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.white)
-                    Text(account.accountType ?? "Personal")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
+                    Text("Balance")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.85))
                 }
             }
 
-            HStack {
-                if let limit = account.credit_limit, account.type == "credit" {
-                    Label("Limit £\(String(format: "%.0f", limit))", systemImage: "creditcard")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.8))
-                }
+            HStack(alignment: .center) {
+                Text(account.type.lowercased())
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.85))
+
                 Spacer()
-                Label("Manage", systemImage: "slider.horizontal.3")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.8))
+
+                if let limit = account.credit_limit, account.type == "credit" {
+                    Text("Limit £\(String(format: "%.0f", limit))")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.85))
+                }
+
+                Button(action: { onManage?() }) {
+                    Image(systemName: "ellipsis.vertical")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.92))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.15))
+                        .clipShape(Capsule())
+                        .accessibilityLabel("Manage")
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity, minHeight: 160, alignment: .leading)
         .background(gradient)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.black.opacity(0.15), lineWidth: 1)
+        )
+        .onTapGesture { onTap?() }
     }
 }
 
@@ -572,43 +683,134 @@ private struct ActivityDetailPopover: View {
     let activity: ActivityItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(activity.title)
-                .font(.headline)
-            Text(activity.formattedAmount)
-                .font(.title3)
-                .bold()
-            Divider()
-            VStack(alignment: .leading, spacing: 8) {
-                Label(activity.accountName, systemImage: "creditcard")
-                if let pot = activity.potName {
-                    Label(pot, systemImage: "tray")
-                }
-                if let company = activity.company, !company.isEmpty {
-                    Label(company, systemImage: "building.2")
-                }
-                Label {
-                    Text(activity.date, style: .date)
-                } icon: {
-                    Image(systemName: "calendar")
-                }
-            }
-            if !activity.metadata.isEmpty {
-                Divider()
-                ForEach(activity.metadata.keys.sorted(), id: \.self) { key in
+        ActivityEditorView(activity: activity)
+    }
+}
+
+// MARK: - Activity Editor
+
+private struct ActivityEditorSheet: View {
+    let activity: ActivityItem
+    var body: some View { ActivityEditorView(activity: activity) }
+}
+
+private struct ActivityEditorView: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @EnvironmentObject private var scheduledPaymentsStore: ScheduledPaymentsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let activity: ActivityItem
+
+    @State private var amount: String = ""
+    @State private var descriptionText: String = ""
+    @State private var company: String = ""
+    @State private var date: Date = Date()
+
+    private var isIncome: Bool { activity.category == .income }
+    private var isExpense: Bool { activity.category == .expense }
+    private var isScheduled: Bool { activity.category == .scheduledPayment }
+
+    private var accountId: Int? {
+        accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id
+    }
+
+    private var entityId: Int? {
+        // Parse trailing numeric component from ActivityItem.id
+        let parts = activity.id.split(separator: "-")
+        if let last = parts.last, let value = Int(last) { return value }
+        return nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Activity") {
                     HStack {
-                        Text(key.capitalized)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Text("Account")
                         Spacer()
-                        Text(activity.metadata[key] ?? "")
-                            .font(.caption)
+                        Text(activity.accountName).foregroundStyle(.secondary)
+                    }
+                    if let pot = activity.potName {
+                        HStack {
+                            Text("Pot")
+                            Spacer()
+                            Text(pot).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if isIncome || isExpense {
+                    Section(isIncome ? "Edit Income" : "Edit Expense") {
+                        TextField("Description", text: $descriptionText)
+                        if isIncome { TextField("Company", text: $company) }
+                        TextField("Amount", text: $amount).keyboardType(.decimalPad)
+                        DatePicker("Date", selection: $date, displayedComponents: .date)
+                    }
+                } else {
+                    Section("Scheduled Payment") {
+                        Text(activity.title)
+                        Text(activity.date, style: .date).foregroundStyle(.secondary)
+                        if let company = activity.company { Text(company).foregroundStyle(.secondary) }
                     }
                 }
             }
+            .navigationTitle("Activity")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { dismiss() } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if isIncome || isExpense {
+                        Button("Save") { Task { await save() } }.disabled(!canSave)
+                    }
+                    Button(role: .destructive) { Task { await deleteItem() } } label: { Text("Delete") }
+                }
+            }
+            .onAppear { preload() }
         }
-        .padding()
-        .frame(width: 280)
+    }
+
+    private var canSave: Bool {
+        Double(amount) != nil && !descriptionText.isEmpty && (isIncome ? !company.isEmpty : true)
+    }
+
+    private func preload() {
+        descriptionText = activity.title
+        company = activity.company ?? ""
+        date = activity.date
+        amount = String(format: "%.2f", abs(activity.amount))
+    }
+
+    private func save() async {
+        guard let accountId = accountId, let id = entityId, let money = Double(amount) else { return }
+        let formatter = ISO8601DateFormatter()
+        if isIncome {
+            let submission = IncomeSubmission(amount: money, description: descriptionText, company: company, date: formatter.string(from: date))
+            await accountsStore.updateIncome(accountId: accountId, incomeId: id, submission: submission)
+        } else if isExpense {
+            let submission = ExpenseSubmission(amount: money, description: descriptionText, date: formatter.string(from: date))
+            await accountsStore.updateExpense(accountId: accountId, expenseId: id, submission: submission)
+        }
+        dismiss()
+    }
+
+    private func deleteItem() async {
+        guard let accountId = accountId else { return }
+        if isIncome, let id = entityId {
+            await accountsStore.deleteIncome(accountId: accountId, incomeId: id)
+            dismiss()
+            return
+        }
+        if isExpense, let id = entityId {
+            await accountsStore.deleteExpense(accountId: accountId, expenseId: id)
+            dismiss()
+            return
+        }
+        if isScheduled, let paymentId = entityId {
+            // Find matching scheduled payment context
+            if let context = scheduledPaymentsStore.items.first(where: { $0.accountId == accountId && $0.payment.id == paymentId }) {
+                await scheduledPaymentsStore.deletePayment(context: context)
+            }
+            dismiss()
+        }
     }
 }
 

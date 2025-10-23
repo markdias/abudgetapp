@@ -12,7 +12,9 @@ protocol APIServiceProtocol {
     func deletePot(accountName: String, potName: String) async throws -> MessageResponse
 
     func addExpense(accountId: Int, expense: ExpenseSubmission) async throws -> Expense
+    func updateExpense(accountId: Int, expenseId: Int, expense: ExpenseSubmission) async throws -> Expense
     func addIncome(accountId: Int, income: IncomeSubmission) async throws -> Income
+    func updateIncome(accountId: Int, incomeId: Int, income: IncomeSubmission) async throws -> Income
     func deleteExpense(accountId: Int, expenseId: Int) async throws -> MessageResponse
     func deleteIncome(accountId: Int, incomeId: Int) async throws -> MessageResponse
 
@@ -39,6 +41,10 @@ protocol APIServiceProtocol {
 
     func getAvailableTransfers() async throws -> AvailableTransfers
     func restoreSampleData() async throws -> ResetResponse
+
+    // Import / Export full state
+    func exportBudgetState() async throws -> Data
+    func importBudgetState(from data: Data) async throws -> ResetResponse
 }
 
 enum APIServiceError: LocalizedError {
@@ -139,9 +145,25 @@ final class APIService: APIServiceProtocol {
         }
     }
 
+    func updateExpense(accountId: Int, expenseId: Int, expense: ExpenseSubmission) async throws -> Expense {
+        do {
+            return try await store.updateExpense(accountId: accountId, expenseId: expenseId, submission: expense)
+        } catch {
+            throw map(error)
+        }
+    }
+
     func addIncome(accountId: Int, income: IncomeSubmission) async throws -> Income {
         do {
             return try await store.addIncome(accountId: accountId, submission: income)
+        } catch {
+            throw map(error)
+        }
+    }
+
+    func updateIncome(accountId: Int, incomeId: Int, income: IncomeSubmission) async throws -> Income {
+        do {
+            return try await store.updateIncome(accountId: accountId, incomeId: incomeId, submission: income)
         } catch {
             throw map(error)
         }
@@ -293,6 +315,22 @@ final class APIService: APIServiceProtocol {
     func restoreSampleData() async throws -> ResetResponse {
         do {
             return try await store.restoreSample()
+        } catch {
+            throw map(error)
+        }
+    }
+
+    func exportBudgetState() async throws -> Data {
+        do {
+            return try await store.exportStateData()
+        } catch {
+            throw map(error)
+        }
+    }
+
+    func importBudgetState(from data: Data) async throws -> ResetResponse {
+        do {
+            return try await store.importStateData(data)
         } catch {
             throw map(error)
         }

@@ -32,7 +32,8 @@ actor LocalBudgetStore {
            let loaded = try? decoder.decode(BudgetState.self, from: data) {
             self.state = loaded.normalized()
         } else {
-            self.state = BudgetState.sample.normalized()
+            // Start with an empty state when no persisted data exists.
+            self.state = BudgetState.empty
             // Avoid persisting during actor initialization to satisfy Swift 6 isolation rules.
         }
     }
@@ -201,6 +202,32 @@ actor LocalBudgetStore {
         return income
     }
 
+    func updateIncome(accountId: Int, incomeId: Int, submission: IncomeSubmission) throws -> Income {
+        guard let index = state.accounts.firstIndex(where: { $0.id == accountId }) else {
+            throw StoreError.notFound("Account #\(accountId) not found")
+        }
+        var account = state.accounts[index]
+        guard var incomes = account.incomes, let incomeIndex = incomes.firstIndex(where: { $0.id == incomeId }) else {
+            throw StoreError.notFound("Income #\(incomeId) not found")
+        }
+        let old = incomes[incomeIndex]
+        let updated = Income(
+            id: old.id,
+            amount: submission.amount,
+            description: submission.description,
+            company: submission.company,
+            date: submission.date ?? old.date
+        )
+        incomes[incomeIndex] = updated
+        account.incomes = incomes
+        // Adjust account balance by the delta
+        let delta = submission.amount - old.amount
+        account.balance += delta
+        state.accounts[index] = account
+        try persist()
+        return updated
+    }
+
     func addExpense(accountId: Int, submission: ExpenseSubmission) throws -> Expense {
         guard let index = state.accounts.firstIndex(where: { $0.id == accountId }) else {
             throw StoreError.notFound("Account #\(accountId) not found")
@@ -220,6 +247,31 @@ actor LocalBudgetStore {
         state.accounts[index] = account
         try persist()
         return expense
+    }
+
+    func updateExpense(accountId: Int, expenseId: Int, submission: ExpenseSubmission) throws -> Expense {
+        guard let index = state.accounts.firstIndex(where: { $0.id == accountId }) else {
+            throw StoreError.notFound("Account #\(accountId) not found")
+        }
+        var account = state.accounts[index]
+        guard var expenses = account.expenses, let expenseIndex = expenses.firstIndex(where: { $0.id == expenseId }) else {
+            throw StoreError.notFound("Expense #\(expenseId) not found")
+        }
+        let old = expenses[expenseIndex]
+        let updated = Expense(
+            id: old.id,
+            amount: submission.amount,
+            description: submission.description,
+            date: submission.date ?? old.date
+        )
+        expenses[expenseIndex] = updated
+        account.expenses = expenses
+        // Remove old effect, then apply new
+        account.balance += old.amount
+        account.balance -= submission.amount
+        state.accounts[index] = account
+        try persist()
+        return updated
     }
 
     func deleteIncome(accountId: Int, incomeId: Int) throws {
@@ -531,6 +583,19 @@ actor LocalBudgetStore {
         return ResetResponse(accounts: state.accounts, income_schedules: state.incomeSchedules, transfer_schedules: state.transferSchedules)
     }
 
+    // MARK: - Import / Export
+
+    func exportStateData() throws -> Data {
+        try encoder.encode(state)
+    }
+
+    func importStateData(_ data: Data) throws -> ResetResponse {
+        let imported = try decoder.decode(BudgetState.self, from: data).normalized()
+        state = imported
+        try persist()
+        return ResetResponse(accounts: state.accounts, income_schedules: state.incomeSchedules, transfer_schedules: state.transferSchedules)
+    }
+
     // MARK: - Helpers
 
     private func updatePotScheduledPayment(accountIndex: Int, potName: String, mutate: (inout [ScheduledPayment]) -> Void) throws {
@@ -690,6 +755,21 @@ private struct BudgetState: Codable {
         normalizedState.nextIncomeScheduleId = max(nextIncomeScheduleId, incomeScheduleMax + 1)
 
         return normalizedState
+    }
+
+    static var empty: BudgetState {
+        BudgetState(
+            accounts: [],
+            transferSchedules: [],
+            incomeSchedules: [],
+            nextAccountId: 1,
+            nextPotId: 1,
+            nextIncomeId: 1,
+            nextExpenseId: 1,
+            nextScheduledPaymentId: 1,
+            nextTransferScheduleId: 1,
+            nextIncomeScheduleId: 1
+        )
     }
 
     static var sample: BudgetState {
