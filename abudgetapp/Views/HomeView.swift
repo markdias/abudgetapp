@@ -1184,11 +1184,17 @@ struct SalarySorterView: View {
     @Binding var isPresented: Bool
 
     private struct TransferPreview: Identifiable {
-        let id = UUID()
-        let name: String
+        let id: Int
+        let schedule: TransferSchedule
         let amount: Double
-        let finalBalance: Double
-        let isPotDestination: Bool
+        let destinationStartingBalance: Double
+        let destinationFinalBalance: Double
+        let destinationLabel: String
+        let destinationIsPot: Bool
+        let sourceLabel: String?
+        let sourceStartingBalance: Double?
+        let sourceFinalBalance: Double?
+        let items: [TransferItem]
     }
 
     private struct AccountPreview: Identifiable {
@@ -1200,6 +1206,11 @@ struct SalarySorterView: View {
         let balanceAfterTransfers: Double
 
         var id: Int { account.id }
+    }
+
+    private struct PreviewContext {
+        let accounts: [AccountPreview]
+        let salaryOutflowTotal: Double
     }
 
     private struct PotKey: Hashable {
@@ -1227,8 +1238,8 @@ struct SalarySorterView: View {
         return dict
     }
 
-    private var accountPreviews: [AccountPreview] {
-        guard !accountsStore.accounts.isEmpty else { return [] }
+    private var previewContext: PreviewContext {
+        guard !accountsStore.accounts.isEmpty else { return PreviewContext(accounts: [], salaryOutflowTotal: 0) }
 
         let accounts = accountsStore.accounts
         let accountStartingBalances = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.balance) })
@@ -1255,62 +1266,123 @@ struct SalarySorterView: View {
             }
         }
 
+        let resolvePotKey: (String, Int?, Int) -> PotKey? = { identifier, accountHint, destinationAccountId in
+            if let numericId = Int(identifier), let key = potLookupById[numericId] {
+                return key
+            }
+            if let accountId = accountHint {
+                let key = PotKey(accountId: accountId, name: identifier)
+                if potStartingBalances[key] != nil {
+                    return key
+                }
+            }
+            let destinationKey = PotKey(accountId: destinationAccountId, name: identifier)
+            if potStartingBalances[destinationKey] != nil {
+                return destinationKey
+            }
+            if let matches = potLookupByName[identifier] {
+                if matches.count == 1 {
+                    return matches[0]
+                }
+                if let accountId = accountHint, let match = matches.first(where: { $0.accountId == accountId }) {
+                    return match
+                }
+                if let match = matches.first(where: { $0.accountId == destinationAccountId }) {
+                    return match
+                }
+                return matches.first
+            }
+            return nil
+        }
+
         var previewsByAccount: [Int: [TransferPreview]] = [:]
         var totalsByAccount: [Int: Double] = [:]
+        var salaryOutflowsByAccount: [Int: Double] = [:]
 
-        for schedule in activeTransfers {
+        for schedule in activeTransfers.sorted(by: { $0.id < $1.id }) {
             let amount = schedule.amount
 
-            if let fromPotId = schedule.fromPotId, !fromPotId.isEmpty {
-                if let numericId = Int(fromPotId), let key = potLookupById[numericId] {
-                    let starting = potStartingBalances[key] ?? 0
-                    potBalances[key] = (potBalances[key] ?? starting) - amount
-                } else if let fromAccountId = schedule.fromAccountId {
-                    let key = PotKey(accountId: fromAccountId, name: fromPotId)
-                    let starting = potStartingBalances[key] ?? 0
-                    potBalances[key] = (potBalances[key] ?? starting) - amount
-                } else if let key = potLookupByName[fromPotId]?.first {
-                    let starting = potStartingBalances[key] ?? 0
-                    potBalances[key] = (potBalances[key] ?? starting) - amount
-                }
+            var sourceLabel: String?
+            var sourceStarting: Double?
+            var sourceFinal: Double?
+            var sourceAccountId: Int?
+
+            if let fromPotId = schedule.fromPotId, !fromPotId.isEmpty,
+               let key = resolvePotKey(fromPotId, schedule.fromAccountId, schedule.toAccountId) {
+                let starting = potBalances[key] ?? potStartingBalances[key] ?? 0
+                sourceStarting = starting
+                let newValue = starting - amount
+                potBalances[key] = newValue
+                sourceFinal = newValue
+                sourceAccountId = key.accountId
+                let accountName = accountsStore.account(for: key.accountId)?.name ?? "Account #\(key.accountId)"
+                sourceLabel = "\(accountName) · Pot: \(key.name)"
             } else if let fromAccountId = schedule.fromAccountId {
                 let starting = accountBalances[fromAccountId]
                     ?? accountAfterIncome[fromAccountId]
                     ?? accountStartingBalances[fromAccountId]
                     ?? 0
-                accountBalances[fromAccountId] = starting - amount
+                sourceStarting = starting
+                let newValue = starting - amount
+                accountBalances[fromAccountId] = newValue
+                sourceFinal = newValue
+                sourceAccountId = fromAccountId
+                let accountName = accountsStore.account(for: fromAccountId)?.name ?? "Account #\(fromAccountId)"
+                sourceLabel = accountName
+            } else if let fromPotId = schedule.fromPotId, !fromPotId.isEmpty {
+                sourceLabel = "Pot: \(fromPotId)"
+            }
+
+            if let accountId = sourceAccountId {
+                salaryOutflowsByAccount[accountId, default: 0] += amount
             }
 
             let destinationAccountId = schedule.toAccountId
-            let previewName: String
-            var finalBalance: Double
+            let destinationLabel: String
+            let destinationStarting: Double
+            let destinationFinal: Double
             var isPotDestination = false
 
             if let potName = schedule.toPotName, !potName.isEmpty {
                 isPotDestination = true
                 let key = PotKey(accountId: destinationAccountId, name: potName)
-                let starting = potStartingBalances[key] ?? 0
-                let newValue = (potBalances[key] ?? starting) + amount
+                let starting = potBalances[key] ?? potStartingBalances[key] ?? 0
+                destinationStarting = starting
+                let newValue = starting + amount
                 potBalances[key] = newValue
-                finalBalance = newValue
-                previewName = potName
+                destinationFinal = newValue
+                let accountName = accountsStore.account(for: destinationAccountId)?.name ?? "Account #\(destinationAccountId)"
+                destinationLabel = "\(accountName) · Pot: \(potName)"
             } else {
                 let starting = accountBalances[destinationAccountId]
                     ?? accountAfterIncome[destinationAccountId]
                     ?? accountStartingBalances[destinationAccountId]
                     ?? 0
+                destinationStarting = starting
                 let newValue = starting + amount
                 accountBalances[destinationAccountId] = newValue
-                finalBalance = newValue
-                previewName = accountsStore.account(for: destinationAccountId)?.name ?? "Account #\(destinationAccountId)"
+                destinationFinal = newValue
+                destinationLabel = accountsStore.account(for: destinationAccountId)?.name ?? "Account #\(destinationAccountId)"
             }
 
-            let preview = TransferPreview(name: previewName, amount: amount, finalBalance: finalBalance, isPotDestination: isPotDestination)
+            let preview = TransferPreview(
+                id: schedule.id,
+                schedule: schedule,
+                amount: amount,
+                destinationStartingBalance: destinationStarting,
+                destinationFinalBalance: destinationFinal,
+                destinationLabel: destinationLabel,
+                destinationIsPot: isPotDestination,
+                sourceLabel: sourceLabel,
+                sourceStartingBalance: sourceStarting,
+                sourceFinalBalance: sourceFinal,
+                items: schedule.items ?? []
+            )
             previewsByAccount[destinationAccountId, default: []].append(preview)
             totalsByAccount[destinationAccountId, default: 0] += amount
         }
 
-        return previewsByAccount.compactMap { accountId, transfers in
+        let previews = previewsByAccount.compactMap { accountId, transfers in
             guard let account = accountsStore.account(for: accountId) else { return nil }
             let starting = accountStartingBalances[accountId] ?? 0
             let afterIncome = accountAfterIncome[accountId] ?? starting
@@ -1325,12 +1397,18 @@ struct SalarySorterView: View {
             )
         }
         .sorted { $0.account.name < $1.account.name }
+        let incomeAccounts = Set(activeIncomes.map { $0.accountId })
+        let salaryOutflow = incomeAccounts.reduce(0) { partial, accountId in
+            partial + (salaryOutflowsByAccount[accountId] ?? 0)
+        }
+
+        return PreviewContext(accounts: previews, salaryOutflowTotal: salaryOutflow)
     }
 
     var body: some View {
-        let previews = accountPreviews
-        let transferTotal = previews.reduce(0) { $0 + $1.totalAmount }
-        let remainingBalance = incomeTotal - transferTotal
+        let context = previewContext
+        let previews = context.accounts
+        let remainingBalance = incomeTotal - context.salaryOutflowTotal
 
         return NavigationStack {
             ScrollView {
@@ -1398,25 +1476,69 @@ struct SalarySorterView: View {
 
                                     VStack(spacing: 10) {
                                         ForEach(preview.transfers) { transfer in
-                                            HStack(alignment: .center, spacing: 12) {
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text(transfer.name)
-                                                        .font(.subheadline.weight(.semibold))
-                                                    Text(transfer.isPotDestination ? "Pot allocation" : "Account top up")
-                                                        .font(.caption2)
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                                Spacer()
-                                                VStack(alignment: .trailing, spacing: 6) {
+                                            VStack(alignment: .leading, spacing: 12) {
+                                                HStack(alignment: .firstTextBaseline) {
+                                                    VStack(alignment: .leading, spacing: 4) {
+                                                        Text(transfer.schedule.description)
+                                                            .font(.subheadline.weight(.semibold))
+                                                        if let source = transfer.sourceLabel {
+                                                            Text("From \(source)")
+                                                                .font(.caption2)
+                                                                .foregroundStyle(.secondary)
+                                                        }
+                                                        Text("To \(transfer.destinationLabel)")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                                    Spacer()
                                                     Text(formatGBP(transfer.amount))
                                                         .font(.subheadline.weight(.semibold))
                                                         .padding(.horizontal, 12)
                                                         .padding(.vertical, 6)
-                                                        .background(chipColor(forPot: transfer.isPotDestination))
+                                                        .background(chipColor(forPot: transfer.destinationIsPot))
                                                         .clipShape(Capsule())
-                                                    Text("Balance \(formatGBP(transfer.finalBalance))")
-                                                        .font(.caption2)
-                                                        .foregroundStyle(.secondary)
+                                                }
+
+                                                if !transfer.items.isEmpty {
+                                                    VStack(alignment: .leading, spacing: 4) {
+                                                        Text("Breakdown")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                        ForEach(transfer.items, id: \.self) { item in
+                                                            HStack {
+                                                                Text(item.description)
+                                                                Spacer()
+                                                                Text(formatGBP(item.amount))
+                                                                    .foregroundStyle(.secondary)
+                                                            }
+                                                            .font(.caption)
+                                                        }
+                                                    }
+                                                }
+
+                                                VStack(alignment: .leading, spacing: 6) {
+                                                    HStack {
+                                                        Text("Current balance")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                        Spacer()
+                                                        Text(formatGBP(transfer.destinationStartingBalance))
+                                                            .font(.caption.weight(.semibold))
+                                                    }
+                                                    HStack {
+                                                        Text("After transfer")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                        Spacer()
+                                                        Text(formatGBP(transfer.destinationFinalBalance))
+                                                            .font(.body.weight(.semibold))
+                                                            .foregroundColor(transfer.destinationFinalBalance >= 0 ? .primary : .red)
+                                                    }
+                                                    if let source = transfer.sourceLabel, let sourceAfter = transfer.sourceFinalBalance {
+                                                        Text("Source after: \(source) → \(formatGBP(sourceAfter))")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                    }
                                                 }
                                             }
                                             .padding(12)
@@ -1446,7 +1568,7 @@ struct SalarySorterView: View {
                         }
                     }
 
-                    if incomeTotal > 0 || transferTotal > 0 {
+                    if incomeTotal > 0 || context.salaryOutflowTotal > 0 {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Remaining")
                                 .font(.caption)
