@@ -25,6 +25,7 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 
 * **Dashboard (Home)** – Stacked, swipeable account cards with drag-to-reorder, quick actions, search, add menus, and activity feed with mark mode and detail popovers.
 * **Transfer Schedules** – Destination grouping, inline execution, delete actions, and a SwiftUI composer sheet.
+* **Salary Sorter** – Previews how active incomes cascade through transfer schedules with per-schedule breakdowns, destination pot balances, and remaining salary after the run.
 * **Activity Tab** – Full history view with filters that share the same activity source as the dashboard feed.
 * **Budget** – Summaries derived from pots and scheduled payments plus an upcoming payments list.
 * **Settings** – Local storage management (restore sample data, reload, reset balances), card reorder flow, and diagnostics launcher.
