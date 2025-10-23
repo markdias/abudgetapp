@@ -6,83 +6,54 @@
 import SwiftUI
 
 struct TransactionsView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject private var activityStore: ActivityStore
     @State private var searchText = ""
-    @State private var selectedFilter: TransactionFilter = .all
-    
-    var filteredTransactions: [Transaction] {
-        // Use appState.transactions instead of local transactions property
-        let searchResults = searchText.isEmpty ? appState.transactions : appState.transactions.filter { 
-            $0.title.localizedCaseInsensitiveContains(searchText) ||
-            $0.category.rawValue.localizedCaseInsensitiveContains(searchText)
+    @State private var selectedFilter: ActivityStore.Filter = .all
+
+    private var filteredActivities: [ActivityItem] {
+        var activities = activityStore.activities
+        if let category = selectedFilter.category {
+            activities = activities.filter { $0.category == category }
         }
-        
-        switch selectedFilter {
-        case .all:
-            return searchResults
-        case .income:
-            return searchResults.filter { $0.isIncome }
-        case .expense:
-            return searchResults.filter { !$0.isIncome && !$0.isPayment }
-        case .payments:
-            return searchResults.filter { $0.isPayment }
+        if searchText.isEmpty { return activities }
+        return activities.filter { activity in
+            activity.title.localizedCaseInsensitiveContains(searchText) ||
+            activity.accountName.localizedCaseInsensitiveContains(searchText) ||
+            (activity.potName?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
     }
-    
+
     var body: some View {
-        NavigationView {
-            VStack {
-                // Filter segment control
-                Picker("Filter", selection: $selectedFilter) {
-                    ForEach(TransactionFilter.allCases, id: \.self) { filter in
-                        Text(filter.rawValue).tag(filter)
+        NavigationStack {
+            List {
+                ForEach(filteredActivities) { activity in
+                    ActivityRow(activity: activity, isMarked: activityStore.markedIdentifiers.contains(activity.id))
+                }
+            }
+            .overlay {
+                if filteredActivities.isEmpty {
+                    ContentUnavailableView("No Activity", systemImage: "tray") {
+                        Text("Adjust the filters or search to see transactions.")
                     }
                 }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding(.horizontal)
-                
-                if filteredTransactions.isEmpty {
-                    ContentUnavailableView(
-                        "No Transactions",
-                        systemImage: "tray",
-                        description: Text("There are no transactions that match your search criteria.")
-                    )
-                    .padding()
-                    Spacer()
-                } else {
-                    List {
-                        ForEach(filteredTransactions) { transaction in
-                            TransactionRow(transaction: transaction)
-                                .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
-                                .listRowSeparator(.hidden)
+            }
+            .navigationTitle("Activity")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Picker("Filter", selection: $selectedFilter) {
+                        ForEach(ActivityStore.Filter.allCases) { filter in
+                            Text(filter.rawValue).tag(filter)
                         }
                     }
-                    .listStyle(.plain)
+                    .pickerStyle(.segmented)
                 }
             }
-            .navigationTitle("Transactions")
-            .searchable(text: $searchText, prompt: "Search transactions")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: {
-                        // Action to add a new transaction
-                    }) {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
+            .searchable(text: $searchText, prompt: "Search activity")
         }
     }
-}
-
-enum TransactionFilter: String, CaseIterable {
-    case all = "All"
-    case income = "Income"
-    case expense = "Expenses"
-    case payments = "Payments"
 }
 
 #Preview {
     TransactionsView()
-        .environmentObject(AppState())
+        .environmentObject(ActivityStore(accountsStore: AccountsStore()))
 }

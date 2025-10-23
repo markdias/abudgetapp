@@ -1,250 +1,116 @@
-//
-//  SettingsView.swift
-//  abudgetapp
-//
-
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject var appState: AppState
-    @State private var isDarkMode = false
-    @State private var notificationsEnabled = true
-    @State private var username = "Mark Dias"
-    @State private var apiBaseURL = "http://localhost:3000"
-    @State private var showingAPIStatus = false
-    @State private var apiStatusMessage = ""
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @EnvironmentObject private var transferStore: TransferSchedulesStore
+    @EnvironmentObject private var incomeStore: IncomeSchedulesStore
+    @EnvironmentObject private var savingsStore: SavingsInvestmentsStore
+    @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
+
+    @State private var apiBaseURL = APIService.shared.loadSavedURL()
+    @State private var apiStatusMessage: String?
     @State private var apiStatusSuccess = false
-    @State private var showingResetConfirmation = false
-    
+    @State private var showingCardReorder = false
+    @State private var showingDiagnostics = false
+
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
-                Section(header: Text("User Profile")) {
-                    HStack {
-                        Text("Name")
-                        Spacer()
-                        Text(username)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    NavigationLink(destination: Text("Profile Details View")) {
-                        Text("Edit Profile")
-                    }
-                }
-                
-                Section(header: Text("API Configuration")) {
-                    TextField("Server URL", text: $apiBaseURL)
-                        .autocapitalization(.none)
+                Section("API Configuration") {
+                    TextField("Base URL", text: $apiBaseURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
-                    
-                    Button("Test Connection") {
-                        testAPIConnection()
-                    }
-                    
-                    Button("Save API Configuration") {
-                        saveAPIConfiguration()
-                    }
-                    .disabled(apiBaseURL.isEmpty)
-                    
-                    if showingAPIStatus {
-                        HStack {
-                            Image(systemName: apiStatusSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundColor(apiStatusSuccess ? .green : .red)
-                            Text(apiStatusMessage)
-                                .font(.footnote)
-                        }
-                    }
-                    
-                    Button("Reload Data") {
-                        appState.fetchData()
+                    Button("Save") { saveAPIConfiguration() }
+                    Button("Test Connection") { Task { await testConnection() } }
+                    if let status = apiStatusMessage {
+                        Label(status, systemImage: apiStatusSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundColor(apiStatusSuccess ? .green : .red)
+                            .font(.caption)
                     }
                 }
-                
-                Section(header: Text("Budget Management")) {
-                    Button("Reset All Balances") {
-                        confirmResetBalances()
+
+                Section("Data Management") {
+                    Button("Reload Data") { refreshAll() }
+                    Button("Reset Balances", role: .destructive) {
+                        Task { await accountsStore.resetBalances(); await transferStore.load(); await incomeStore.load() }
                     }
-                    .foregroundColor(.orange)
-                    
-                    Button("Execute All Income Schedules") {
-                        executeAllIncomeSchedules()
-                    }
-                    
-                    Button("Execute All Transfer Schedules") {
-                        executeAllTransferSchedules()
-                    }
+                    Button("Execute All Transfers") { Task { await transferStore.executeAll() } }
+                        .disabled(transferStore.schedules.isEmpty)
+                    Button("Execute All Incomes") { Task { await incomeStore.executeAll() } }
+                        .disabled(incomeStore.schedules.isEmpty)
                 }
-                
-                Section(header: Text("Preferences")) {
-                    Toggle("Dark Mode", isOn: $isDarkMode)
-                    Toggle("Notifications", isOn: $notificationsEnabled)
-                    
-                    NavigationLink(destination: Text("Currency Settings View")) {
-                        HStack {
-                            Text("Currency")
-                            Spacer()
-                            Text("GBP (£)")
-                                .foregroundColor(.secondary)
-                        }
-                    }
+
+                Section("Tools") {
+                    Button("Reorder Cards") { showingCardReorder = true }
+                    Button("Run Diagnostics") { showingDiagnostics = true }
                 }
-                
-                Section(header: Text("Data & Privacy")) {
-                    NavigationLink(destination: Text("Export Data View")) {
-                        Text("Export Data")
-                    }
-                    
-                    NavigationLink(destination: Text("Privacy Policy View")) {
-                        Text("Privacy Policy")
-                    }
-                    
-                    Button(action: {
-                        // Clear all data action
-                    }) {
-                        Text("Clear All Data")
-                            .foregroundColor(.red)
-                    }
-                }
-                
-                Section {
-                    HStack {
-                        Spacer()
-                        VStack {
-                            Text("Budget App")
-                                .font(.headline)
-                            Text("Version 1.0")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
+
+                Section("About") {
+                    VStack(alignment: .leading) {
+                        Text("MyBudget")
+                            .font(.headline)
+                        Text("Version 1.0")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
             .navigationTitle("Settings")
-            .alert(isPresented: $appState.showingError) {
-                Alert(
-                    title: Text("Error"),
-                    message: Text(appState.errorMessage ?? "Unknown error"),
-                    dismissButton: .default(Text("OK"))
-                )
+            .sheet(isPresented: $showingCardReorder) {
+                CardReorderView(isPresented: $showingCardReorder)
             }
-            .onAppear {
-                // Load the saved API URL
-                apiBaseURL = APIService.shared.loadSavedURL()
-            }
-            .confirmationDialog(
-                "Reset Balances",
-                isPresented: $showingResetConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Reset", role: .destructive) {
-                    resetBalances()
-                }
-                Button("Cancel", role: .cancel) {
-                    // Do nothing
-                }
-            } message: {
-                Text("Are you sure you want to reset all balances? This action cannot be undone.")
+            .sheet(isPresented: $showingDiagnostics) {
+                DiagnosticsRunnerView(isPresented: $showingDiagnostics)
             }
         }
     }
-    
-    // Test the API connection by making a simple request
-    private func testAPIConnection() {
-        showingAPIStatus = true
-        apiStatusMessage = "Testing connection..."
-        
-        // Need to ensure the URL is valid
-        guard let url = URL(string: apiBaseURL + "/accounts") else {
-            apiStatusSuccess = false
-            apiStatusMessage = "Invalid URL format"
-            return
-        }
-        
-        // Make a simple request to test the connection
-        let task = URLSession.shared.dataTask(with: url) { data, response, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    apiStatusSuccess = false
-                    apiStatusMessage = "Connection failed: \(error.localizedDescription)"
-                    return
-                }
-                
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    apiStatusSuccess = false
-                    apiStatusMessage = "Invalid response"
-                    return
-                }
-                
-                if (200...299).contains(httpResponse.statusCode) {
-                    apiStatusSuccess = true
-                    apiStatusMessage = "Connection successful!"
-                } else {
-                    apiStatusSuccess = false
-                    apiStatusMessage = "Server returned status code: \(httpResponse.statusCode)"
-                }
-            }
-        }
-        task.resume()
-    }
-    
-    // Save the API configuration
+
     private func saveAPIConfiguration() {
         APIService.shared.updateBaseURL(apiBaseURL)
-        showingAPIStatus = true
+        apiStatusMessage = "Saved"
         apiStatusSuccess = true
-        apiStatusMessage = "API URL saved successfully"
-        
-        // Reload data with the new URL
-        appState.fetchData()
+        refreshAll()
     }
-    
-    // Reset all balances
-    private func confirmResetBalances() {
-        showingResetConfirmation = true
-    }
-    
-    private func resetBalances() {
-        appState.resetBalances { success in
-            showingAPIStatus = true
-            if success {
-                apiStatusSuccess = true
-                apiStatusMessage = "Balances reset successfully"
-            } else {
-                apiStatusSuccess = false
-                apiStatusMessage = "Failed to reset balances"
-            }
+
+    private func refreshAll() {
+        Task {
+            await accountsStore.loadAccounts()
+            await savingsStore.load()
+            await transferStore.load()
+            await incomeStore.load()
         }
     }
-    
-    private func executeAllIncomeSchedules() {
-        appState.executeAllIncomeSchedules { success in
-            showingAPIStatus = true
-            if success {
-                apiStatusSuccess = true
-                apiStatusMessage = "Income schedules executed successfully"
-            } else {
-                apiStatusSuccess = false
-                apiStatusMessage = "Failed to execute income schedules"
-            }
+
+    private func testConnection() async {
+        guard let url = URL(string: apiBaseURL) else {
+            apiStatusMessage = "Invalid URL"
+            apiStatusSuccess = false
+            return
         }
-    }
-    
-    private func executeAllTransferSchedules() {
-        appState.executeAllTransferSchedules { success in
-            showingAPIStatus = true
-            if success {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) {
+                apiStatusMessage = "Connection Successful"
                 apiStatusSuccess = true
-                apiStatusMessage = "Transfer schedules executed successfully"
             } else {
+                apiStatusMessage = "Unexpected Response"
                 apiStatusSuccess = false
-                apiStatusMessage = "Failed to execute transfer schedules"
             }
+        } catch {
+            apiStatusMessage = error.localizedDescription
+            apiStatusSuccess = false
         }
     }
 }
 
 #Preview {
     SettingsView()
-        .environmentObject(AppState())
+        .environmentObject(AccountsStore())
+        .environmentObject(TransferSchedulesStore(accountsStore: AccountsStore()))
+        .environmentObject(IncomeSchedulesStore(accountsStore: AccountsStore()))
+        .environmentObject(SavingsInvestmentsStore())
+        .environmentObject(DiagnosticsStore(accountsStore: AccountsStore()))
 }
