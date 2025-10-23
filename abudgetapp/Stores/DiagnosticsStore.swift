@@ -53,17 +53,17 @@ final class DiagnosticsStore: ObservableObject {
                 return "Created account #\(account.id)"
             }),
             ("Add Pot", {
-                guard let accountId = createdAccountId else { throw APIServiceError.invalidEndpoint("Missing account for pot") }
+                guard let accountId = createdAccountId else { throw APIServiceError.invalidOperation("Missing account for pot") }
                 let pot = try await self.service.addPot(accountId: accountId, pot: PotSubmission(name: "Diagnostics Pot", balance: 120))
                 return "Added pot \(pot.name)"
             }),
             ("Delete Pot", {
-                guard let accountId = createdAccountId, let accountName = createdAccountName else { throw APIServiceError.invalidEndpoint("Missing account for delete pot") }
+                guard let accountId = createdAccountId, let accountName = createdAccountName else { throw APIServiceError.invalidOperation("Missing account for delete pot") }
                 _ = try await self.service.deletePot(accountName: accountName, potName: "Diagnostics Pot")
                 return "Deleted diagnostics pot"
             }),
             ("Delete Account", {
-                guard let accountId = createdAccountId else { throw APIServiceError.invalidEndpoint("Missing account for delete") }
+                guard let accountId = createdAccountId else { throw APIServiceError.invalidOperation("Missing account for delete") }
                 _ = try await self.service.deleteAccount(accountId: accountId)
                 return "Deleted diagnostics account"
             }),

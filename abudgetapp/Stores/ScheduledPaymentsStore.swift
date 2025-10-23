@@ -49,7 +49,7 @@ final class ScheduledPaymentsStore: ObservableObject {
 
     func addPayment(accountId: Int, submission: ScheduledPaymentSubmission, potName: String? = nil) async {
         do {
-            let payment = try await service.addScheduledPayment(accountId: accountId, payment: submission)
+            let payment = try await service.addScheduledPayment(accountId: accountId, potName: potName, payment: submission)
             accountsStore.mutateAccount(id: accountId) { account in
                 if potName == nil {
                     var payments = account.scheduled_payments ?? []

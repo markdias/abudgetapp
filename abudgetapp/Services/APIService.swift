@@ -16,7 +16,7 @@ protocol APIServiceProtocol {
     func deleteExpense(accountId: Int, expenseId: Int) async throws -> MessageResponse
     func deleteIncome(accountId: Int, incomeId: Int) async throws -> MessageResponse
 
-    func addScheduledPayment(accountId: Int, payment: ScheduledPaymentSubmission) async throws -> ScheduledPayment
+    func addScheduledPayment(accountId: Int, potName: String?, payment: ScheduledPaymentSubmission) async throws -> ScheduledPayment
     func deleteScheduledPayment(accountId: Int, paymentName: String, paymentDate: String, potName: String?) async throws -> MessageResponse
 
     func resetBalances() async throws -> ResetResponse
@@ -38,340 +38,280 @@ protocol APIServiceProtocol {
     func deleteIncomeSchedule(scheduleId: Int) async throws -> MessageResponse
 
     func getAvailableTransfers() async throws -> AvailableTransfers
-
-    func updateBaseURL(_ newURL: String)
-    func loadSavedURL() -> String
+    func restoreSampleData() async throws -> ResetResponse
 }
 
-enum APIServiceError: LocalizedError, Equatable {
-    case invalidBaseURL(String)
-    case invalidEndpoint(String)
-    case invalidResponse
-    case server(code: Int, message: String?)
-    case decoding(DecodingError)
-    case transport(URLError)
+enum APIServiceError: LocalizedError {
+    case notFound(String)
+    case invalidOperation(String)
+    case persistence(String)
     case unknown(Error)
 
     var errorDescription: String? {
         switch self {
-        case .invalidBaseURL(let value):
-            return "Invalid API base URL: \(value)"
-        case .invalidEndpoint(let value):
-            return "Invalid endpoint path: \(value)"
-        case .invalidResponse:
-            return "Received an unexpected response from the server"
-        case .server(let code, let message):
-            return message ?? "Server returned status code \(code)"
-        case .decoding(let decodingError):
-            return "Failed to decode response: \(decodingError.localizedDescription)"
-        case .transport(let urlError):
-            return urlError.localizedDescription
+        case .notFound(let message):
+            return message
+        case .invalidOperation(let message):
+            return message
+        case .persistence(let message):
+            return "Failed to persist data: \(message)"
         case .unknown(let error):
             return error.localizedDescription
         }
     }
 }
 
-private enum HTTPMethod: String {
-    case get = "GET"
-    case post = "POST"
-    case put = "PUT"
-    case delete = "DELETE"
-}
-
 final class APIService: APIServiceProtocol {
     static let shared = APIService()
 
-    private let session: URLSession
-    private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
+    private let store = LocalBudgetStore.shared
 
-    private init(session: URLSession = .shared) {
-        self.session = session
-        self.decoder = JSONDecoder()
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
-    }
-
-    // MARK: - Public API Methods
+    private init() {}
 
     func getAccounts() async throws -> [Account] {
-        try await request(endpoint: "/accounts")
+        await store.currentAccounts()
     }
 
     func addAccount(account: AccountSubmission) async throws -> Account {
-        try await request(endpoint: "/add-account", method: .post, body: account)
+        do {
+            return try await store.addAccount(account)
+        } catch {
+            throw map(error)
+        }
     }
 
     func updateAccount(accountId: Int, updatedAccount: AccountSubmission) async throws -> Account {
-        let payload = UpdateAccountPayload(accountId: accountId, updatedAccount: updatedAccount)
-        return try await request(endpoint: "/update-account", method: .put, body: payload)
+        do {
+            return try await store.updateAccount(id: accountId, submission: updatedAccount)
+        } catch {
+            throw map(error)
+        }
     }
 
     func deleteAccount(accountId: Int) async throws -> MessageResponse {
-        try await request(endpoint: "/delete-account", method: .delete, body: AccountIdPayload(accountId: accountId))
+        do {
+            try await store.deleteAccount(id: accountId)
+            return MessageResponse(message: "Account deleted")
+        } catch {
+            throw map(error)
+        }
     }
 
     func updateCardOrder(accountIds: [Int]) async throws -> CardOrderResponse {
-        try await request(endpoint: "/update-card-order", method: .post, body: CardOrderPayload(cardIds: accountIds))
+        do {
+            let accounts = try await store.reorderAccounts(by: accountIds)
+            return CardOrderResponse(success: true, message: "Card order updated", accounts: accounts)
+        } catch {
+            throw map(error)
+        }
     }
 
     func addPot(accountId: Int, pot: PotSubmission) async throws -> Pot {
-        try await request(endpoint: "/add-pot", method: .post, body: AddPotPayload(accountId: accountId, pot: pot))
+        do {
+            return try await store.addPot(accountId: accountId, submission: pot)
+        } catch {
+            throw map(error)
+        }
     }
 
     func updatePot(originalAccountId: Int, originalPot: Pot, updatedPot: PotSubmission) async throws -> Pot {
-        let payload = UpdatePotPayload(originalAccountId: originalAccountId, originalPot: originalPot, updatedPot: updatedPot)
-        return try await request(endpoint: "/update-pot", method: .put, body: payload)
+        do {
+            return try await store.updatePot(accountId: originalAccountId, potId: originalPot.id, submission: updatedPot)
+        } catch {
+            throw map(error)
+        }
     }
 
     func deletePot(accountName: String, potName: String) async throws -> MessageResponse {
-        let payload = DeletePotPayload(accountName: accountName, potName: potName)
-        return try await request(endpoint: "/delete-pot", method: .delete, body: payload)
+        do {
+            try await store.deletePot(accountName: accountName, potName: potName)
+            return MessageResponse(message: "Pot deleted")
+        } catch {
+            throw map(error)
+        }
     }
 
     func addExpense(accountId: Int, expense: ExpenseSubmission) async throws -> Expense {
-        try await request(endpoint: "/add-expense", method: .post, body: AddExpensePayload(accountId: accountId, expense: expense))
+        do {
+            return try await store.addExpense(accountId: accountId, submission: expense)
+        } catch {
+            throw map(error)
+        }
     }
 
     func addIncome(accountId: Int, income: IncomeSubmission) async throws -> Income {
-        try await request(endpoint: "/add-income", method: .post, body: AddIncomePayload(accountId: accountId, income: income))
+        do {
+            return try await store.addIncome(accountId: accountId, submission: income)
+        } catch {
+            throw map(error)
+        }
     }
 
     func deleteExpense(accountId: Int, expenseId: Int) async throws -> MessageResponse {
-        let payload = DeleteExpensePayload(accountId: accountId, expenseId: expenseId)
-        return try await request(endpoint: "/delete-expense", method: .delete, body: payload)
+        do {
+            try await store.deleteExpense(accountId: accountId, expenseId: expenseId)
+            return MessageResponse(message: "Expense deleted")
+        } catch {
+            throw map(error)
+        }
     }
 
     func deleteIncome(accountId: Int, incomeId: Int) async throws -> MessageResponse {
-        let payload = DeleteIncomePayload(accountId: accountId, incomeId: incomeId)
-        return try await request(endpoint: "/delete-income", method: .delete, body: payload)
+        do {
+            try await store.deleteIncome(accountId: accountId, incomeId: incomeId)
+            return MessageResponse(message: "Income deleted")
+        } catch {
+            throw map(error)
+        }
     }
 
-    func addScheduledPayment(accountId: Int, payment: ScheduledPaymentSubmission) async throws -> ScheduledPayment {
-        let payload = AddScheduledPaymentPayload(accountId: accountId, payment: payment)
-        return try await request(endpoint: "/add-scheduled-payment", method: .post, body: payload)
+    func addScheduledPayment(accountId: Int, potName: String?, payment: ScheduledPaymentSubmission) async throws -> ScheduledPayment {
+        do {
+            return try await store.addScheduledPayment(accountId: accountId, potName: potName, submission: payment)
+        } catch {
+            throw map(error)
+        }
     }
 
     func deleteScheduledPayment(accountId: Int, paymentName: String, paymentDate: String, potName: String?) async throws -> MessageResponse {
-        let payload = DeleteScheduledPaymentPayload(accountId: accountId, paymentName: paymentName, paymentDate: paymentDate, potName: potName)
-        return try await request(endpoint: "/delete-scheduled-payment", method: .delete, body: payload)
+        do {
+            try await store.deleteScheduledPayment(accountId: accountId, paymentName: paymentName, paymentDate: paymentDate, potName: potName)
+            return MessageResponse(message: "Scheduled payment deleted")
+        } catch {
+            throw map(error)
+        }
     }
 
     func resetBalances() async throws -> ResetResponse {
-        try await request(endpoint: "/reset-balances", method: .post, body: EmptyPayload())
+        do {
+            return try await store.resetBalances()
+        } catch {
+            throw map(error)
+        }
     }
 
     func toggleAccountExclusion(accountId: Int) async throws -> ExclusionResponse {
-        try await request(endpoint: "/toggle-account-exclusion", method: .post, body: AccountIdPayload(accountId: accountId))
+        do {
+            let value = try await store.toggleAccountExclusion(accountId: accountId)
+            return ExclusionResponse(excludeFromReset: value)
+        } catch {
+            throw map(error)
+        }
     }
 
     func togglePotExclusion(accountId: Int, potName: String) async throws -> ExclusionResponse {
-        let payload = TogglePotExclusionPayload(accountId: accountId, potName: potName)
-        return try await request(endpoint: "/toggle-pot-exclusion", method: .post, body: payload)
+        do {
+            let value = try await store.togglePotExclusion(accountId: accountId, potName: potName)
+            return ExclusionResponse(excludeFromReset: value)
+        } catch {
+            throw map(error)
+        }
     }
 
     func getSavingsInvestments() async throws -> [Account] {
-        try await request(endpoint: "/savings-investments")
+        await store.savingsAndInvestments()
     }
 
     func getTransferSchedules() async throws -> [TransferSchedule] {
-        try await request(endpoint: "/transfer-schedules")
+        await store.currentTransferSchedules()
     }
 
     func addTransferSchedule(transfer: TransferScheduleSubmission) async throws -> TransferSchedule {
-        try await request(endpoint: "/add-transfer-schedule", method: .post, body: transfer)
+        do {
+            return try await store.addTransferSchedule(transfer)
+        } catch {
+            throw map(error)
+        }
     }
 
     func executeTransferSchedule(scheduleId: Int) async throws -> TransferExecutionResponse {
-        try await request(endpoint: "/execute-transfer-schedule", method: .post, body: ScheduleIdPayload(scheduleId: scheduleId))
+        do {
+            return try await store.executeTransferSchedule(id: scheduleId)
+        } catch {
+            throw map(error)
+        }
     }
 
     func executeAllTransferSchedules() async throws -> TransferExecutionResponse {
-        try await request(endpoint: "/execute-all-transfer-schedules", method: .post, body: EmptyPayload())
+        do {
+            return try await store.executeAllTransferSchedules()
+        } catch {
+            throw map(error)
+        }
     }
 
     func deleteTransferSchedule(scheduleId: Int) async throws -> MessageResponse {
-        try await request(endpoint: "/delete-transfer-schedule", method: .delete, body: ScheduleIdPayload(scheduleId: scheduleId))
+        do {
+            try await store.deleteTransferSchedule(id: scheduleId)
+            return MessageResponse(message: "Transfer schedule deleted")
+        } catch {
+            throw map(error)
+        }
     }
 
     func getIncomeSchedules() async throws -> [IncomeSchedule] {
-        try await request(endpoint: "/income-schedules")
+        await store.currentIncomeSchedules()
     }
 
     func addIncomeSchedule(schedule: IncomeScheduleSubmission) async throws -> IncomeSchedule {
-        try await request(endpoint: "/add-income-schedule", method: .post, body: schedule)
+        do {
+            return try await store.addIncomeSchedule(schedule)
+        } catch {
+            throw map(error)
+        }
     }
 
     func executeIncomeSchedule(scheduleId: Int) async throws -> MessageResponse {
-        try await request(endpoint: "/execute-income-schedule", method: .post, body: ScheduleIdPayload(scheduleId: scheduleId))
+        do {
+            return try await store.executeIncomeSchedule(id: scheduleId)
+        } catch {
+            throw map(error)
+        }
     }
 
     func executeAllIncomeSchedules() async throws -> IncomeExecutionResponse {
-        try await request(endpoint: "/execute-all-income-schedules", method: .post, body: EmptyPayload())
+        do {
+            return try await store.executeAllIncomeSchedules()
+        } catch {
+            throw map(error)
+        }
     }
 
     func deleteIncomeSchedule(scheduleId: Int) async throws -> MessageResponse {
-        try await request(endpoint: "/delete-income-schedule", method: .delete, body: ScheduleIdPayload(scheduleId: scheduleId))
+        do {
+            try await store.deleteIncomeSchedule(id: scheduleId)
+            return MessageResponse(message: "Income schedule deleted")
+        } catch {
+            throw map(error)
+        }
     }
 
     func getAvailableTransfers() async throws -> AvailableTransfers {
-        try await request(endpoint: "/get-available-transfers")
+        await store.availableTransfers()
     }
 
-    // MARK: - Base URL Configuration
-
-    func updateBaseURL(_ newURL: String) {
-        var urlToSave = newURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !urlToSave.hasSuffix("/") {
-            urlToSave += "/"
-        }
-        UserDefaults.standard.set(urlToSave, forKey: Self.baseURLKey)
-        UserDefaults.standard.synchronize()
-    }
-
-    func loadSavedURL() -> String {
-        UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
-    }
-
-    // MARK: - Private Helpers
-
-    private static let baseURLKey = "api_base_url"
-    private static let defaultBaseURL = "http://localhost:3000/"
-
-    private func resolveURL(for endpoint: String) throws -> URL {
-        let trimmedEndpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let base = URL(string: loadSavedURL()) else {
-            throw APIServiceError.invalidBaseURL(loadSavedURL())
-        }
-
-        let normalizedEndpoint = trimmedEndpoint.hasPrefix("/") ? String(trimmedEndpoint.dropFirst()) : trimmedEndpoint
-        return base.appendingPathComponent(normalizedEndpoint)
-    }
-
-    private func request<T: Decodable, Body: Encodable>(endpoint: String, method: HTTPMethod = .get, body: Body) async throws -> T {
-        try await performRequest(endpoint: endpoint, method: method, body: body)
-    }
-
-    private func request<T: Decodable>(endpoint: String, method: HTTPMethod = .get) async throws -> T {
-        try await performRequest(endpoint: endpoint, method: method, body: Optional<EmptyPayload>.none)
-    }
-
-    private func performRequest<T: Decodable, Body: Encodable>(endpoint: String, method: HTTPMethod, body: Body?) async throws -> T {
-        let url = try resolveURL(for: endpoint)
-        var request = URLRequest(url: url)
-        request.httpMethod = method.rawValue
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        if let body = body {
-            do {
-                request.httpBody = try encoder.encode(body)
-            } catch {
-                throw APIServiceError.unknown(error)
-            }
-        }
-
+    func restoreSampleData() async throws -> ResetResponse {
         do {
-            let (data, response) = try await session.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw APIServiceError.invalidResponse
-            }
-
-            guard (200...299).contains(httpResponse.statusCode) else {
-                let serverMessage = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let message = serverMessage?["error"] as? String ?? serverMessage?["message"] as? String
-                throw APIServiceError.server(code: httpResponse.statusCode, message: message)
-            }
-
-            do {
-                return try decoder.decode(T.self, from: data)
-            } catch let decodingError as DecodingError {
-                throw APIServiceError.decoding(decodingError)
-            } catch {
-                throw APIServiceError.unknown(error)
-            }
-        } catch let urlError as URLError {
-            throw APIServiceError.transport(urlError)
+            return try await store.restoreSample()
         } catch {
-            if let apiError = error as? APIServiceError {
-                throw apiError
-            }
-            throw APIServiceError.unknown(error)
+            throw map(error)
         }
     }
 
-    // MARK: - Request Payload Types
-
-    private struct EmptyPayload: Encodable {}
-
-    private struct UpdateAccountPayload: Encodable {
-        let accountId: Int
-        let updatedAccount: AccountSubmission
-    }
-
-    private struct AccountIdPayload: Encodable {
-        let accountId: Int
-    }
-
-    private struct CardOrderPayload: Encodable {
-        let cardIds: [Int]
-    }
-
-    private struct AddPotPayload: Encodable {
-        let accountId: Int
-        let pot: PotSubmission
-    }
-
-    private struct UpdatePotPayload: Encodable {
-        let originalAccountId: Int
-        let originalPot: Pot
-        let updatedPot: PotSubmission
-    }
-
-    private struct DeletePotPayload: Encodable {
-        let accountName: String
-        let potName: String
-    }
-
-    private struct TogglePotExclusionPayload: Encodable {
-        let accountId: Int
-        let potName: String
-    }
-
-    private struct AddExpensePayload: Encodable {
-        let accountId: Int
-        let expense: ExpenseSubmission
-    }
-
-    private struct AddIncomePayload: Encodable {
-        let accountId: Int
-        let income: IncomeSubmission
-    }
-
-    private struct DeleteExpensePayload: Encodable {
-        let accountId: Int
-        let expenseId: Int
-    }
-
-    private struct DeleteIncomePayload: Encodable {
-        let accountId: Int
-        let incomeId: Int
-    }
-
-    private struct AddScheduledPaymentPayload: Encodable {
-        let accountId: Int
-        let payment: ScheduledPaymentSubmission
-    }
-
-    private struct DeleteScheduledPaymentPayload: Encodable {
-        let accountId: Int
-        let paymentName: String
-        let paymentDate: String
-        let potName: String?
-    }
-
-    private struct ScheduleIdPayload: Encodable {
-        let scheduleId: Int
+    private func map(_ error: Error) -> APIServiceError {
+        if let serviceError = error as? APIServiceError {
+            return serviceError
+        }
+        if let storeError = error as? LocalBudgetStore.StoreError {
+            switch storeError {
+            case .notFound(let message):
+                return .notFound(message)
+            case .invalidOperation(let message):
+                return .invalidOperation(message)
+            case .persistence(let underlying):
+                return .persistence(underlying.localizedDescription)
+            }
+        }
+        return .unknown(error)
     }
 }

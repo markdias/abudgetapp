@@ -7,25 +7,25 @@ struct SettingsView: View {
     @EnvironmentObject private var savingsStore: SavingsInvestmentsStore
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
 
-    @State private var apiBaseURL = APIService.shared.loadSavedURL()
-    @State private var apiStatusMessage: String?
-    @State private var apiStatusSuccess = false
+    @State private var storageStatus: String?
+    @State private var storageStatusIsSuccess = false
+    @State private var isRestoringSample = false
     @State private var showingCardReorder = false
     @State private var showingDiagnostics = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("API Configuration") {
-                    TextField("Base URL", text: $apiBaseURL)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .disableAutocorrection(true)
-                    Button("Save") { saveAPIConfiguration() }
-                    Button("Test Connection") { Task { await testConnection() } }
-                    if let status = apiStatusMessage {
-                        Label(status, systemImage: apiStatusSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .foregroundColor(apiStatusSuccess ? .green : .red)
+                Section("Local Storage") {
+                    Label("Data is stored securely on this device and synced between views automatically.", systemImage: "internaldrive")
+                        .foregroundStyle(.secondary)
+                        .font(.footnote)
+                        .padding(.vertical, 4)
+                    Button("Restore Sample Dataset", role: .destructive) { restoreSampleData() }
+                        .disabled(isRestoringSample)
+                    if let status = storageStatus {
+                        Label(status, systemImage: storageStatusIsSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(storageStatusIsSuccess ? .green : .orange)
                             .font(.caption)
                     }
                 }
@@ -66,13 +66,6 @@ struct SettingsView: View {
         }
     }
 
-    private func saveAPIConfiguration() {
-        APIService.shared.updateBaseURL(apiBaseURL)
-        apiStatusMessage = "Saved"
-        apiStatusSuccess = true
-        refreshAll()
-    }
-
     private func refreshAll() {
         Task {
             await accountsStore.loadAccounts()
@@ -82,26 +75,36 @@ struct SettingsView: View {
         }
     }
 
-    private func testConnection() async {
-        guard let url = URL(string: apiBaseURL) else {
-            apiStatusMessage = "Invalid URL"
-            apiStatusSuccess = false
-            return
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "HEAD"
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) {
-                apiStatusMessage = "Connection Successful"
-                apiStatusSuccess = true
-            } else {
-                apiStatusMessage = "Unexpected Response"
-                apiStatusSuccess = false
+    private func restoreSampleData() {
+        if isRestoringSample { return }
+        storageStatus = nil
+        isRestoringSample = true
+        Task {
+            do {
+                let snapshot = try await APIService.shared.restoreSampleData()
+                await MainActor.run {
+                    accountsStore.applyAccounts(snapshot.accounts)
+                    storageStatus = "Sample data restored"
+                    storageStatusIsSuccess = true
+                }
+                await transferStore.load()
+                await incomeStore.load()
+                await savingsStore.load()
+            } catch let error as APIServiceError {
+                await MainActor.run {
+                    storageStatus = error.localizedDescription
+                    storageStatusIsSuccess = false
+                }
+            } catch {
+                let apiError = APIServiceError.unknown(error)
+                await MainActor.run {
+                    storageStatus = apiError.localizedDescription
+                    storageStatusIsSuccess = false
+                }
             }
-        } catch {
-            apiStatusMessage = error.localizedDescription
-            apiStatusSuccess = false
+            await MainActor.run {
+                isRestoringSample = false
+            }
         }
     }
 }

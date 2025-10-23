@@ -4,7 +4,7 @@ The MyBudget project is a SwiftUI implementation of the budget dashboard that mi
 
 ## Architecture
 
-The app uses a collection of domain-focused observable stores to keep local state aligned with the Express API:
+The app uses a collection of domain-focused observable stores to keep local state aligned with the on-device data store:
 
 | Store | Responsibility |
 | --- | --- |
@@ -15,9 +15,9 @@ The app uses a collection of domain-focused observable stores to keep local stat
 | `IncomeSchedulesStore` | Manages salary and recurring income schedules. |
 | `SavingsInvestmentsStore` | Loads savings and investment accounts, with exclusion toggles. |
 | `ActivityStore` | Builds an activity feed by merging incomes, expenses, and scheduled payments with mark-mode support. |
-| `DiagnosticsStore` | Runs a sequential API validation suite that exercises add/execute/delete/reset endpoints. |
+| `DiagnosticsStore` | Runs an offline validation suite that exercises add/execute/delete/reset operations against local data. |
 
-The `APIService` is written with `async/await` and provides typed methods for each Express endpoint. Requests are JSON encoded and include robust error propagation through `APIServiceError` and `StatusMessage` types.
+`APIService` now wraps a local `LocalBudgetStore` actor that reads and writes a JSON snapshot stored in the app's Application Support directory. All requests use `async/await` and map storage errors to `APIServiceError` values for consistent status messaging.
 
 All stores broadcast updates so dependent views remain in sync without ad-hoc refresh calls. The environment is wired in `MyBudgetApp`, which bootstraps initial data fetches when the app launches.
 
@@ -27,18 +27,18 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Transfer Schedules** – Destination grouping, inline execution, delete actions, and a SwiftUI composer sheet.
 * **Activity Tab** – Full history view with filters that share the same activity source as the dashboard feed.
 * **Budget** – Summaries derived from pots and scheduled payments plus an upcoming payments list.
-* **Settings** – Environment configuration, reloads, resets, global execution controls, card reorder flow, and diagnostics launcher.
+* **Settings** – Local storage management (restore sample data, reload, reset balances), card reorder flow, and diagnostics launcher.
 * **Diagnostics** – Developer QA surface that adds/removes sample data, executes schedules, resets balances, and reports status for each step.
 
-## Environment Configuration
+## Local Persistence
 
-Set the API base URL from the Settings tab. The value is persisted via `UserDefaults`. Default configuration expects the Express server at `http://localhost:3000/`.
+Budget data is saved locally on the device. A bundled sample dataset seeds the app on first launch, and you can restore it at any time from **Settings → Local Storage → Restore Sample Dataset**. Data lives in the app's Application Support directory and no network connectivity is required.
 
 ## Running the App
 
-1. Update the API base URL if your server differs from the default.
+1. Launch the app to load the bundled sample dataset (or restore it from Settings if you have existing data).
 2. Use the dashboard add menu to create accounts, pots, incomes, expenses, and transfer schedules.
-3. Visit the Settings tab to trigger diagnostics, resets, or card reordering.
+3. Visit the Settings tab to run diagnostics, reset balances, restore sample data, or start the card reordering flow.
 
 > **Note:** The project targets iOS and requires Xcode 15+ with the Swift 6 toolchain for compilation.
 
