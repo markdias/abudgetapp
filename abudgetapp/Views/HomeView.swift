@@ -1183,12 +1183,37 @@ struct SalarySorterView: View {
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
     @Binding var isPresented: Bool
 
-    private struct TransferPreview: Identifiable { let id = UUID(); let label: String; let amount: Double; let after: Double }
+    private struct TransferPreview: Identifiable {
+        let id = UUID()
+        let name: String
+        let amount: Double
+        let finalBalance: Double
+        let isPotDestination: Bool
+    }
+
+    private struct AccountPreview: Identifiable {
+        let account: Account
+        let transfers: [TransferPreview]
+        let totalAmount: Double
+        let startingBalance: Double
+        let balanceAfterIncome: Double
+        let balanceAfterTransfers: Double
+
+        var id: Int { account.id }
+    }
+
+    private struct PotKey: Hashable {
+        let accountId: Int
+        let name: String
+    }
 
     private var activeIncomes: [IncomeSchedule] {
         incomeStore.schedules.filter { $0.isActive && !$0.isCompleted }
     }
-    private var incomeTotal: Double { activeIncomes.reduce(0) { $0 + $1.amount } }
+
+    private var incomeTotal: Double {
+        activeIncomes.reduce(0) { $0 + $1.amount }
+    }
 
     private var activeTransfers: [TransferSchedule] {
         transferStore.schedules.filter { $0.isActive && !$0.isCompleted }
@@ -1196,163 +1221,283 @@ struct SalarySorterView: View {
 
     private var incomesByAccount: [Int: Double] {
         var dict: [Int: Double] = [:]
-        for inc in activeIncomes {
-            dict[inc.accountId, default: 0] += inc.amount
+        for income in activeIncomes {
+            dict[income.accountId, default: 0] += income.amount
         }
         return dict
     }
 
-    private var previewsByAccount: [(account: Account, items: [TransferPreview], total: Double, afterIncome: Double, finalMain: Double)] {
-        // Starting balances
-        var accountAfter: [Int: Double] = Dictionary(uniqueKeysWithValues: accountsStore.accounts.map { ($0.id, $0.balance) })
-        var potAfter: [String: Double] = [:]
-        for account in accountsStore.accounts {
-            for pot in account.pots ?? [] { potAfter["\(account.id)|\(pot.name)"] = pot.balance }
+    private var accountPreviews: [AccountPreview] {
+        guard !accountsStore.accounts.isEmpty else { return [] }
+
+        let accounts = accountsStore.accounts
+        let accountStartingBalances = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.balance) })
+
+        var accountAfterIncome = accountStartingBalances
+        for (accountId, amount) in incomesByAccount {
+            accountAfterIncome[accountId, default: accountStartingBalances[accountId] ?? 0] += amount
         }
 
-        // Apply incomes first (simulate deposits without executing)
-        for (accountId, amount) in incomesByAccount { accountAfter[accountId, default: 0] += amount }
+        var accountBalances = accountAfterIncome
 
-        // Build rows grouped by destination account, then simulate transfers
-        var grouped: [Int: [TransferPreview]] = [:]
-        var toMainTotals: [Int: Double] = [:]
+        var potStartingBalances: [PotKey: Double] = [:]
+        var potBalances: [PotKey: Double] = [:]
+        var potLookupById: [Int: PotKey] = [:]
+        var potLookupByName: [String: [PotKey]] = [:]
+
+        for account in accounts {
+            for pot in account.pots ?? [] {
+                let key = PotKey(accountId: account.id, name: pot.name)
+                potStartingBalances[key] = pot.balance
+                potBalances[key] = pot.balance
+                potLookupById[pot.id] = key
+                potLookupByName[pot.name, default: []].append(key)
+            }
+        }
+
+        var previewsByAccount: [Int: [TransferPreview]] = [:]
+        var totalsByAccount: [Int: Double] = [:]
+
         for schedule in activeTransfers {
-            let destId = schedule.toAccountId
-            if let pot = schedule.toPotName, !pot.isEmpty {
-                let key = "\(destId)|\(pot)"
-                let newBal = (potAfter[key] ?? 0) + schedule.amount
-                potAfter[key] = newBal
-                grouped[destId, default: []].append(TransferPreview(label: pot, amount: schedule.amount, after: newBal))
-            } else {
-                let newBal = (accountAfter[destId] ?? 0) + schedule.amount
-                accountAfter[destId] = newBal
-                let label = accountsStore.account(for: destId)?.name ?? "Account #\(destId)"
-                grouped[destId, default: []].append(TransferPreview(label: label, amount: schedule.amount, after: newBal))
-                toMainTotals[destId, default: 0] += schedule.amount
+            let amount = schedule.amount
+
+            if let fromPotId = schedule.fromPotId, !fromPotId.isEmpty {
+                if let numericId = Int(fromPotId), let key = potLookupById[numericId] {
+                    let starting = potStartingBalances[key] ?? 0
+                    potBalances[key] = (potBalances[key] ?? starting) - amount
+                } else if let fromAccountId = schedule.fromAccountId {
+                    let key = PotKey(accountId: fromAccountId, name: fromPotId)
+                    let starting = potStartingBalances[key] ?? 0
+                    potBalances[key] = (potBalances[key] ?? starting) - amount
+                } else if let key = potLookupByName[fromPotId]?.first {
+                    let starting = potStartingBalances[key] ?? 0
+                    potBalances[key] = (potBalances[key] ?? starting) - amount
+                }
+            } else if let fromAccountId = schedule.fromAccountId {
+                let starting = accountBalances[fromAccountId]
+                    ?? accountAfterIncome[fromAccountId]
+                    ?? accountStartingBalances[fromAccountId]
+                    ?? 0
+                accountBalances[fromAccountId] = starting - amount
             }
+
+            let destinationAccountId = schedule.toAccountId
+            let previewName: String
+            var finalBalance: Double
+            var isPotDestination = false
+
+            if let potName = schedule.toPotName, !potName.isEmpty {
+                isPotDestination = true
+                let key = PotKey(accountId: destinationAccountId, name: potName)
+                let starting = potStartingBalances[key] ?? 0
+                let newValue = (potBalances[key] ?? starting) + amount
+                potBalances[key] = newValue
+                finalBalance = newValue
+                previewName = potName
+            } else {
+                let starting = accountBalances[destinationAccountId]
+                    ?? accountAfterIncome[destinationAccountId]
+                    ?? accountStartingBalances[destinationAccountId]
+                    ?? 0
+                let newValue = starting + amount
+                accountBalances[destinationAccountId] = newValue
+                finalBalance = newValue
+                previewName = accountsStore.account(for: destinationAccountId)?.name ?? "Account #\(destinationAccountId)"
+            }
+
+            let preview = TransferPreview(name: previewName, amount: amount, finalBalance: finalBalance, isPotDestination: isPotDestination)
+            previewsByAccount[destinationAccountId, default: []].append(preview)
+            totalsByAccount[destinationAccountId, default: 0] += amount
         }
 
-        // Produce ordered result
-        var result: [(Account, [TransferPreview], Double, Double, Double)] = []
-        for (id, items) in grouped {
-            if let account = accountsStore.account(for: id) {
-                let total = items.reduce(0) { $0 + $1.amount }
-                let afterIncome = accountAfter[id] ?? account.balance
-                let finalMain = (accountAfter[id] ?? account.balance) // already includes to-main since we incremented above
-                // But we want to show final main balance explicitly; it's `start + income + toMainTransfers`.
-                let start = accountsStore.account(for: id)?.balance ?? 0
-                let incomeAdded = incomesByAccount[id] ?? 0
-                let toMain = toMainTotals[id] ?? 0
-                let final = start + incomeAdded + toMain
-                result.append((account, items, total, start + incomeAdded, final))
-            }
+        return previewsByAccount.compactMap { accountId, transfers in
+            guard let account = accountsStore.account(for: accountId) else { return nil }
+            let starting = accountStartingBalances[accountId] ?? 0
+            let afterIncome = accountAfterIncome[accountId] ?? starting
+            let afterTransfers = accountBalances[accountId] ?? afterIncome
+            return AccountPreview(
+                account: account,
+                transfers: transfers,
+                totalAmount: totalsByAccount[accountId] ?? 0,
+                startingBalance: starting,
+                balanceAfterIncome: afterIncome,
+                balanceAfterTransfers: afterTransfers
+            )
         }
-        return result.sorted { $0.0.name < $1.0.name }
+        .sorted { $0.account.name < $1.account.name }
     }
 
-    private var totalTransfers: Double { previewsByAccount.reduce(0) { $0 + $1.total } }
-    private var remaining: Double { incomeTotal - totalTransfers }
-
     var body: some View {
-        NavigationStack {
+        let previews = accountPreviews
+        let transferTotal = previews.reduce(0) { $0 + $1.totalAmount }
+        let remainingBalance = incomeTotal - transferTotal
+
+        return NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Income summary card
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Income")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack {
-                            Text(incomeTitle())
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Income")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(incomeSubtitle())
+                                    .font(.callout.weight(.semibold))
+                            }
                             Spacer()
                             Text(formatGBP(incomeTotal))
                                 .font(.title3.bold())
                         }
+                        if activeIncomes.isEmpty {
+                            Text("Activate an income schedule to preview its salary split.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding()
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.green.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                    Text("Scheduled Transfers")
-                        .font(.headline)
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Scheduled Transfers")
+                            .font(.headline)
 
-                    ForEach(previewsByAccount, id: \.0.id) { account, items, total, afterIncome, finalMain in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(account.name)
-                                    .font(.subheadline.bold())
-                                Spacer()
-                                HStack(spacing: 8) {
-                                    Text("After income: \(formatGBP(afterIncome))")
-                                        .font(.caption)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.green.opacity(0.15))
-                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                    Text("Final: \(formatGBP(finalMain))")
-                                        .font(.caption)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.blue.opacity(0.15))
-                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                }
+                        if previews.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Nothing to move just yet.")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Add or activate transfer schedules to see their projected balances.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-
-                            VStack(spacing: 8) {
-                                ForEach(items) { item in
-                                    HStack {
-                                        Text(item.label)
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        } else {
+                            ForEach(previews) { preview in
+                                VStack(alignment: .leading, spacing: 16) {
+                                    HStack(alignment: .firstTextBaseline) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(preview.account.name)
+                                                .font(.headline)
+                                            Text("After incomes \(formatGBP(preview.balanceAfterIncome))")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                         Spacer()
-                                        VStack(alignment: .trailing, spacing: 2) {
-                                            Text(formatGBP(item.amount)).font(.subheadline)
-                                            Text("after: \(formatGBP(item.after))")
+                                        VStack(alignment: .trailing, spacing: 4) {
+                                            Text(formatGBP(preview.balanceAfterTransfers))
+                                                .font(.title3.bold())
+                                            Text("Post transfers")
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
                                         }
                                     }
-                                    .padding(12)
-                                    .background(Color(.systemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                                    VStack(spacing: 10) {
+                                        ForEach(preview.transfers) { transfer in
+                                            HStack(alignment: .center, spacing: 12) {
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(transfer.name)
+                                                        .font(.subheadline.weight(.semibold))
+                                                    Text(transfer.isPotDestination ? "Pot allocation" : "Account top up")
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                Spacer()
+                                                VStack(alignment: .trailing, spacing: 6) {
+                                                    Text(formatGBP(transfer.amount))
+                                                        .font(.subheadline.weight(.semibold))
+                                                        .padding(.horizontal, 12)
+                                                        .padding(.vertical, 6)
+                                                        .background(chipColor(forPot: transfer.isPotDestination))
+                                                        .clipShape(Capsule())
+                                                    Text("Balance \(formatGBP(transfer.finalBalance))")
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                            .padding(12)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .background(Color(.systemBackground))
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        }
+                                    }
+
+                                    Divider()
+
+                                    HStack {
+                                        Text("Scheduled total")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Text(formatGBP(preview.totalAmount))
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.secondarySystemGroupedBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                             }
                         }
-                        .padding()
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
 
-                    // Remaining card
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Remaining")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(formatGBP(max(remaining, 0)))
-                            .font(.title3.bold())
+                    if incomeTotal > 0 || transferTotal > 0 {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Remaining")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(formatGBP(remainingBalance))
+                                .font(.title3.bold())
+                            Text(remainingBalance >= 0 ? "Available after scheduled moves" : "Shortfall after scheduled moves")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(remainingBalance >= 0 ? Color.blue.opacity(0.12) : Color.red.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.blue.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.vertical, 24)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Salary Sorter")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { isPresented = false } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { isPresented = false }
+                }
             }
             .task {
+                if accountsStore.accounts.isEmpty {
+                    await accountsStore.loadAccounts()
+                }
                 await incomeStore.load()
                 await transferStore.load()
             }
         }
     }
 
-    private func formatGBP(_ value: Double) -> String { "£" + String(format: "%.2f", value) }
-    private func incomeTitle() -> String {
-        if activeIncomes.count == 1 { return activeIncomes.first?.company ?? "Income" }
-        if activeIncomes.isEmpty { return "Income" }
-        return "\(activeIncomes.count) Schedules"
+    private func chipColor(forPot: Bool) -> Color {
+        forPot ? Color.purple.opacity(0.18) : Color.blue.opacity(0.18)
+    }
+
+    private func formatGBP(_ value: Double) -> String {
+        let formatted = String(format: "%.2f", abs(value))
+        let currency = "£" + formatted
+        return value < 0 ? "-\(currency)" : currency
+    }
+
+    private func incomeSubtitle() -> String {
+        if activeIncomes.isEmpty { return "No active schedules" }
+        let companies = Set(activeIncomes.map { $0.company })
+        if companies.count == 1, let company = companies.first { return company }
+        return "\(activeIncomes.count) schedules"
     }
 }
 
