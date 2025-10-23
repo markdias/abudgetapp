@@ -214,7 +214,7 @@ private struct TransferEditorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Destination", footer: Text(destinationKind.helperDescription)) {
+                Section(header: Text("Destination"), footer: Text(destinationKind.helperDescription)) {
                     Picker("Account", selection: $toAccountId) {
                         ForEach(accountsStore.accounts) { acc in
                             Text(acc.name).tag(acc.id)
@@ -241,7 +241,7 @@ private struct TransferEditorSheet: View {
                         }
                     }
                 }
-                Section("Details") {
+                Section(header: Text("Details")) {
                     TextField("Description", text: $description)
                     TextField("Amount", text: $amount).keyboardType(.decimalPad)
                 }
@@ -267,7 +267,8 @@ private struct TransferEditorSheet: View {
             }
             .onChange(of: toAccountId) { newValue in
                 guard destinationKind == .pot else { return }
-                if let id = newValue, let pots = accountsStore.account(for: id)?.pots, pots.isEmpty {
+                let id = newValue
+                if let pots = accountsStore.account(for: id)?.pots, pots.isEmpty {
                     destinationKind = .account
                 }
             }

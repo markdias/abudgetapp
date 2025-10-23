@@ -193,7 +193,7 @@ struct ExpenseFormView: View {
                         }
                     }
                 }
-                Section("Expense", footer: Text("Expenses stay within the main account balance and never move money into pots.")) {
+                Section(header: Text("Expense"), footer: Text("Expenses stay within the main account balance and never move money into pots.")) {
                     TextField("Description", text: $description)
                     TextField("Amount", text: $amount)
                         .keyboardType(.decimalPad)
@@ -246,7 +246,7 @@ struct TransferComposerView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("From") {
+                Section(header: Text("From")) {
                     Picker("Account", selection: $fromAccountId) {
                         Text("Select Account").tag(nil as Int?)
                         ForEach(accountsStore.accounts) { account in
@@ -262,7 +262,7 @@ struct TransferComposerView: View {
                         }
                     }
                 }
-                Section("To", footer: Text(destinationKind.helperDescription)) {
+                Section(header: Text("To"), footer: Text(destinationKind.helperDescription)) {
                     Picker("Account", selection: $toAccountId) {
                         Text("Select Account").tag(nil as Int?)
                         ForEach(accountsStore.accounts) { account in
@@ -290,7 +290,7 @@ struct TransferComposerView: View {
                         }
                     }
                 }
-                Section("Details") {
+                Section(header: Text("Details")) {
                     TextField("Amount", text: $amount)
                         .keyboardType(.decimalPad)
                     TextField("Description", text: $description)
