@@ -14,7 +14,7 @@ The app uses a collection of domain-focused observable stores to keep local stat
 | `TransferSchedulesStore` | Loads, groups, executes, and deletes transfer schedules. |
 | `IncomeSchedulesStore` | Manages salary and recurring income schedules. |
 | `SavingsInvestmentsStore` | Loads savings and investment accounts, with exclusion toggles. |
-| `ActivityStore` | Builds an activity feed by merging incomes, expenses, and scheduled payments with mark-mode support. |
+| `ActivityStore` | Builds an activity feed by merging incomes, expenses, scheduled payments, and transfer schedule items with mark-mode support. |
 | `DiagnosticsStore` | Runs an offline validation suite that exercises add/execute/delete/reset operations against local data. |
 
 `APIService` now wraps a local `LocalBudgetStore` actor that reads and writes a JSON snapshot stored in the app's Application Support directory. All requests use `async/await` and map storage errors to `APIServiceError` values for consistent status messaging.
@@ -26,7 +26,7 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Dashboard (Home)** – Stacked, swipeable account cards with drag-to-reorder, quick actions, search, add menus, and activity feed with mark mode and detail popovers.
 * **Transfer Schedules** – Destination grouping, inline execution, delete actions, and a SwiftUI composer sheet.
 * **Salary Sorter** – Previews how active incomes cascade through transfer schedules with per-schedule breakdowns, destination pot balances, and remaining salary after the run.
-* **Activity Tab** – Full history view with filters that merge manual incomes, expenses, transfer schedule expense items, and scheduled payments.
+* **Activity Tab** – Full history view with filters that merge manual incomes, expenses, transfer schedule card/direct debit entries, and scheduled payments.
 * **Budget** – Summaries derived from pots and scheduled payments plus an upcoming payments list.
 * **Settings** – Local storage management (restore sample data, reload, reset balances), card reorder flow, and diagnostics launcher.
 * **Diagnostics** – Developer QA surface that adds/removes sample data, executes schedules, resets balances, and reports status for each step.

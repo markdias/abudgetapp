@@ -190,16 +190,23 @@ final class ActivityStore: ObservableObject {
             guard let account = accounts.first(where: { $0.id == schedule.toAccountId }) else { continue }
             if let scheduleItems = schedule.items {
                 for item in scheduleItems {
-                    guard let normalizedType = item.type?.lowercased(), normalizedType == "expense" else { continue }
+                    let normalizedType = item.type?.lowercased()
+                    guard let category = ActivityStore.category(forTransferItemType: normalizedType) else { continue }
                     let parsedDate = (item.date.flatMap { ActivityStore.parse(dateString: $0) })
                         ?? (schedule.lastExecuted.flatMap { ActivityStore.parse(dateString: $0) })
                         ?? Date()
                     let identifier: String
                     if let itemId = item.id {
-                        identifier = "transfer-expense-\(schedule.id)-\(itemId)"
+                        identifier = "transfer-\(category == .income ? "income" : "expense")-\(schedule.id)-\(itemId)"
                     } else {
-                        identifier = "transfer-expense-\(schedule.id)-\(UUID().uuidString)"
+                        identifier = "transfer-\(category == .income ? "income" : "expense")-\(schedule.id)-\(UUID().uuidString)"
                     }
+                    var metadata: [String: String] = [
+                        "source": "transferSchedule",
+                        "scheduleId": String(schedule.id)
+                    ]
+                    metadata["type"] = normalizedType ?? "unspecified"
+                    if let itemId = item.id { metadata["itemId"] = String(itemId) }
                     items.append(ActivityItem(
                         id: identifier,
                         title: item.description,
@@ -208,12 +215,8 @@ final class ActivityStore: ObservableObject {
                         accountName: account.name,
                         potName: schedule.toPotName,
                         company: item.company,
-                        category: .expense,
-                        metadata: [
-                            "type": normalizedType,
-                            "source": "transferSchedule",
-                            "scheduleId": String(schedule.id)
-                        ]
+                        category: category,
+                        metadata: metadata
                     ))
                 }
             }
@@ -221,6 +224,21 @@ final class ActivityStore: ObservableObject {
 
         items.sort { $0.date > $1.date }
         return items
+    }
+
+    private nonisolated static func category(forTransferItemType type: String?) -> ActivityCategory? {
+        guard let type else { return .expense }
+        let normalized = type
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+        switch normalized {
+        case "income":
+            return .income
+        case "expense", "card", "direct_debit":
+            return .expense
+        default:
+            return .expense
+        }
     }
 
     private func applyFilter() {
