@@ -1182,6 +1182,8 @@ struct SalarySorterView: View {
     @EnvironmentObject private var transferStore: TransferSchedulesStore
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
     @Binding var isPresented: Bool
+    @State private var expandedAccountIds: Set<Int> = []
+    @State private var expandedTransferIds: Set<Int> = []
 
     private struct TransferPreview: Identifiable {
         let id: Int
@@ -1382,7 +1384,9 @@ struct SalarySorterView: View {
             totalsByAccount[destinationAccountId, default: 0] += amount
         }
 
-        let previews = previewsByAccount.compactMap { accountId, transfers in
+        let previews: [AccountPreview] = previewsByAccount.compactMap { entry in
+            let accountId = entry.key
+            let transfers = entry.value
             guard let account = accountsStore.account(for: accountId) else { return nil }
             let starting = accountStartingBalances[accountId] ?? 0
             let afterIncome = accountAfterIncome[accountId] ?? starting
@@ -1455,109 +1459,127 @@ struct SalarySorterView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         } else {
                             ForEach(previews) { preview in
-                                VStack(alignment: .leading, spacing: 16) {
-                                    HStack(alignment: .firstTextBaseline) {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(preview.account.name)
-                                                .font(.headline)
-                                            Text("After incomes \(formatGBP(preview.balanceAfterIncome))")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        VStack(alignment: .trailing, spacing: 4) {
-                                            Text(formatGBP(preview.balanceAfterTransfers))
-                                                .font(.title3.bold())
-                                            Text("Post transfers")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Button {
+                                        if expandedAccountIds.contains(preview.id) { expandedAccountIds.remove(preview.id) } else { expandedAccountIds.insert(preview.id) }
+                                    } label: {
+                                        HStack(alignment: .firstTextBaseline) {
+                                            Image(systemName: expandedAccountIds.contains(preview.id) ? "chevron.down.circle.fill" : "chevron.right.circle")
+                                                .foregroundStyle(.blue)
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(preview.account.name)
+                                                    .font(.headline)
+                                                Text("After incomes \(formatGBP(preview.balanceAfterIncome))")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            Spacer()
+                                            VStack(alignment: .trailing, spacing: 4) {
+                                                Text(formatGBP(preview.balanceAfterTransfers))
+                                                    .font(.title3.bold())
+                                                Text("Post transfers")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
                                     }
+                                    .buttonStyle(.plain)
 
-                                    VStack(spacing: 10) {
-                                        ForEach(preview.transfers) { transfer in
-                                            VStack(alignment: .leading, spacing: 12) {
-                                                HStack(alignment: .firstTextBaseline) {
-                                                    VStack(alignment: .leading, spacing: 4) {
-                                                        Text(transfer.schedule.description)
-                                                            .font(.subheadline.weight(.semibold))
-                                                        if let source = transfer.sourceLabel {
-                                                            Text("From \(source)")
-                                                                .font(.caption2)
+                                    if expandedAccountIds.contains(preview.id) {
+                                        VStack(spacing: 10) {
+                                            ForEach(preview.transfers) { transfer in
+                                                VStack(alignment: .leading, spacing: 12) {
+                                                    Button {
+                                                        if expandedTransferIds.contains(transfer.id) { expandedTransferIds.remove(transfer.id) } else { expandedTransferIds.insert(transfer.id) }
+                                                    } label: {
+                                                        HStack(alignment: .firstTextBaseline) {
+                                                            Image(systemName: expandedTransferIds.contains(transfer.id) ? "chevron.down" : "chevron.right")
                                                                 .foregroundStyle(.secondary)
-                                                        }
-                                                        Text("To \(transfer.destinationLabel)")
-                                                            .font(.caption2)
-                                                            .foregroundStyle(.secondary)
-                                                    }
-                                                    Spacer()
-                                                    Text(formatGBP(transfer.amount))
-                                                        .font(.subheadline.weight(.semibold))
-                                                        .padding(.horizontal, 12)
-                                                        .padding(.vertical, 6)
-                                                        .background(chipColor(forPot: transfer.destinationIsPot))
-                                                        .clipShape(Capsule())
-                                                }
-
-                                                if !transfer.items.isEmpty {
-                                                    VStack(alignment: .leading, spacing: 4) {
-                                                        Text("Breakdown")
-                                                            .font(.caption2)
-                                                            .foregroundStyle(.secondary)
-                                                        ForEach(transfer.items, id: \.self) { item in
-                                                            HStack {
-                                                                Text(item.description)
-                                                                Spacer()
-                                                                Text(formatGBP(item.amount))
+                                                            VStack(alignment: .leading, spacing: 4) {
+                                                                Text(transfer.schedule.description)
+                                                                    .font(.subheadline.weight(.semibold))
+                                                                if let source = transfer.sourceLabel {
+                                                                    Text("From \(source)")
+                                                                        .font(.caption2)
+                                                                        .foregroundStyle(.secondary)
+                                                                }
+                                                                Text("To \(transfer.destinationLabel)")
+                                                                    .font(.caption2)
                                                                     .foregroundStyle(.secondary)
                                                             }
-                                                            .font(.caption)
+                                                            Spacer()
+                                                            Text(formatGBP(transfer.amount))
+                                                                .font(.subheadline.weight(.semibold))
+                                                                .padding(.horizontal, 12)
+                                                                .padding(.vertical, 6)
+                                                                .background(chipColor(forPot: transfer.destinationIsPot))
+                                                                .clipShape(Capsule())
+                                                        }
+                                                    }
+                                                    .buttonStyle(.plain)
+
+                                                    if expandedTransferIds.contains(transfer.id) {
+                                                        if !transfer.items.isEmpty {
+                                                            VStack(alignment: .leading, spacing: 4) {
+                                                                Text("Breakdown")
+                                                                    .font(.caption2)
+                                                                    .foregroundStyle(.secondary)
+                                                                ForEach(transfer.items, id: \.self) { item in
+                                                                    HStack {
+                                                                        Text(item.description)
+                                                                        Spacer()
+                                                                        Text(formatGBP(item.amount))
+                                                                            .foregroundStyle(.secondary)
+                                                                    }
+                                                                    .font(.caption)
+                                                                }
+                                                            }
+                                                        }
+
+                                                        VStack(alignment: .leading, spacing: 6) {
+                                                            HStack {
+                                                                Text("Current balance")
+                                                                    .font(.caption2)
+                                                                    .foregroundStyle(.secondary)
+                                                                Spacer()
+                                                                Text(formatGBP(transfer.destinationStartingBalance))
+                                                                    .font(.caption.weight(.semibold))
+                                                            }
+                                                            HStack {
+                                                                Text("After transfer")
+                                                                    .font(.caption2)
+                                                                    .foregroundStyle(.secondary)
+                                                                Spacer()
+                                                                Text(formatGBP(transfer.destinationFinalBalance))
+                                                                    .font(.body.weight(.semibold))
+                                                                    .foregroundColor(transfer.destinationFinalBalance >= 0 ? .primary : .red)
+                                                            }
+                                                            if let source = transfer.sourceLabel, let sourceAfter = transfer.sourceFinalBalance {
+                                                                Text("Source after: \(source) → \(formatGBP(sourceAfter))")
+                                                                    .font(.caption2)
+                                                                    .foregroundStyle(.secondary)
+                                                            }
                                                         }
                                                     }
                                                 }
-
-                                                VStack(alignment: .leading, spacing: 6) {
-                                                    HStack {
-                                                        Text("Current balance")
-                                                            .font(.caption2)
-                                                            .foregroundStyle(.secondary)
-                                                        Spacer()
-                                                        Text(formatGBP(transfer.destinationStartingBalance))
-                                                            .font(.caption.weight(.semibold))
-                                                    }
-                                                    HStack {
-                                                        Text("After transfer")
-                                                            .font(.caption2)
-                                                            .foregroundStyle(.secondary)
-                                                        Spacer()
-                                                        Text(formatGBP(transfer.destinationFinalBalance))
-                                                            .font(.body.weight(.semibold))
-                                                            .foregroundColor(transfer.destinationFinalBalance >= 0 ? .primary : .red)
-                                                    }
-                                                    if let source = transfer.sourceLabel, let sourceAfter = transfer.sourceFinalBalance {
-                                                        Text("Source after: \(source) → \(formatGBP(sourceAfter))")
-                                                            .font(.caption2)
-                                                            .foregroundStyle(.secondary)
-                                                    }
-                                                }
+                                                .padding(12)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .background(Color(.systemBackground))
+                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                             }
-                                            .padding(12)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .background(Color(.systemBackground))
-                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                         }
-                                    }
 
-                                    Divider()
+                                        Divider()
 
-                                    HStack {
-                                        Text("Scheduled total")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Spacer()
-                                        Text(formatGBP(preview.totalAmount))
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
+                                        HStack {
+                                            Text("Scheduled total")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            Spacer()
+                                            Text(formatGBP(preview.totalAmount))
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
                                 .padding(16)
