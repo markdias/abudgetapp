@@ -1137,6 +1137,9 @@ struct TransferBoardView: View {
                         ForEach(group.schedules) { schedule in
                             VStack(alignment: .leading) {
                                 Text(schedule.description)
+                                Text(schedule.destinationKind.displayLabel)
+                                    .font(.caption2)
+                                    .foregroundStyle(schedule.destinationKind == .account ? .orange : .blue)
                                 Text("£\(String(format: "%.2f", schedule.amount))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -1364,7 +1367,8 @@ struct SalarySorterView: View {
                 let newValue = starting + amount
                 accountBalances[destinationAccountId] = newValue
                 destinationFinal = newValue
-                destinationLabel = accountsStore.account(for: destinationAccountId)?.name ?? "Account #\(destinationAccountId)"
+                let accountName = accountsStore.account(for: destinationAccountId)?.name ?? "Account #\(destinationAccountId)"
+                destinationLabel = "\(accountName) · Main Account"
             }
 
             let preview = TransferPreview(

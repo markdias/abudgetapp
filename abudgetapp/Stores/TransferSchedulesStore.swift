@@ -166,11 +166,11 @@ final class TransferSchedulesStore: ObservableObject {
 
     private func scheduleDestinationSubtitle(_ schedule: TransferSchedule?, account: Account?) -> String? {
         guard let schedule else { return nil }
-        if let potName = schedule.toPotName {
+        if schedule.destinationKind == .pot, let potName = schedule.toPotName {
             return "Pot: \(potName)"
         }
         if let account = account {
-            return "Account Balance: \(String(format: "£%.2f", account.balance))"
+            return "Main Account Balance: \(String(format: "£%.2f", account.balance))"
         }
         return nil
     }

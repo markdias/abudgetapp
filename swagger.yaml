@@ -583,6 +583,7 @@ components:
           format: date-time
         toPotName:
           type: string
+          description: When omitted the transfer lands in the main account balance and is treated as an expense
 
     NewScheduledPayment:
       type: object
