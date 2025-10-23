@@ -596,6 +596,12 @@ actor LocalBudgetStore {
         return ResetResponse(accounts: state.accounts, income_schedules: state.incomeSchedules, transfer_schedules: state.transferSchedules)
     }
 
+    func clearAll() throws -> ResetResponse {
+        state = BudgetState.empty
+        try persist()
+        return ResetResponse(accounts: [], income_schedules: [], transfer_schedules: [])
+    }
+
     // MARK: - Helpers
 
     private func updatePotScheduledPayment(accountIndex: Int, potName: String, mutate: (inout [ScheduledPayment]) -> Void) throws {
@@ -713,8 +719,51 @@ private struct BudgetState: Codable {
         self.nextIncomeScheduleId = nextIncomeScheduleId
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case accounts
+        case transferSchedules = "transfer_schedules"
+        case incomeSchedules = "income_schedules"
+        case nextAccountId
+        case nextPotId
+        case nextIncomeId
+        case nextExpenseId
+        case nextScheduledPaymentId
+        case nextTransferScheduleId
+        case nextIncomeScheduleId
+    }
+
+    // Support legacy camelCase keys for backward compatibility
+    private enum LegacyKeys: String, CodingKey {
+        case accounts
+        case transferSchedules
+        case incomeSchedules
+        case nextAccountId
+        case nextPotId
+        case nextIncomeId
+        case nextExpenseId
+        case nextScheduledPaymentId
+        case nextTransferScheduleId
+        case nextIncomeScheduleId
+    }
+
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Try snake_case keys first
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
+            transferSchedules = try container.decodeIfPresent([TransferSchedule].self, forKey: .transferSchedules) ?? []
+            incomeSchedules = try container.decodeIfPresent([IncomeSchedule].self, forKey: .incomeSchedules) ?? []
+            nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
+            nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
+            nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
+            nextExpenseId = try container.decodeIfPresent(Int.self, forKey: .nextExpenseId) ?? 1
+            nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
+            nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
+            nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
+            return
+        }
+
+        // Fallback to legacy camelCase
+        let container = try decoder.container(keyedBy: LegacyKeys.self)
         accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
         transferSchedules = try container.decodeIfPresent([TransferSchedule].self, forKey: .transferSchedules) ?? []
         incomeSchedules = try container.decodeIfPresent([IncomeSchedule].self, forKey: .incomeSchedules) ?? []

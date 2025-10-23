@@ -31,6 +31,8 @@ struct HomeView: View {
     @State private var showingImporter = false
     @State private var showingExporter = false
     @State private var exportDocument = JSONDocument()
+    @State private var showingDeleteAllConfirm = false
+    @State private var selectedPotContext: PotEditContext? = nil
 
     private let cardSpacing: CGFloat = 72
 
@@ -107,6 +109,17 @@ struct HomeView: View {
                         onViewAll: { selectedTab = 1 }
                     )
 
+                    PotsPanelSection(
+                        accounts: accountsStore.accounts,
+                        potsByAccount: potsStore.potsByAccount,
+                        onTapPot: { account, pot in
+                            selectedPotContext = PotEditContext(account: account, pot: pot)
+                        },
+                        onDeletePot: { account, pot in
+                            Task { await potsStore.deletePot(accountId: account.id, potName: pot.name) }
+                        }
+                    )
+
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
                         onSavings: { showingSavings = true },
@@ -150,6 +163,9 @@ struct HomeView: View {
                         Divider()
                         Button("Import Data (JSON)") { showingImporter = true }
                         Button("Export Data (JSON)") { Task { await exportAllData() } }
+                        Button(role: .destructive) { showingDeleteAllConfirm = true } label: {
+                            Text("Delete All Data")
+                        }
                         Divider()
                         Button("Run Diagnostics", action: { showingDiagnostics = true })
                     } label: {
@@ -164,6 +180,8 @@ struct HomeView: View {
                     guard let url = urls.first else { return }
                     Task {
                         do {
+                            let accessed = url.startAccessingSecurityScopedResource()
+                            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
                             let data = try Data(contentsOf: url)
                             _ = try await APIService.shared.importBudgetState(from: data)
                             await refreshAllAfterImport()
@@ -177,6 +195,12 @@ struct HomeView: View {
             }
             .fileExporter(isPresented: $showingExporter, document: exportDocument, contentType: .json, defaultFilename: "budget_state") { result in
                 if case .failure(let error) = result { print("Export failed: \(error)") }
+            }
+            .alert("Delete All Data?", isPresented: $showingDeleteAllConfirm) {
+                Button("Delete", role: .destructive) { Task { await deleteAllData() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will permanently erase all accounts, pots, expenses, incomes, and schedules. This cannot be undone.")
             }
             .toolbar { // chip to clear selected account when active
                 if let selectedId = selectedAccountId,
@@ -227,6 +251,9 @@ struct HomeView: View {
             .sheet(isPresented: $showingDiagnostics) {
                 DiagnosticsRunnerView(isPresented: $showingDiagnostics)
             }
+            .sheet(item: $selectedPotContext) { context in
+                PotEditorSheet(context: context)
+            }
             .sheet(item: $selectedActivity) { activity in
                 ActivityEditorSheet(activity: activity)
             }
@@ -256,6 +283,15 @@ struct HomeView: View {
             showingExporter = true
         } catch {
             print("Export failed: \(error)")
+        }
+    }
+
+    private func deleteAllData() async {
+        do {
+            _ = try await APIService.shared.clearAllData()
+            await refreshAllAfterImport()
+        } catch {
+            print("Delete all failed: \(error)")
         }
     }
 
@@ -532,6 +568,8 @@ private struct QuickActionButton: View {
 // MARK: - Activity Feed
 
 private struct ActivityFeedSection: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @EnvironmentObject private var scheduledPaymentsStore: ScheduledPaymentsStore
     @ObservedObject var activityStore: ActivityStore
     let activities: [ActivityItem]
     @Binding var selectedActivity: ActivityItem?
@@ -566,6 +604,15 @@ private struct ActivityFeedSection: View {
                                     selectedActivity = activity
                                 }
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    Task { await deleteActivity(activity) }
+                                } label: { Label("Delete", systemImage: "trash") }
+
+                                Button {
+                                    selectedActivity = activity
+                                } label: { Label("Edit", systemImage: "pencil") }.tint(.blue)
+                            }
                     }
                 }
             }
@@ -574,6 +621,22 @@ private struct ActivityFeedSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func deleteActivity(_ activity: ActivityItem) async {
+        guard let accountId = accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id else { return }
+        let parts = activity.id.split(separator: "-")
+        let numericId = Int(parts.last ?? "")
+        switch activity.category {
+        case .income:
+            if let id = numericId { await accountsStore.deleteIncome(accountId: accountId, incomeId: id) }
+        case .expense:
+            if let id = numericId { await accountsStore.deleteExpense(accountId: accountId, expenseId: id) }
+        case .scheduledPayment:
+            if let id = numericId, let context = scheduledPaymentsStore.items.first(where: { $0.accountId == accountId && $0.payment.id == id }) {
+                await scheduledPaymentsStore.deletePayment(context: context)
+            }
+        }
     }
 }
 
@@ -650,7 +713,7 @@ struct ActivityRow: View {
                 Text(activity.formattedAmount)
                     .font(.subheadline)
                     .foregroundColor(activity.category == .income ? .green : .primary)
-                Text(activity.date, style: .date)
+                Text(dayOfMonth(activity.date))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -675,6 +738,179 @@ struct ActivityRow: View {
         case .expense: return "arrow.up.circle.fill"
         case .scheduledPayment: return "calendar"
         }
+    }
+
+    private func dayOfMonth(_ date: Date) -> String {
+        String(Calendar.current.component(.day, from: date))
+    }
+}
+
+// MARK: - Pots Panel
+
+private struct PotEditContext: Identifiable, Hashable {
+    let id = UUID()
+    let account: Account
+    let pot: Pot
+}
+
+private struct PotsPanelSection: View {
+    let accounts: [Account]
+    let potsByAccount: [Int: [Pot]]
+    var onTapPot: (Account, Pot) -> Void = { _, _ in }
+    var onDeletePot: (Account, Pot) -> Void = { _, _ in }
+
+    private var allPots: [(account: Account, pot: Pot)] {
+        var items: [(account: Account, pot: Pot)] = []
+        for account in accounts {
+            for pot in (potsByAccount[account.id] ?? []) {
+                items.append((account: account, pot: pot))
+            }
+        }
+        // Sort by account then pot name
+        return items.sorted { lhs, rhs in
+            if lhs.account.name == rhs.account.name { return lhs.pot.name < rhs.pot.name }
+            return lhs.account.name < rhs.account.name
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Pots")
+                    .font(.headline)
+                Spacer()
+            }
+
+            if allPots.isEmpty {
+                ContentUnavailableView(
+                    "No Pots",
+                    systemImage: "tray",
+                    description: Text("Create pots to organize balances.")
+                )
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(Array(allPots.enumerated()), id: \.offset) { _, item in
+                        PotRow(pot: item.pot, accountName: item.account.name)
+                            .onTapGesture { onTapPot(item.account, item.pot) }
+                            .contextMenu {
+                                Button("Manage") { onTapPot(item.account, item.pot) }
+                                Button(role: .destructive) { onDeletePot(item.account, item.pot) } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) { onDeletePot(item.account, item.pot) } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                Button { onTapPot(item.account, item.pot) } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }.tint(.blue)
+                            }
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+// MARK: - Pot Editor
+
+private struct PotEditorSheet: View {
+    @EnvironmentObject private var potsStore: PotsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let context: PotEditContext
+
+    @State private var name: String = ""
+    @State private var balance: String = ""
+    @State private var excludeFromReset: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Pot") {
+                    HStack {
+                        Text("Account")
+                        Spacer()
+                        Text(context.account.name).foregroundStyle(.secondary)
+                    }
+                    TextField("Name", text: $name)
+                    TextField("Balance", text: $balance).keyboardType(.decimalPad)
+                    Toggle("Exclude from Reset", isOn: $excludeFromReset)
+                        .onChange(of: excludeFromReset) { _, newValue in
+                            Task { await potsStore.toggleExclusion(accountId: context.account.id, potName: context.pot.name) }
+                        }
+                }
+            }
+            .navigationTitle("Manage Pot")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { dismiss() } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                    Button(role: .destructive) { Task { await deletePot() } } label: { Text("Delete") }
+                }
+            }
+            .onAppear { preload() }
+        }
+    }
+
+    private var canSave: Bool { !name.isEmpty && Double(balance) != nil }
+
+    private func preload() {
+        name = context.pot.name
+        balance = String(format: "%.2f", context.pot.balance)
+        excludeFromReset = context.pot.excludeFromReset ?? false
+    }
+
+    private func save() async {
+        guard let amount = Double(balance) else { return }
+        let submission = PotSubmission(name: name, balance: amount, excludeFromReset: excludeFromReset)
+        await potsStore.updatePot(accountId: context.account.id, existingPot: context.pot, submission: submission)
+        dismiss()
+    }
+
+    private func deletePot() async {
+        await potsStore.deletePot(accountId: context.account.id, potName: context.pot.name)
+        dismiss()
+    }
+}
+
+private struct PotRow: View {
+    let pot: Pot
+    let accountName: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.purple.opacity(0.2))
+                .frame(width: 44, height: 44)
+                .overlay(Image(systemName: "tray.fill").foregroundColor(.purple))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pot.name)
+                    .font(.subheadline).fontWeight(.medium)
+                Text(accountName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("£\(String(format: "%.2f", pot.balance))")
+                    .font(.subheadline).foregroundColor(.primary)
+                Text("Balance")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
     }
 }
 
@@ -703,7 +939,7 @@ private struct ActivityEditorView: View {
     @State private var amount: String = ""
     @State private var descriptionText: String = ""
     @State private var company: String = ""
-    @State private var date: Date = Date()
+    @State private var dayOfMonth: String = ""
 
     private var isIncome: Bool { activity.category == .income }
     private var isExpense: Bool { activity.category == .expense }
@@ -743,7 +979,7 @@ private struct ActivityEditorView: View {
                         TextField("Description", text: $descriptionText)
                         if isIncome { TextField("Company", text: $company) }
                         TextField("Amount", text: $amount).keyboardType(.decimalPad)
-                        DatePicker("Date", selection: $date, displayedComponents: .date)
+                        TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
                     }
                 } else {
                     Section("Scheduled Payment") {
@@ -768,24 +1004,28 @@ private struct ActivityEditorView: View {
     }
 
     private var canSave: Bool {
-        Double(amount) != nil && !descriptionText.isEmpty && (isIncome ? !company.isEmpty : true)
+        Double(amount) != nil && !descriptionText.isEmpty && validDay && (isIncome ? !company.isEmpty : true)
+    }
+
+    private var validDay: Bool {
+        if let d = Int(dayOfMonth), (1...31).contains(d) { return true }
+        return false
     }
 
     private func preload() {
         descriptionText = activity.title
         company = activity.company ?? ""
-        date = activity.date
         amount = String(format: "%.2f", abs(activity.amount))
+        dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
     }
 
     private func save() async {
         guard let accountId = accountId, let id = entityId, let money = Double(amount) else { return }
-        let formatter = ISO8601DateFormatter()
         if isIncome {
-            let submission = IncomeSubmission(amount: money, description: descriptionText, company: company, date: formatter.string(from: date))
+            let submission = IncomeSubmission(amount: money, description: descriptionText, company: company, date: dayOfMonth)
             await accountsStore.updateIncome(accountId: accountId, incomeId: id, submission: submission)
         } else if isExpense {
-            let submission = ExpenseSubmission(amount: money, description: descriptionText, date: formatter.string(from: date))
+            let submission = ExpenseSubmission(amount: money, description: descriptionText, date: dayOfMonth)
             await accountsStore.updateExpense(accountId: accountId, expenseId: id, submission: submission)
         }
         dismiss()

@@ -45,6 +45,7 @@ protocol APIServiceProtocol {
     // Import / Export full state
     func exportBudgetState() async throws -> Data
     func importBudgetState(from data: Data) async throws -> ResetResponse
+    func clearAllData() async throws -> ResetResponse
 }
 
 enum APIServiceError: LocalizedError {
@@ -331,6 +332,14 @@ final class APIService: APIServiceProtocol {
     func importBudgetState(from data: Data) async throws -> ResetResponse {
         do {
             return try await store.importStateData(data)
+        } catch {
+            throw map(error)
+        }
+    }
+
+    func clearAllData() async throws -> ResetResponse {
+        do {
+            return try await store.clearAll()
         } catch {
             throw map(error)
         }

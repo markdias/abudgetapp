@@ -124,7 +124,7 @@ struct IncomeFormView: View {
     @State private var amount = "0"
     @State private var description = ""
     @State private var company = ""
-    @State private var date = Date()
+    @State private var dayOfMonth = ""
 
     var body: some View {
         NavigationStack {
@@ -142,7 +142,8 @@ struct IncomeFormView: View {
                     TextField("Company", text: $company)
                     TextField("Amount", text: $amount)
                         .keyboardType(.decimalPad)
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth)
+                        .keyboardType(.numberPad)
                 }
             }
             .navigationTitle("Add Income")
@@ -154,13 +155,17 @@ struct IncomeFormView: View {
     }
 
     private var isValid: Bool {
-        selectedAccountId != nil && !description.isEmpty && !company.isEmpty && Double(amount) != nil
+        selectedAccountId != nil && !description.isEmpty && !company.isEmpty && Double(amount) != nil && validDay
+    }
+
+    private var validDay: Bool {
+        if let d = Int(dayOfMonth), (1...31).contains(d) { return true }
+        return false
     }
 
     private func save() {
         guard let accountId = selectedAccountId, let money = Double(amount) else { return }
-        let formatter = ISO8601DateFormatter()
-        let submission = IncomeSubmission(amount: money, description: description, company: company, date: formatter.string(from: date))
+        let submission = IncomeSubmission(amount: money, description: description, company: company, date: dayOfMonth)
         Task {
             await accountsStore.addIncome(accountId: accountId, submission: submission)
             isPresented = false
@@ -175,7 +180,7 @@ struct ExpenseFormView: View {
     @State private var selectedAccountId: Int?
     @State private var amount = "0"
     @State private var description = ""
-    @State private var date = Date()
+    @State private var dayOfMonth = ""
 
     var body: some View {
         NavigationStack {
@@ -192,7 +197,8 @@ struct ExpenseFormView: View {
                     TextField("Description", text: $description)
                     TextField("Amount", text: $amount)
                         .keyboardType(.decimalPad)
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth)
+                        .keyboardType(.numberPad)
                 }
             }
             .navigationTitle("Add Expense")
@@ -204,13 +210,17 @@ struct ExpenseFormView: View {
     }
 
     private var isValid: Bool {
-        selectedAccountId != nil && !description.isEmpty && Double(amount) != nil
+        selectedAccountId != nil && !description.isEmpty && Double(amount) != nil && validDay
+    }
+
+    private var validDay: Bool {
+        if let d = Int(dayOfMonth), (1...31).contains(d) { return true }
+        return false
     }
 
     private func save() {
         guard let accountId = selectedAccountId, let money = Double(amount) else { return }
-        let formatter = ISO8601DateFormatter()
-        let submission = ExpenseSubmission(amount: money, description: description, date: formatter.string(from: date))
+        let submission = ExpenseSubmission(amount: money, description: description, date: dayOfMonth)
         Task {
             await accountsStore.addExpense(accountId: accountId, submission: submission)
             isPresented = false
