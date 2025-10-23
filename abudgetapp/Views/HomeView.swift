@@ -78,8 +78,6 @@ struct HomeView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
-                    BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
-
                     if reorderableAccounts.isEmpty {
                         ContentUnavailableView(
                             "No Accounts",
@@ -102,6 +100,12 @@ struct HomeView: View {
                             }
                         )
                     }
+                    ActivityFeedSection(
+                        activityStore: activityStore,
+                        activities: filteredActivities,
+                        selectedActivity: $selectedActivity,
+                        onViewAll: { selectedTab = 1 }
+                    )
 
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
@@ -112,12 +116,7 @@ struct HomeView: View {
                         onReorder: { showingCardReorder = true }
                     )
 
-                    ActivityFeedSection(
-                        activityStore: activityStore,
-                        activities: filteredActivities,
-                        selectedActivity: $selectedActivity,
-                        onViewAll: { selectedTab = 1 }
-                    )
+                    BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 16)
@@ -411,8 +410,8 @@ private struct AccountCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top) {
                 Label {
                     Text(account.name)
                         .font(.system(size: 18, weight: .semibold))
@@ -460,7 +459,7 @@ private struct AccountCardView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.top, 4)
+        .padding(.top, 0)
         .padding(.horizontal, 16)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, minHeight: 160, alignment: .leading)
