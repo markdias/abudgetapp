@@ -181,7 +181,11 @@ struct TransferScheduleView: View {
         } else {
             to += "Account #\(schedule.toAccountId)"
         }
-        if let pot = schedule.toPotName, !pot.isEmpty { to += " · \(pot)" }
+        if let pot = schedule.toPotName, !pot.isEmpty {
+            to += " · \(pot)"
+        } else {
+            to += " · Main Account"
+        }
         return to
     }
 }
@@ -199,30 +203,42 @@ private struct TransferEditorSheet: View {
     @State private var amount: String = ""
     @State private var toAccountId: Int
     @State private var toPotName: String = ""
+    @State private var destinationKind: TransferDestinationKind
 
     init(schedule: TransferSchedule) {
         self.schedule = schedule
         _toAccountId = State(initialValue: schedule.toAccountId)
+        _destinationKind = State(initialValue: schedule.destinationKind)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Destination") {
+                Section("Destination", footer: Text(destinationKind.helperDescription)) {
                     Picker("Account", selection: $toAccountId) {
                         ForEach(accountsStore.accounts) { acc in
                             Text(acc.name).tag(acc.id)
                         }
                     }
-                    if let pots = accountsStore.account(for: toAccountId)?.pots, !pots.isEmpty {
-                        Picker("Pot", selection: $toPotName) {
-                            Text("Main Account").tag("")
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name)
-                            }
+                    Picker("Type", selection: $destinationKind) {
+                        ForEach(TransferDestinationKind.allCases, id: \.self) { kind in
+                            Text(kind.displayLabel).tag(kind)
                         }
-                    } else {
-                        TextField("Pot (optional)", text: $toPotName)
+                    }
+                    .pickerStyle(.segmented)
+                    if destinationKind == .pot {
+                        if let pots = accountsStore.account(for: toAccountId)?.pots, !pots.isEmpty {
+                            Picker("Pot", selection: $toPotName) {
+                                Text("Select Pot").tag("")
+                                ForEach(pots, id: \.name) { pot in
+                                    Text(pot.name).tag(pot.name)
+                                }
+                            }
+                        } else {
+                            Text("No pots available for this account")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Section("Details") {
@@ -242,10 +258,29 @@ private struct TransferEditorSheet: View {
                 amount = String(format: "%.2f", schedule.amount)
                 toPotName = schedule.toPotName ?? ""
             }
+            .onChange(of: destinationKind) { newValue in
+                if newValue == .account {
+                    toPotName = ""
+                } else if let pots = accountsStore.account(for: toAccountId)?.pots, let first = pots.first {
+                    toPotName = first.name
+                }
+            }
+            .onChange(of: toAccountId) { newValue in
+                guard destinationKind == .pot else { return }
+                if let id = newValue, let pots = accountsStore.account(for: id)?.pots, pots.isEmpty {
+                    destinationKind = .account
+                }
+            }
         }
     }
 
-    private var canSave: Bool { Double(amount) != nil && !description.isEmpty }
+    private var canSave: Bool {
+        guard Double(amount) != nil, !description.isEmpty else { return false }
+        if destinationKind == .pot {
+            return !(toPotName.isEmpty)
+        }
+        return true
+    }
 
     private func save() async {
         guard let money = Double(amount) else { return }
@@ -253,7 +288,7 @@ private struct TransferEditorSheet: View {
             fromAccountId: schedule.fromAccountId,
             fromPotId: schedule.fromPotId,
             toAccountId: toAccountId,
-            toPotName: toPotName.isEmpty ? nil : toPotName,
+            toPotName: destinationKind == .pot ? (toPotName.isEmpty ? nil : toPotName) : nil,
             amount: money,
             description: description,
             items: schedule.items,
@@ -279,6 +314,14 @@ private struct TransferScheduleRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(schedule.description)
                         .font(.headline)
+                    Label(schedule.destinationKind == .account ? "Expense" : "Transfer", systemImage: schedule.destinationKind == .account ? "arrowshape.turn.up.left" : "arrow.left.arrow.right")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .foregroundColor(.white)
+                        .background(schedule.destinationKind == .account ? Color.orange : Color.blue)
+                        .clipShape(Capsule())
+                        .accessibilityLabel(schedule.destinationKind.displayLabel)
                     Text(fromLabel)
                         .font(.caption)
                         .foregroundStyle(.secondary)

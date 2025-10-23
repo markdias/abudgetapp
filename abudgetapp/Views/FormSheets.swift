@@ -193,7 +193,7 @@ struct ExpenseFormView: View {
                         }
                     }
                 }
-                Section("Expense") {
+                Section("Expense", footer: Text("Expenses stay within the main account balance and never move money into pots.")) {
                     TextField("Description", text: $description)
                     TextField("Amount", text: $amount)
                         .keyboardType(.decimalPad)
@@ -238,6 +238,7 @@ struct TransferComposerView: View {
     @State private var fromPotName: String = ""
     @State private var toAccountId: Int?
     @State private var toPotName: String = ""
+    @State private var destinationKind: TransferDestinationKind = .pot
     @State private var amount = ""
     @State private var description = ""
     @State private var isDirectPotTransfer = false
@@ -261,19 +262,31 @@ struct TransferComposerView: View {
                         }
                     }
                 }
-                Section("To") {
+                Section("To", footer: Text(destinationKind.helperDescription)) {
                     Picker("Account", selection: $toAccountId) {
                         Text("Select Account").tag(nil as Int?)
                         ForEach(accountsStore.accounts) { account in
                             Text(account.name).tag(account.id as Int?)
                         }
                     }
-                    if let accountId = toAccountId, let pots = potsStore.potsByAccount[accountId], !pots.isEmpty {
-                        Picker("Pot", selection: $toPotName) {
-                            Text("Account Balance").tag("")
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name)
+                    Picker("Type", selection: $destinationKind) {
+                        ForEach(TransferDestinationKind.allCases, id: \.self) { kind in
+                            Text(kind.displayLabel).tag(kind)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    if destinationKind == .pot {
+                        if let accountId = toAccountId, let pots = potsStore.potsByAccount[accountId], !pots.isEmpty {
+                            Picker("Pot", selection: $toPotName) {
+                                Text("Select Pot").tag("")
+                                ForEach(pots, id: \.name) { pot in
+                                    Text(pot.name).tag(pot.name)
+                                }
                             }
+                        } else if let accountId = toAccountId, (potsStore.potsByAccount[accountId]?.isEmpty ?? true) {
+                            Text("No pots available for this account")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -281,7 +294,9 @@ struct TransferComposerView: View {
                     TextField("Amount", text: $amount)
                         .keyboardType(.decimalPad)
                     TextField("Description", text: $description)
-                    Toggle("Direct Pot Transfer", isOn: $isDirectPotTransfer)
+                    if destinationKind == .pot {
+                        Toggle("Direct Pot Transfer", isOn: $isDirectPotTransfer)
+                    }
                 }
             }
             .navigationTitle("Transfer Schedule")
@@ -289,30 +304,53 @@ struct TransferComposerView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { isPresented = false } }
                 ToolbarItem(placement: .topBarTrailing) { Button("Save", action: save).disabled(!isValid) }
             }
+            .onChange(of: destinationKind) { newValue in
+                if newValue == .account {
+                    toPotName = ""
+                    isDirectPotTransfer = false
+                } else if let accountId = toAccountId,
+                          let pots = potsStore.potsByAccount[accountId],
+                          let firstPot = pots.first {
+                    toPotName = firstPot.name
+                }
+            }
+            .onChange(of: toAccountId) { newValue in
+                guard destinationKind == .pot else { return }
+                if let accountId = newValue, (potsStore.potsByAccount[accountId]?.isEmpty ?? true) {
+                    destinationKind = .account
+                }
+            }
         }
     }
 
     private var isValid: Bool {
         guard let toAccountId = toAccountId, let amountValue = Double(amount) else { return false }
         if fromAccountId == nil && fromPotName.isEmpty { return false }
-        return amountValue > 0 && !description.isEmpty && toAccountId > 0
+        guard amountValue > 0 && !description.isEmpty && toAccountId > 0 else { return false }
+        return hasSelectedPot
     }
 
     private func save() {
         guard let toAccountId = toAccountId, let amountValue = Double(amount) else { return }
+        let potName = destinationKind == .pot ? (toPotName.isEmpty ? nil : toPotName) : nil
         let submission = TransferScheduleSubmission(
             fromAccountId: fromAccountId,
             fromPotId: fromPotName.isEmpty ? nil : fromPotName,
             toAccountId: toAccountId,
-            toPotName: toPotName.isEmpty ? nil : toPotName,
+            toPotName: potName,
             amount: amountValue,
             description: description,
             items: nil,
-            isDirectPotTransfer: isDirectPotTransfer
+            isDirectPotTransfer: destinationKind == .pot ? isDirectPotTransfer : false
         )
         Task {
             await transferStore.add(submission)
             isPresented = false
         }
+    }
+
+    private var hasSelectedPot: Bool {
+        guard destinationKind == .pot else { return true }
+        return !toPotName.isEmpty
     }
 }

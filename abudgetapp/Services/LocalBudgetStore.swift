@@ -589,7 +589,12 @@ actor LocalBudgetStore {
         var accountTransfers: [AvailableAccountTransfer] = []
         for schedule in state.transferSchedules where schedule.isActive {
             guard let destinationAccount = state.accounts.first(where: { $0.id == schedule.toAccountId }) else { continue }
-            let destinationName = schedule.toPotName ?? destinationAccount.name
+            let destinationName: String
+            if schedule.destinationKind == .pot, let potName = schedule.toPotName, !potName.isEmpty {
+                destinationName = potName
+            } else {
+                destinationName = "\(destinationAccount.name) · Main Account"
+            }
             let item = AvailableTransferItem(
                 id: schedule.id,
                 amount: schedule.amount,
@@ -600,7 +605,7 @@ actor LocalBudgetStore {
             )
             let transfer = AvailableAccountTransfer(
                 destinationId: schedule.id,
-                destinationType: schedule.toPotName == nil ? "account" : "pot",
+                destinationType: schedule.destinationKind == .pot ? "pot" : "account",
                 destinationName: destinationName,
                 accountName: destinationAccount.name,
                 totalAmount: schedule.amount,

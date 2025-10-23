@@ -1445,7 +1445,7 @@ app.get('/get-available-transfers', async (req, res) => {
         groupedTransfers.byAccount.push({
           destinationId: account.id,
           destinationType: 'account',
-          destinationName: `${account.name} Expenses`,
+          destinationName: `${account.name} · Main Account`,
           accountName: account.name,
           totalAmount: account.expenses.reduce((sum, exp) => sum + exp.amount, 0),
           items: account.expenses.map(expense => ({

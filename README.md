@@ -31,6 +31,10 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Settings** – Local storage management (restore sample data, reload, reset balances), card reorder flow, and diagnostics launcher.
 * **Diagnostics** – Developer QA surface that adds/removes sample data, executes schedules, resets balances, and reports status for each step.
 
+## Expenses vs. Transfers
+
+Expenses track cash that remains in the primary account balance—think of them as money earmarked for upcoming use that should stay out of pots. Transfer schedules move money directly into pots for ring-fencing. Wherever the app references expenses and transfers, the UI now calls out the distinction: the transfer composer lets you choose between “Expense · Main Account” and “Transfer · Pot”, editor sheets echo the selection, and schedule lists badge each entry so it’s immediately clear which balance will receive the funds.
+
 ## Local Persistence
 
 Budget data is saved locally on the device. A bundled sample dataset seeds the app on first launch, and you can restore it at any time from **Settings → Local Storage → Restore Sample Dataset**. Data lives in the app's Application Support directory and no network connectivity is required.

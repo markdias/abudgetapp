@@ -367,6 +367,25 @@ public struct ScheduledPayment: Identifiable, Codable, Hashable {
 }
 
 // MARK: - Schedule Models
+public enum TransferDestinationKind: String, Codable, CaseIterable {
+    case account
+    case pot
+
+    public var displayLabel: String {
+        switch self {
+        case .account: return "Expense · Main Account"
+        case .pot: return "Transfer · Pot"
+        }
+    }
+
+    public var helperDescription: String {
+        switch self {
+        case .account: return "Funds remain in the main account balance."
+        case .pot: return "Funds move into the selected pot."
+        }
+    }
+}
+
 public struct TransferSchedule: Identifiable, Codable, Hashable {
     public let id: Int
     public var fromAccountId: Int?
@@ -380,7 +399,7 @@ public struct TransferSchedule: Identifiable, Codable, Hashable {
     public var items: [TransferItem]?
     public var isDirectPotTransfer: Bool?
     public var lastExecuted: String?
-    
+
     public init(id: Int, fromAccountId: Int? = nil, fromPotId: String? = nil, toAccountId: Int, toPotName: String? = nil,
          amount: Double, description: String, isActive: Bool, isCompleted: Bool, items: [TransferItem]? = nil,
          isDirectPotTransfer: Bool? = nil, lastExecuted: String? = nil) {
@@ -396,6 +415,13 @@ public struct TransferSchedule: Identifiable, Codable, Hashable {
         self.items = items
         self.isDirectPotTransfer = isDirectPotTransfer
         self.lastExecuted = lastExecuted
+    }
+
+    public var destinationKind: TransferDestinationKind {
+        if let name = toPotName, !name.isEmpty {
+            return .pot
+        }
+        return .account
     }
     
     public static func == (lhs: TransferSchedule, rhs: TransferSchedule) -> Bool {
