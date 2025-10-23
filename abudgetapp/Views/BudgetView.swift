@@ -32,9 +32,11 @@ struct BudgetView: View {
                     BudgetSummaryCard(totalAllocated: totalAllocated, totalSpent: totalSpent)
 
                     if budgetItems.isEmpty {
-                        ContentUnavailableView("No Budget Data", systemImage: "chart.bar") {
-                            Text("Create pots and scheduled payments to see budget allocations.")
-                        }
+                        ContentUnavailableView(
+                            "No Budget Data",
+                            systemImage: "chart.bar",
+                            description: Text("Create pots and scheduled payments to see budget allocations.")
+                        )
                     } else {
                         ForEach(budgetItems) { item in
                             BudgetItemRow(budgetItem: item)

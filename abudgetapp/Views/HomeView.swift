@@ -67,9 +67,11 @@ struct HomeView: View {
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
 
                     if reorderableAccounts.isEmpty {
-                        ContentUnavailableView("No Accounts", systemImage: "creditcard") {
-                            Text("Use the add menu to create your first account.")
-                        }
+                        ContentUnavailableView(
+                            "No Accounts",
+                            systemImage: "creditcard",
+                            description: Text("Use the add menu to create your first account.")
+                        )
                         .frame(maxWidth: .infinity)
                     } else {
                         StackedAccountDeck(
@@ -438,9 +440,11 @@ private struct ActivityFeedSection: View {
             ActivityFilterChips(activityStore: activityStore)
 
             if activities.isEmpty {
-                ContentUnavailableView("No Activity", systemImage: "calendar") {
-                    Text("Transactions and scheduled payments will appear here once available.")
-                }
+                ContentUnavailableView(
+                    "No Activity",
+                    systemImage: "calendar",
+                    description: Text("Transactions and scheduled payments will appear here once available.")
+                )
             } else {
                 VStack(spacing: 12) {
                     ForEach(activities.prefix(6)) { activity in
@@ -583,7 +587,11 @@ private struct ActivityDetailPopover: View {
                 if let company = activity.company, !company.isEmpty {
                     Label(company, systemImage: "building.2")
                 }
-                Label(activity.date, systemImage: "calendar")
+                Label {
+                    Text(activity.date, style: .date)
+                } icon: {
+                    Image(systemName: "calendar")
+                }
             }
             if !activity.metadata.isEmpty {
                 Divider()

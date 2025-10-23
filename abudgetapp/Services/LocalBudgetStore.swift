@@ -33,7 +33,7 @@ actor LocalBudgetStore {
             self.state = loaded.normalized()
         } else {
             self.state = BudgetState.sample.normalized()
-            try? persist()
+            // Avoid persisting during actor initialization to satisfy Swift 6 isolation rules.
         }
     }
 

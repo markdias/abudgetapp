@@ -37,7 +37,9 @@ final class ActivityStore: ObservableObject {
     private var accountsObserver: NSObjectProtocol?
 
     init(accountsStore: AccountsStore) {
-        rebuildActivities(from: accountsStore.accounts)
+        let items = Self.buildActivities(from: accountsStore.accounts)
+        self.activities = items
+        self.filteredActivities = items
         accountsObserver = NotificationCenter.default.addObserver(
             forName: AccountsStore.accountsDidChangeNotification,
             object: nil,
@@ -45,7 +47,11 @@ final class ActivityStore: ObservableObject {
         ) { [weak self] notification in
             guard let self = self else { return }
             guard let accounts = notification.userInfo?["accounts"] as? [Account] else { return }
-            self.rebuildActivities(from: accounts)
+            let items = Self.buildActivities(from: accounts)
+            Task { @MainActor in
+                self.activities = items
+                self.applyFilter()
+            }
         }
     }
 
@@ -71,7 +77,7 @@ final class ActivityStore: ObservableObject {
         markedIdentifiers.removeAll()
     }
 
-    private func rebuildActivities(from accounts: [Account]) {
+    private nonisolated static func buildActivities(from accounts: [Account]) -> [ActivityItem] {
         var items: [ActivityItem] = []
         for account in accounts {
             if let incomes = account.incomes {
@@ -158,7 +164,7 @@ final class ActivityStore: ObservableObject {
         }
 
         items.sort { $0.date > $1.date }
-        activities = items
+        return items
     }
 
     private func applyFilter() {
@@ -169,7 +175,7 @@ final class ActivityStore: ObservableObject {
         }
     }
 
-    private static func parse(dateString: String) -> Date? {
+    private nonisolated static func parse(dateString: String) -> Date? {
         if let isoDate = ISO8601DateFormatter().date(from: dateString) {
             return isoDate
         }

@@ -29,7 +29,7 @@ final class ScheduledPaymentsStore: ObservableObject {
     init(accountsStore: AccountsStore, service: APIServiceProtocol = APIService.shared) {
         self.accountsStore = accountsStore
         self.service = service
-        rebuild(from: accountsStore.accounts)
+        self.items = Self.buildContexts(from: accountsStore.accounts)
         accountsObserver = NotificationCenter.default.addObserver(
             forName: AccountsStore.accountsDidChangeNotification,
             object: nil,
@@ -37,7 +37,10 @@ final class ScheduledPaymentsStore: ObservableObject {
         ) { [weak self] notification in
             guard let self = self else { return }
             guard let accounts = notification.userInfo?["accounts"] as? [Account] else { return }
-            self.rebuild(from: accounts)
+            let contexts = Self.buildContexts(from: accounts)
+            Task { @MainActor in
+                self.items = contexts
+            }
         }
     }
 
@@ -110,7 +113,7 @@ final class ScheduledPaymentsStore: ObservableObject {
         }
     }
 
-    private func rebuild(from accounts: [Account]) {
+    private nonisolated static func buildContexts(from accounts: [Account]) -> [ScheduledPaymentContext] {
         var contexts: [ScheduledPaymentContext] = []
         for account in accounts {
             if let payments = account.scheduled_payments {
@@ -129,6 +132,6 @@ final class ScheduledPaymentsStore: ObservableObject {
             }
         }
         contexts.sort { $0.payment.date < $1.payment.date }
-        items = contexts
+        return contexts
     }
 }

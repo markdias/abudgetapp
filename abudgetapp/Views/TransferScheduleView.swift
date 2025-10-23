@@ -44,9 +44,11 @@ struct TransferScheduleView: View {
             }
             .overlay {
                 if transferStore.schedules.isEmpty {
-                    ContentUnavailableView("No Transfer Schedules", systemImage: "arrow.left.arrow.right") {
-                        Text("Create a transfer schedule to automate pot or account movements.")
-                    }
+                    ContentUnavailableView(
+                        "No Transfer Schedules",
+                        systemImage: "arrow.left.arrow.right",
+                        description: Text("Create a transfer schedule to automate pot or account movements.")
+                    )
                 }
             }
             .navigationTitle("Transfers")

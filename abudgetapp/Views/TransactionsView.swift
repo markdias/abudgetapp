@@ -32,9 +32,11 @@ struct TransactionsView: View {
             }
             .overlay {
                 if filteredActivities.isEmpty {
-                    ContentUnavailableView("No Activity", systemImage: "tray") {
-                        Text("Adjust the filters or search to see transactions.")
-                    }
+                    ContentUnavailableView(
+                        "No Activity",
+                        systemImage: "tray",
+                        description: Text("Adjust the filters or search to see transactions.")
+                    )
                 }
             }
             .navigationTitle("Activity")

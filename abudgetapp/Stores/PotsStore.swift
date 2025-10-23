@@ -127,7 +127,10 @@ final class PotsStore: ObservableObject {
         ) { [weak self] notification in
             guard let self = self else { return }
             if let accounts = notification.userInfo?["accounts"] as? [Account] {
-                self.potsByAccount = Self.buildMap(from: accounts)
+                let mapping = Self.buildMap(from: accounts)
+                Task { @MainActor in
+                    self.potsByAccount = mapping
+                }
             }
         }
     }
@@ -138,7 +141,7 @@ final class PotsStore: ObservableObject {
         potsByAccount[accountId] = pots
     }
 
-    private static func buildMap(from accounts: [Account]) -> [Int: [Pot]] {
+    private nonisolated static func buildMap(from accounts: [Account]) -> [Int: [Pot]] {
         var mapping: [Int: [Pot]] = [:]
         for account in accounts {
             mapping[account.id] = account.pots ?? []
