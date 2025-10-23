@@ -762,7 +762,8 @@ private struct PotsPanelSection: View {
     private var allPots: [(account: Account, pot: Pot)] {
         var items: [(account: Account, pot: Pot)] = []
         for account in accounts {
-            for pot in (potsByAccount[account.id] ?? []) {
+            let sourcePots = (account.pots ?? potsByAccount[account.id] ?? [])
+            for pot in sourcePots {
                 items.append((account: account, pot: pot))
             }
         }
@@ -1177,35 +1178,181 @@ struct IncomeSchedulesBoardView: View {
 }
 
 struct SalarySorterView: View {
-    @EnvironmentObject private var activityStore: ActivityStore
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @EnvironmentObject private var transferStore: TransferSchedulesStore
+    @EnvironmentObject private var incomeStore: IncomeSchedulesStore
     @Binding var isPresented: Bool
+
+    private struct TransferPreview: Identifiable { let id = UUID(); let label: String; let amount: Double; let after: Double }
+
+    private var activeIncomes: [IncomeSchedule] {
+        incomeStore.schedules.filter { $0.isActive && !$0.isCompleted }
+    }
+    private var incomeTotal: Double { activeIncomes.reduce(0) { $0 + $1.amount } }
+
+    private var activeTransfers: [TransferSchedule] {
+        transferStore.schedules.filter { $0.isActive && !$0.isCompleted }
+    }
+
+    private var incomesByAccount: [Int: Double] {
+        var dict: [Int: Double] = [:]
+        for inc in activeIncomes {
+            dict[inc.accountId, default: 0] += inc.amount
+        }
+        return dict
+    }
+
+    private var previewsByAccount: [(account: Account, items: [TransferPreview], total: Double, afterIncome: Double, finalMain: Double)] {
+        // Starting balances
+        var accountAfter: [Int: Double] = Dictionary(uniqueKeysWithValues: accountsStore.accounts.map { ($0.id, $0.balance) })
+        var potAfter: [String: Double] = [:]
+        for account in accountsStore.accounts {
+            for pot in account.pots ?? [] { potAfter["\(account.id)|\(pot.name)"] = pot.balance }
+        }
+
+        // Apply incomes first (simulate deposits without executing)
+        for (accountId, amount) in incomesByAccount { accountAfter[accountId, default: 0] += amount }
+
+        // Build rows grouped by destination account, then simulate transfers
+        var grouped: [Int: [TransferPreview]] = [:]
+        var toMainTotals: [Int: Double] = [:]
+        for schedule in activeTransfers {
+            let destId = schedule.toAccountId
+            if let pot = schedule.toPotName, !pot.isEmpty {
+                let key = "\(destId)|\(pot)"
+                let newBal = (potAfter[key] ?? 0) + schedule.amount
+                potAfter[key] = newBal
+                grouped[destId, default: []].append(TransferPreview(label: pot, amount: schedule.amount, after: newBal))
+            } else {
+                let newBal = (accountAfter[destId] ?? 0) + schedule.amount
+                accountAfter[destId] = newBal
+                let label = accountsStore.account(for: destId)?.name ?? "Account #\(destId)"
+                grouped[destId, default: []].append(TransferPreview(label: label, amount: schedule.amount, after: newBal))
+                toMainTotals[destId, default: 0] += schedule.amount
+            }
+        }
+
+        // Produce ordered result
+        var result: [(Account, [TransferPreview], Double, Double, Double)] = []
+        for (id, items) in grouped {
+            if let account = accountsStore.account(for: id) {
+                let total = items.reduce(0) { $0 + $1.amount }
+                let afterIncome = accountAfter[id] ?? account.balance
+                let finalMain = (accountAfter[id] ?? account.balance) // already includes to-main since we incremented above
+                // But we want to show final main balance explicitly; it's `start + income + toMainTransfers`.
+                let start = accountsStore.account(for: id)?.balance ?? 0
+                let incomeAdded = incomesByAccount[id] ?? 0
+                let toMain = toMainTotals[id] ?? 0
+                let final = start + incomeAdded + toMain
+                result.append((account, items, total, start + incomeAdded, final))
+            }
+        }
+        return result.sorted { $0.0.name < $1.0.name }
+    }
+
+    private var totalTransfers: Double { previewsByAccount.reduce(0) { $0 + $1.total } }
+    private var remaining: Double { incomeTotal - totalTransfers }
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Salary Sorter")
-                    .font(.title3.bold())
-                Text("Breakdown of incoming salary allocations across pots and accounts.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                List {
-                    ForEach(activityStore.activities.filter { $0.category == .income }) { income in
-                        VStack(alignment: .leading) {
-                            Text(income.title)
-                            Text(income.date, style: .date)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Income summary card
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Income")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Text(incomeTitle())
+                            Spacer()
+                            Text(formatGBP(incomeTotal))
+                                .font(.title3.bold())
                         }
                     }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.green.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Text("Scheduled Transfers")
+                        .font(.headline)
+
+                    ForEach(previewsByAccount, id: \.0.id) { account, items, total, afterIncome, finalMain in
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text(account.name)
+                                    .font(.subheadline.bold())
+                                Spacer()
+                                HStack(spacing: 8) {
+                                    Text("After income: \(formatGBP(afterIncome))")
+                                        .font(.caption)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.green.opacity(0.15))
+                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    Text("Final: \(formatGBP(finalMain))")
+                                        .font(.caption)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.blue.opacity(0.15))
+                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                }
+                            }
+
+                            VStack(spacing: 8) {
+                                ForEach(items) { item in
+                                    HStack {
+                                        Text(item.label)
+                                        Spacer()
+                                        VStack(alignment: .trailing, spacing: 2) {
+                                            Text(formatGBP(item.amount)).font(.subheadline)
+                                            Text("after: \(formatGBP(item.after))")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(Color(.systemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+
+                    // Remaining card
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Remaining")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(formatGBP(max(remaining, 0)))
+                            .font(.title3.bold())
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
+                .padding()
             }
-            .padding()
             .navigationTitle("Salary Sorter")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { isPresented = false } }
             }
+            .task {
+                await incomeStore.load()
+                await transferStore.load()
+            }
         }
+    }
+
+    private func formatGBP(_ value: Double) -> String { "£" + String(format: "%.2f", value) }
+    private func incomeTitle() -> String {
+        if activeIncomes.count == 1 { return activeIncomes.first?.company ?? "Income" }
+        if activeIncomes.isEmpty { return "Income" }
+        return "\(activeIncomes.count) Schedules"
     }
 }
 

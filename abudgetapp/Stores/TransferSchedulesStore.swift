@@ -10,6 +10,7 @@ final class TransferSchedulesStore: ObservableObject {
     }
 
     @Published private(set) var schedules: [TransferSchedule] = []
+    @Published private(set) var lastResetAt: String?
     @Published var isLoading = false
     @Published var lastMessage: StatusMessage?
     @Published var lastError: APIServiceError?
@@ -33,6 +34,7 @@ final class TransferSchedulesStore: ObservableObject {
         do {
             let fetched = try await service.getTransferSchedules()
             schedules = fetched
+            lastResetAt = await service.getLastResetAt()
         } catch let error as APIServiceError {
             lastError = error
             lastMessage = StatusMessage(title: "Transfers", message: error.localizedDescription, kind: .error)
@@ -55,6 +57,23 @@ final class TransferSchedulesStore: ObservableObject {
             let apiError = APIServiceError.unknown(error)
             lastError = apiError
             lastMessage = StatusMessage(title: "Add Transfer Failed", message: apiError.localizedDescription, kind: .error)
+        }
+    }
+
+    func update(id: Int, submission: TransferScheduleSubmission) async {
+        do {
+            let schedule = try await service.updateTransferSchedule(scheduleId: id, transfer: submission)
+            if let idx = schedules.firstIndex(where: { $0.id == id }) {
+                schedules[idx] = schedule
+            }
+            lastMessage = StatusMessage(title: "Transfer Updated", message: schedule.description, kind: .success)
+        } catch let error as APIServiceError {
+            lastError = error
+            lastMessage = StatusMessage(title: "Update Transfer Failed", message: error.localizedDescription, kind: .error)
+        } catch {
+            let apiError = APIServiceError.unknown(error)
+            lastError = apiError
+            lastMessage = StatusMessage(title: "Update Transfer Failed", message: apiError.localizedDescription, kind: .error)
         }
     }
 

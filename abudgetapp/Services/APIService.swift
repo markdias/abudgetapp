@@ -29,6 +29,7 @@ protocol APIServiceProtocol {
 
     func getTransferSchedules() async throws -> [TransferSchedule]
     func addTransferSchedule(transfer: TransferScheduleSubmission) async throws -> TransferSchedule
+    func updateTransferSchedule(scheduleId: Int, transfer: TransferScheduleSubmission) async throws -> TransferSchedule
     func executeTransferSchedule(scheduleId: Int) async throws -> TransferExecutionResponse
     func executeAllTransferSchedules() async throws -> TransferExecutionResponse
     func deleteTransferSchedule(scheduleId: Int) async throws -> MessageResponse
@@ -46,6 +47,7 @@ protocol APIServiceProtocol {
     func exportBudgetState() async throws -> Data
     func importBudgetState(from data: Data) async throws -> ResetResponse
     func clearAllData() async throws -> ResetResponse
+    func getLastResetAt() async -> String?
 }
 
 enum APIServiceError: LocalizedError {
@@ -247,6 +249,14 @@ final class APIService: APIServiceProtocol {
         }
     }
 
+    func updateTransferSchedule(scheduleId: Int, transfer: TransferScheduleSubmission) async throws -> TransferSchedule {
+        do {
+            return try await store.updateTransferSchedule(id: scheduleId, submission: transfer)
+        } catch {
+            throw map(error)
+        }
+    }
+
     func executeTransferSchedule(scheduleId: Int) async throws -> TransferExecutionResponse {
         do {
             return try await store.executeTransferSchedule(id: scheduleId)
@@ -343,6 +353,10 @@ final class APIService: APIServiceProtocol {
         } catch {
             throw map(error)
         }
+    }
+
+    func getLastResetAt() async -> String? {
+        await store.lastResetTimestamp()
     }
 
     private func map(_ error: Error) -> APIServiceError {
