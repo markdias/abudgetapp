@@ -31,6 +31,11 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Settings** – Local storage management (restore sample data, reload, reset balances), card reorder flow, and diagnostics launcher.
 * **Diagnostics** – Developer QA surface that adds/removes sample data, executes schedules, resets balances, and reports status for each step.
 
+## Transaction Rules
+
+* **Expenses** – Represent money that has been moved but not yet spent. They always land in an account's main balance and never post directly to pots.
+* **Transfers** – Automate movements into pots only. When composing or editing a transfer schedule you must choose a destination pot; main account balances are no longer valid transfer targets.
+
 ## Local Persistence
 
 Budget data is saved locally on the device. A bundled sample dataset seeds the app on first launch, and you can restore it at any time from **Settings → Local Storage → Restore Sample Dataset**. Data lives in the app's Application Support directory and no network connectivity is required.

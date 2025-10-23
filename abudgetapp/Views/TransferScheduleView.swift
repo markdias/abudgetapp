@@ -181,7 +181,11 @@ struct TransferScheduleView: View {
         } else {
             to += "Account #\(schedule.toAccountId)"
         }
-        if let pot = schedule.toPotName, !pot.isEmpty { to += " · \(pot)" }
+        if let pot = schedule.toPotName, !pot.isEmpty {
+            to += " · Pot: \(pot)"
+        } else {
+            to += " · Pot: —"
+        }
         return to
     }
 }
@@ -200,6 +204,15 @@ private struct TransferEditorSheet: View {
     @State private var toAccountId: Int
     @State private var toPotName: String = ""
 
+    private var destinationAccounts: [Account] {
+        var accounts = accountsStore.accounts.filter { !($0.pots?.isEmpty ?? true) }
+        if accounts.contains(where: { $0.id == toAccountId }) == false,
+           let current = accountsStore.account(for: toAccountId) {
+            accounts.insert(current, at: 0)
+        }
+        return accounts
+    }
+
     init(schedule: TransferSchedule) {
         self.schedule = schedule
         _toAccountId = State(initialValue: schedule.toAccountId)
@@ -209,20 +222,27 @@ private struct TransferEditorSheet: View {
         NavigationStack {
             Form {
                 Section("Destination") {
-                    Picker("Account", selection: $toAccountId) {
-                        ForEach(accountsStore.accounts) { acc in
-                            Text(acc.name).tag(acc.id)
+                    if destinationAccounts.isEmpty {
+                        Text("Add a pot to an account before selecting a transfer destination.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Account", selection: $toAccountId) {
+                            ForEach(destinationAccounts) { acc in
+                                Text(acc.name).tag(acc.id)
+                            }
                         }
                     }
                     if let pots = accountsStore.account(for: toAccountId)?.pots, !pots.isEmpty {
                         Picker("Pot", selection: $toPotName) {
-                            Text("Main Account").tag("")
                             ForEach(pots, id: \.name) { pot in
                                 Text(pot.name).tag(pot.name)
                             }
                         }
                     } else {
-                        TextField("Pot (optional)", text: $toPotName)
+                        Text("Selected account has no pots available. Add a pot before saving this transfer.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Section("Details") {
@@ -241,26 +261,52 @@ private struct TransferEditorSheet: View {
                 description = schedule.description
                 amount = String(format: "%.2f", schedule.amount)
                 toPotName = schedule.toPotName ?? ""
+                if destinationAccounts.contains(where: { $0.id == schedule.toAccountId }) == false,
+                   let firstAccount = destinationAccounts.first {
+                    toAccountId = firstAccount.id
+                }
+                updatePotSelectionIfNeeded()
             }
+            .onChange(of: toAccountId) { _ in updatePotSelectionIfNeeded() }
         }
     }
 
-    private var canSave: Bool { Double(amount) != nil && !description.isEmpty }
+    private var canSave: Bool {
+        guard Double(amount) != nil else { return false }
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPot = toPotName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDescription.isEmpty, !trimmedPot.isEmpty else { return false }
+        guard let pots = accountsStore.account(for: toAccountId)?.pots, !pots.isEmpty else { return false }
+        return true
+    }
 
     private func save() async {
         guard let money = Double(amount) else { return }
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPotName = toPotName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDescription.isEmpty, !trimmedPotName.isEmpty else { return }
         let submission = TransferScheduleSubmission(
             fromAccountId: schedule.fromAccountId,
             fromPotId: schedule.fromPotId,
             toAccountId: toAccountId,
-            toPotName: toPotName.isEmpty ? nil : toPotName,
+            toPotName: trimmedPotName,
             amount: money,
-            description: description,
+            description: trimmedDescription,
             items: schedule.items,
             isDirectPotTransfer: schedule.isDirectPotTransfer
         )
         await transferStore.update(id: schedule.id, submission: submission)
         dismiss()
+    }
+
+    private func updatePotSelectionIfNeeded() {
+        guard let pots = accountsStore.account(for: toAccountId)?.pots, !pots.isEmpty else {
+            toPotName = ""
+            return
+        }
+        if toPotName.isEmpty || !pots.contains(where: { $0.name == toPotName }) {
+            toPotName = pots.first?.name ?? ""
+        }
     }
 }
 

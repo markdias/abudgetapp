@@ -709,16 +709,15 @@ actor LocalBudgetStore {
         }
 
         // Credit destination
+        guard let destinationPot = schedule.toPotName, !destinationPot.isEmpty else {
+            throw StoreError.invalidOperation("Transfer schedule requires a destination pot")
+        }
         try mutateAccount(id: schedule.toAccountId) { account in
-            if let potName = schedule.toPotName, !potName.isEmpty {
-                guard var pots = account.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
-                    throw StoreError.notFound("Pot \(potName) not found")
-                }
-                pots[potIndex].balance += schedule.amount
-                account.pots = pots
-            } else {
-                account.balance += schedule.amount
+            guard var pots = account.pots, let potIndex = pots.firstIndex(where: { $0.name == destinationPot }) else {
+                throw StoreError.notFound("Pot \(destinationPot) not found")
             }
+            pots[potIndex].balance += schedule.amount
+            account.pots = pots
         }
     }
 

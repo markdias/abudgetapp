@@ -558,13 +558,13 @@ public struct TransferScheduleSubmission: Codable {
     public var fromAccountId: Int?
     public var fromPotId: String?
     public let toAccountId: Int
-    public var toPotName: String?
+    public var toPotName: String
     public let amount: Double
     public let description: String
     public var items: [TransferItem]?
     public var isDirectPotTransfer: Bool?
-    
-    public init(fromAccountId: Int? = nil, fromPotId: String? = nil, toAccountId: Int, toPotName: String? = nil,
+
+    public init(fromAccountId: Int? = nil, fromPotId: String? = nil, toAccountId: Int, toPotName: String,
          amount: Double, description: String, items: [TransferItem]? = nil, isDirectPotTransfer: Bool? = nil) {
         self.fromAccountId = fromAccountId
         self.fromPotId = fromPotId

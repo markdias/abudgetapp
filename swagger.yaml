@@ -565,6 +565,12 @@ components:
 
     TransferSchedule:
       type: object
+      required:
+        - id
+        - toAccountId
+        - amount
+        - description
+        - toPotName
       properties:
         id:
           type: integer

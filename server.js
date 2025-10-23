@@ -946,10 +946,10 @@ app.get('/transfer-schedules', (req, res) => {
 // Update add-transfer-schedule endpoint to remove isScheduled marking
 app.post('/add-transfer-schedule', async (req, res) => {
   try {
-    const { 
-      fromAccountId, 
-      fromPotId, 
-      toAccountId, 
+    const {
+      fromAccountId,
+      fromPotId,
+      toAccountId,
       toPotName,
       amount, 
       description,
@@ -969,13 +969,17 @@ app.post('/add-transfer-schedule', async (req, res) => {
     if (!amount || amount <= 0) {
       throw new Error('Valid amount is required');
     }
+    const normalizedToPotName = typeof toPotName === 'string' ? toPotName.trim() : '';
+    if (!normalizedToPotName) {
+      throw new Error('toPotName is required for transfers');
+    }
 
     const newSchedule = {
       id: Date.now(),
       fromAccountId,
       fromPotId,
       toAccountId,
-      toPotName: isDirectPotTransfer ? toPotName : undefined,
+      toPotName: normalizedToPotName,
       amount,
       description,
       isActive: true,
@@ -1095,6 +1099,15 @@ app.post('/execute-transfer-schedule', async (req, res) => {
       return res.status(404).json({ error: 'Destination account not found' });
     }
 
+    const destinationPotName = typeof schedule.toPotName === 'string' ? schedule.toPotName.trim() : '';
+    if (!destinationPotName) {
+      return res.status(400).json({ error: 'Destination pot is required for transfers' });
+    }
+    const toPot = toAccount.pots?.find(p => p.name === destinationPotName);
+    if (!toPot) {
+      return res.status(404).json({ error: 'Destination pot not found' });
+    }
+
     // Perform the transfer with proper error handling
     try {
       if (fromPot) {
@@ -1103,15 +1116,8 @@ app.post('/execute-transfer-schedule', async (req, res) => {
         fromAccount.balance = Number((fromAccount.balance - schedule.amount).toFixed(2));
       }
 
-      if (schedule.toPotName) {
-        const toPot = toAccount.pots?.find(p => p.name === schedule.toPotName);
-        if (!toPot) {
-          throw new Error('Destination pot not found');
-        }
-        toPot.balance = Number((toPot.balance + schedule.amount).toFixed(2));
-      } else {
-        toAccount.balance = Number((toAccount.balance + schedule.amount).toFixed(2));
-      }
+      toPot.balance = Number((toPot.balance + schedule.amount).toFixed(2));
+      schedule.toPotName = destinationPotName;
 
       // Mark schedule as completed
       schedule.isCompleted = true;
@@ -1131,6 +1137,7 @@ app.post('/execute-transfer-schedule', async (req, res) => {
       } else {
         fromAccount.balance = Number((fromAccount.balance + schedule.amount).toFixed(2));
       }
+      toPot.balance = Number((toPot.balance - schedule.amount).toFixed(2));
       throw transferError;
     }
   } catch (error) {

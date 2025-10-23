@@ -242,6 +242,15 @@ struct TransferComposerView: View {
     @State private var description = ""
     @State private var isDirectPotTransfer = false
 
+    private var destinationAccounts: [Account] {
+        accountsStore.accounts.filter { account in
+            if let pots = potsStore.potsByAccount[account.id] {
+                return !pots.isEmpty
+            }
+            return !(account.pots?.isEmpty ?? true)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -262,17 +271,25 @@ struct TransferComposerView: View {
                     }
                 }
                 Section("To") {
-                    Picker("Account", selection: $toAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
+                    if destinationAccounts.isEmpty {
+                        Text("Add a pot to an account before scheduling a transfer destination.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Account", selection: $toAccountId) {
+                            Text("Select Account").tag(nil as Int?)
+                            ForEach(destinationAccounts) { account in
+                                Text(account.name).tag(account.id as Int?)
+                            }
                         }
-                    }
-                    if let accountId = toAccountId, let pots = potsStore.potsByAccount[accountId], !pots.isEmpty {
-                        Picker("Pot", selection: $toPotName) {
-                            Text("Account Balance").tag("")
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name)
+                        if let accountId = toAccountId {
+                            let pots = potsStore.potsByAccount[accountId] ?? accountsStore.account(for: accountId)?.pots ?? []
+                            if !pots.isEmpty {
+                            Picker("Pot", selection: $toPotName) {
+                                ForEach(pots, id: \.name) { pot in
+                                    Text(pot.name).tag(pot.name)
+                                }
+                            }
                             }
                         }
                     }
@@ -289,24 +306,67 @@ struct TransferComposerView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { isPresented = false } }
                 ToolbarItem(placement: .topBarTrailing) { Button("Save", action: save).disabled(!isValid) }
             }
+            .onChange(of: toAccountId) { newValue in
+                guard let id = newValue else {
+                    toPotName = ""
+                    return
+                }
+                let pots = potsStore.potsByAccount[id] ?? accountsStore.account(for: id)?.pots ?? []
+                guard !pots.isEmpty else {
+                    toPotName = ""
+                    return
+                }
+                if !pots.contains(where: { $0.name == toPotName }) {
+                    toPotName = pots.first?.name ?? ""
+                }
+            }
+            .onAppear {
+                if toAccountId == nil, let firstAccount = destinationAccounts.first {
+                    toAccountId = firstAccount.id
+                }
+                guard let id = toAccountId else {
+                    toPotName = ""
+                    return
+                }
+                let pots = potsStore.potsByAccount[id] ?? accountsStore.account(for: id)?.pots ?? []
+                guard !pots.isEmpty else {
+                    toPotName = ""
+                    return
+                }
+                if toPotName.isEmpty || !pots.contains(where: { $0.name == toPotName }) {
+                    toPotName = pots.first?.name ?? ""
+                }
+            }
         }
     }
 
     private var isValid: Bool {
-        guard let toAccountId = toAccountId, let amountValue = Double(amount) else { return false }
+        guard let toAccountId = toAccountId,
+              let amountValue = Double(amount),
+              amountValue > 0 else { return false }
         if fromAccountId == nil && fromPotName.isEmpty { return false }
-        return amountValue > 0 && !description.isEmpty && toAccountId > 0
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPot = toPotName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDescription.isEmpty, !trimmedPot.isEmpty else { return false }
+        guard destinationAccounts.contains(where: { $0.id == toAccountId }) else { return false }
+        let availablePots = potsStore.potsByAccount[toAccountId] ?? accountsStore.account(for: toAccountId)?.pots ?? []
+        guard !availablePots.isEmpty else { return false }
+        return true
     }
 
     private func save() {
-        guard let toAccountId = toAccountId, let amountValue = Double(amount) else { return }
+        guard let toAccountId = toAccountId,
+              let amountValue = Double(amount) else { return }
+        let trimmedPotName = toPotName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPotName.isEmpty, !trimmedDescription.isEmpty else { return }
         let submission = TransferScheduleSubmission(
             fromAccountId: fromAccountId,
             fromPotId: fromPotName.isEmpty ? nil : fromPotName,
             toAccountId: toAccountId,
-            toPotName: toPotName.isEmpty ? nil : toPotName,
+            toPotName: trimmedPotName,
             amount: amountValue,
-            description: description,
+            description: trimmedDescription,
             items: nil,
             isDirectPotTransfer: isDirectPotTransfer
         )
