@@ -315,9 +315,6 @@ actor LocalBudgetStore {
     }
 
     func addTransaction(_ submission: TransactionSubmission) throws -> TransactionRecord {
-        guard state.accounts.contains(where: { $0.id == submission.fromAccountId }) else {
-            throw StoreError.notFound("Account #\(submission.fromAccountId) not found")
-        }
         guard state.accounts.contains(where: { $0.id == submission.toAccountId }) else {
             throw StoreError.notFound("Account #\(submission.toAccountId) not found")
         }
@@ -615,32 +612,52 @@ actor LocalBudgetStore {
     }
 
     private func adjustTransactionBalances(for record: TransactionRecord, multiplier: Double) throws {
-        guard let fromIndex = state.accounts.firstIndex(where: { $0.id == record.fromAccountId }) else {
-            throw StoreError.notFound("Account #\(record.fromAccountId) not found")
-        }
         guard let toIndex = state.accounts.firstIndex(where: { $0.id == record.toAccountId }) else {
             throw StoreError.notFound("Account #\(record.toAccountId) not found")
         }
 
-        if fromIndex == toIndex {
-            var account = state.accounts[fromIndex]
+        if let fromAccountId = record.fromAccountId {
+            guard let fromIndex = state.accounts.firstIndex(where: { $0.id == fromAccountId }) else {
+                throw StoreError.notFound("Account #\(fromAccountId) not found")
+            }
+
+            if fromIndex == toIndex {
+                var account = state.accounts[fromIndex]
+                if let potName = record.toPotName, !potName.isEmpty {
+                    guard var pots = account.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
+                        throw StoreError.notFound("Pot \(potName) not found")
+                    }
+                    var pot = pots[potIndex]
+                    pot.balance += record.amount * multiplier
+                    pots[potIndex] = pot
+                    account.pots = pots
+                }
+                state.accounts[fromIndex] = account
+                return
+            }
+
+            var fromAccount = state.accounts[fromIndex]
+            var toAccount = state.accounts[toIndex]
+
+            fromAccount.balance -= record.amount * multiplier
+            toAccount.balance += record.amount * multiplier
+
             if let potName = record.toPotName, !potName.isEmpty {
-                guard var pots = account.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
+                guard var pots = toAccount.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
                     throw StoreError.notFound("Pot \(potName) not found")
                 }
                 var pot = pots[potIndex]
                 pot.balance += record.amount * multiplier
                 pots[potIndex] = pot
-                account.pots = pots
+                toAccount.pots = pots
             }
-            state.accounts[fromIndex] = account
+
+            state.accounts[fromIndex] = fromAccount
+            state.accounts[toIndex] = toAccount
             return
         }
 
-        var fromAccount = state.accounts[fromIndex]
         var toAccount = state.accounts[toIndex]
-
-        fromAccount.balance -= record.amount * multiplier
         toAccount.balance += record.amount * multiplier
 
         if let potName = record.toPotName, !potName.isEmpty {
@@ -653,7 +670,6 @@ actor LocalBudgetStore {
             toAccount.pots = pots
         }
 
-        state.accounts[fromIndex] = fromAccount
         state.accounts[toIndex] = toAccount
     }
 

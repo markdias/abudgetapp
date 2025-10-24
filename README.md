@@ -37,7 +37,7 @@ Budget data is saved locally on the device. A bundled sample dataset seeds the a
 ## Running the App
 
 1. Launch the app to load the bundled sample dataset (or restore it from Settings if you have existing data).
-2. Use the dashboard add menu to create transactions, expenses, incomes, accounts, and pots. Transactions can move money between accounts (and optional pots), expenses can redirect funds to destination accounts, and incomes can land directly in a pot.
+2. Use the dashboard add menu to create transactions, expenses, incomes, accounts, and pots. Transactions add money to an account (and optional pot), expenses can redirect funds to destination accounts, and incomes can land directly in a pot.
 3. Review or edit any item from the home activity feed or the Activity tab. Swipe actions or detail sheets let you update amounts, day-of-month scheduling, destinations, and associated metadata.
 4. Open the Transfers tab to review or update transfer schedules, execute incomes, reset balances, or run the salary sorter. Use the Settings tab for diagnostics, restoring the sample dataset, and card reordering.
 

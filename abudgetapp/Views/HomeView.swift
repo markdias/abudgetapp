@@ -30,7 +30,7 @@ struct HomeView: View {
     @State private var exportDocument = JSONDocument()
     @State private var showingDeleteAllConfirm = false
     @State private var selectedPotContext: PotEditContext? = nil
-    @State private var transactionSourceAccountId: Int? = nil
+    @State private var transactionDestinationAccountId: Int? = nil
 
     private let cardSpacing: CGFloat = 72
 
@@ -94,7 +94,7 @@ struct HomeView: View {
                             onReorder: handleReorder,
                             onAddPot: { _ in showingAddPot = true },
                             onAddTransaction: { account in
-                                transactionSourceAccountId = account.id
+                                transactionDestinationAccountId = account.id
                                 showingAddTransaction = true
                             },
                             onManageCards: { showingCardReorder = true },
@@ -153,7 +153,7 @@ struct HomeView: View {
 
                     Menu {
                         Button("Add Transaction") {
-                            transactionSourceAccountId = nil
+                            transactionDestinationAccountId = nil
                             showingAddTransaction = true
                         }
                         Button("Add Expense", action: { showingAddExpense = true })
@@ -234,7 +234,7 @@ struct HomeView: View {
                 ExpenseFormView(isPresented: $showingAddExpense)
             }
             .sheet(isPresented: $showingAddTransaction) {
-                TransactionFormView(isPresented: $showingAddTransaction, defaultFromAccountId: transactionSourceAccountId)
+                TransactionFormView(isPresented: $showingAddTransaction, defaultToAccountId: transactionDestinationAccountId)
             }
             .sheet(isPresented: $showingPotsManager) {
                 PotsManagementView(isPresented: $showingPotsManager)
@@ -1193,7 +1193,6 @@ private struct TransactionActivityEditorView: View {
 
     let activity: ActivityItem
 
-    @State private var fromAccountId: Int?
     @State private var toAccountId: Int?
     @State private var selectedPot: String?
     @State private var name: String = ""
@@ -1214,15 +1213,6 @@ private struct TransactionActivityEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("From") {
-                    Picker("Account", selection: $fromAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
-                        }
-                    }
-                }
-
                 Section("To") {
                     Picker("Account", selection: $toAccountId) {
                         Text("Select Account").tag(nil as Int?)
@@ -1261,14 +1251,13 @@ private struct TransactionActivityEditorView: View {
     }
 
     private var canSave: Bool {
-        guard let _ = fromAccountId, let _ = toAccountId, let money = Double(amount), money > 0 else { return false }
+        guard let _ = toAccountId, let money = Double(amount), money > 0 else { return false }
         guard !name.isEmpty, !vendor.isEmpty, let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
         return true
     }
 
     private func preload() {
         if let recordId = transactionId, let record = accountsStore.transaction(for: recordId) {
-            fromAccountId = record.fromAccountId
             toAccountId = record.toAccountId
             selectedPot = record.toPotName
             name = record.name
@@ -1280,8 +1269,7 @@ private struct TransactionActivityEditorView: View {
                 dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
             }
         } else {
-            fromAccountId = accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id
-            toAccountId = accountsStore.accounts.first(where: { $0.name == activity.metadata["counterparty"] })?.id
+            toAccountId = accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id
             selectedPot = activity.metadata["potName"].flatMap { $0.isEmpty ? nil : $0 }
             name = activity.title
             vendor = activity.company ?? ""
@@ -1292,7 +1280,6 @@ private struct TransactionActivityEditorView: View {
 
     private func save() async {
         guard let recordId = transactionId,
-              let fromAccountId,
               let toAccountId,
               let money = Double(amount)
         else { return }
@@ -1302,7 +1289,7 @@ private struct TransactionActivityEditorView: View {
             vendor: vendor,
             amount: money,
             date: dayOfMonth,
-            fromAccountId: fromAccountId,
+            fromAccountId: nil,
             toAccountId: toAccountId,
             toPotName: selectedPot
         )

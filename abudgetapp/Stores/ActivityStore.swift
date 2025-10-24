@@ -183,50 +183,37 @@ final class ActivityStore: ObservableObject {
 
         for transaction in transactions {
             guard let date = ActivityStore.parse(dateString: transaction.date) else { continue }
-            let counterpartyOut = accountMap[transaction.toAccountId]?.name ?? ""
-            let counterpartyIn = accountMap[transaction.fromAccountId]?.name ?? ""
+            guard let toAccount = accountMap[transaction.toAccountId] else { continue }
 
-            if let fromAccount = accountMap[transaction.fromAccountId] {
-                let metadata: [String: String] = [
-                    "type": "transaction",
-                    "transactionId": String(transaction.id),
-                    "direction": "out",
-                    "counterparty": counterpartyOut,
-                    "potName": transaction.toPotName ?? ""
-                ]
-                items.append(ActivityItem(
-                    id: "transaction-\(transaction.id)-out",
-                    title: transaction.name,
-                    amount: transaction.amount,
-                    date: date,
-                    accountName: fromAccount.name,
-                    potName: nil,
-                    company: transaction.vendor,
-                    category: .transfer,
-                    metadata: metadata
-                ))
+            var metadata: [String: String] = [
+                "type": "transaction",
+                "transactionId": String(transaction.id),
+                "direction": "in"
+            ]
+
+            if let fromAccountId = transaction.fromAccountId,
+               let fromAccount = accountMap[fromAccountId] {
+                metadata["counterparty"] = fromAccount.name
+                metadata["fromAccountId"] = String(fromAccountId)
+            } else {
+                metadata["counterparty"] = ""
             }
 
-            if let toAccount = accountMap[transaction.toAccountId] {
-                let metadata: [String: String] = [
-                    "type": "transaction",
-                    "transactionId": String(transaction.id),
-                    "direction": "in",
-                    "counterparty": counterpartyIn,
-                    "potName": transaction.toPotName ?? ""
-                ]
-                items.append(ActivityItem(
-                    id: "transaction-\(transaction.id)-in",
-                    title: transaction.name,
-                    amount: transaction.amount,
-                    date: date,
-                    accountName: toAccount.name,
-                    potName: transaction.toPotName,
-                    company: transaction.vendor,
-                    category: .transfer,
-                    metadata: metadata
-                ))
+            if let potName = transaction.toPotName, !potName.isEmpty {
+                metadata["potName"] = potName
             }
+
+            items.append(ActivityItem(
+                id: "transaction-\(transaction.id)",
+                title: transaction.name,
+                amount: transaction.amount,
+                date: date,
+                accountName: toAccount.name,
+                potName: transaction.toPotName,
+                company: transaction.vendor,
+                category: .transfer,
+                metadata: metadata
+            ))
         }
 
         items.sort { $0.date > $1.date }
