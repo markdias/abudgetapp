@@ -4,18 +4,20 @@ import Foundation
 final class ActivityStore: ObservableObject {
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All"
-        case scheduled = "Scheduled"
-        case expenses = "Expenses"
         case income = "Income"
+        case expenses = "Expenses"
+        case transfers = "Transfers"
+        case scheduled = "Scheduled"
 
         var id: String { rawValue }
 
         var category: ActivityCategory? {
             switch self {
             case .all: return nil
-            case .scheduled: return .scheduledPayment
-            case .expenses: return .expense
             case .income: return .income
+            case .expenses: return .expense
+            case .transfers: return .transfer
+            case .scheduled: return .scheduledPayment
             }
         }
     }
@@ -35,20 +37,24 @@ final class ActivityStore: ObservableObject {
     @Published private(set) var markedIdentifiers: Set<ActivityItem.ID> = []
 
     private var accountsObserver: NSObjectProtocol?
+    private var currentTransactions: [TransactionRecord] = []
 
     init(accountsStore: AccountsStore) {
-        let items = Self.buildActivities(from: accountsStore.accounts)
+        let items = Self.buildActivities(from: accountsStore.accounts, transactions: accountsStore.transactions)
         self.activities = items
         self.filteredActivities = items
+        self.currentTransactions = accountsStore.transactions
         accountsObserver = NotificationCenter.default.addObserver(
             forName: AccountsStore.accountsDidChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self = self else { return }
             guard let accounts = notification.userInfo?["accounts"] as? [Account] else { return }
-            let items = Self.buildActivities(from: accounts)
-            Task { @MainActor in
+            let transactions = notification.userInfo?["transactions"] as? [TransactionRecord]
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if let transactions { self.currentTransactions = transactions }
+                let items = Self.buildActivities(from: accounts, transactions: self.currentTransactions)
                 self.activities = items
                 self.applyFilter()
             }
@@ -77,8 +83,9 @@ final class ActivityStore: ObservableObject {
         markedIdentifiers.removeAll()
     }
 
-    private nonisolated static func buildActivities(from accounts: [Account]) -> [ActivityItem] {
+    private nonisolated static func buildActivities(from accounts: [Account], transactions: [TransactionRecord]) -> [ActivityItem] {
         var items: [ActivityItem] = []
+        let accountMap = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
         for account in accounts {
             if let incomes = account.incomes {
                 for income in incomes {
@@ -90,10 +97,13 @@ final class ActivityStore: ObservableObject {
                         amount: income.amount,
                         date: date,
                         accountName: account.name,
-                        potName: nil,
+                        potName: income.potName,
                         company: income.company,
                         category: .income,
-                        metadata: ["type": "income"]
+                        metadata: [
+                            "type": "income",
+                            "potName": income.potName ?? ""
+                        ]
                     ))
                 }
             }
@@ -102,16 +112,24 @@ final class ActivityStore: ObservableObject {
                 for expense in expenses {
                     guard let date = ActivityStore.parse(dateString: expense.date) else { continue }
                     let id = "expense-\(expense.id)"
+                    var metadata: [String: String] = ["type": "expense"]
+                    if let toId = expense.toAccountId, let toAccount = accountMap[toId] {
+                        metadata["toAccountId"] = String(toId)
+                        metadata["toAccountName"] = toAccount.name
+                    }
+                    if let potName = expense.toPotName {
+                        metadata["toPotName"] = potName
+                    }
                     items.append(ActivityItem(
                         id: id,
                         title: expense.description,
                         amount: expense.amount,
                         date: date,
                         accountName: account.name,
-                        potName: nil,
+                        potName: expense.toPotName,
                         company: nil,
                         category: .expense,
-                        metadata: ["type": "expense"]
+                        metadata: metadata
                     ))
                 }
             }
@@ -160,6 +178,54 @@ final class ActivityStore: ObservableObject {
                         }
                     }
                 }
+            }
+        }
+
+        for transaction in transactions {
+            guard let date = ActivityStore.parse(dateString: transaction.date) else { continue }
+            let counterpartyOut = accountMap[transaction.toAccountId]?.name ?? ""
+            let counterpartyIn = accountMap[transaction.fromAccountId]?.name ?? ""
+
+            if let fromAccount = accountMap[transaction.fromAccountId] {
+                let metadata: [String: String] = [
+                    "type": "transaction",
+                    "transactionId": String(transaction.id),
+                    "direction": "out",
+                    "counterparty": counterpartyOut,
+                    "potName": transaction.toPotName ?? ""
+                ]
+                items.append(ActivityItem(
+                    id: "transaction-\(transaction.id)-out",
+                    title: transaction.name,
+                    amount: transaction.amount,
+                    date: date,
+                    accountName: fromAccount.name,
+                    potName: nil,
+                    company: transaction.vendor,
+                    category: .transfer,
+                    metadata: metadata
+                ))
+            }
+
+            if let toAccount = accountMap[transaction.toAccountId] {
+                let metadata: [String: String] = [
+                    "type": "transaction",
+                    "transactionId": String(transaction.id),
+                    "direction": "in",
+                    "counterparty": counterpartyIn,
+                    "potName": transaction.toPotName ?? ""
+                ]
+                items.append(ActivityItem(
+                    id: "transaction-\(transaction.id)-in",
+                    title: transaction.name,
+                    amount: transaction.amount,
+                    date: date,
+                    accountName: toAccount.name,
+                    potName: transaction.toPotName,
+                    company: transaction.vendor,
+                    category: .transfer,
+                    metadata: metadata
+                ))
             }
         }
 

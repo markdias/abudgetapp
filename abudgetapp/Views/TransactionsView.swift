@@ -7,8 +7,11 @@ import SwiftUI
 
 struct TransactionsView: View {
     @EnvironmentObject private var activityStore: ActivityStore
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @EnvironmentObject private var scheduledPaymentsStore: ScheduledPaymentsStore
     @State private var searchText = ""
     @State private var selectedFilter: ActivityStore.Filter = .all
+    @State private var selectedActivity: ActivityItem?
 
     private var filteredActivities: [ActivityItem] {
         var activities = activityStore.activities
@@ -28,6 +31,23 @@ struct TransactionsView: View {
             List {
                 ForEach(filteredActivities) { activity in
                     ActivityRow(activity: activity, isMarked: activityStore.markedIdentifiers.contains(activity.id))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedActivity = activity
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                Task { await deleteActivity(activity) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+
+                            Button {
+                                selectedActivity = activity
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }.tint(.blue)
+                        }
                 }
             }
             .overlay {
@@ -51,11 +71,37 @@ struct TransactionsView: View {
                 }
             }
             .searchable(text: $searchText, prompt: "Search activity")
+            .sheet(item: $selectedActivity) { ActivityEditorSheet(activity: $0) }
+        }
+    }
+
+    private func deleteActivity(_ activity: ActivityItem) async {
+        guard let accountId = accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id else { return }
+        let parts = activity.id.split(separator: "-")
+        let numericId = Int(parts.last ?? "")
+        switch activity.category {
+        case .income:
+            if let id = numericId { await accountsStore.deleteIncome(accountId: accountId, incomeId: id) }
+        case .expense:
+            if let id = numericId { await accountsStore.deleteExpense(accountId: accountId, expenseId: id) }
+        case .scheduledPayment:
+            if let id = numericId, let context = scheduledPaymentsStore.items.first(where: { $0.accountId == accountId && $0.payment.id == id }) {
+                await scheduledPaymentsStore.deletePayment(context: context)
+            }
+        case .transfer:
+            if let transactionIdString = activity.metadata["transactionId"], let transactionId = Int(transactionIdString) {
+                await accountsStore.deleteTransaction(id: transactionId)
+            }
         }
     }
 }
 
 #Preview {
-    TransactionsView()
-        .environmentObject(ActivityStore(accountsStore: AccountsStore()))
+    let accountsStore = AccountsStore()
+    let activityStore = ActivityStore(accountsStore: accountsStore)
+    let scheduledStore = ScheduledPaymentsStore(accountsStore: accountsStore)
+    return TransactionsView()
+        .environmentObject(activityStore)
+        .environmentObject(accountsStore)
+        .environmentObject(scheduledStore)
 }

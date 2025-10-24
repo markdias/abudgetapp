@@ -17,6 +17,7 @@ struct HomeView: View {
     @State private var showingAddPot = false
     @State private var showingAddIncome = false
     @State private var showingAddExpense = false
+    @State private var showingAddTransaction = false
     @State private var showingPotsManager = false
     @State private var showingSavings = false
     @State private var showingIncomeSchedules = false
@@ -29,6 +30,7 @@ struct HomeView: View {
     @State private var exportDocument = JSONDocument()
     @State private var showingDeleteAllConfirm = false
     @State private var selectedPotContext: PotEditContext? = nil
+    @State private var transactionSourceAccountId: Int? = nil
 
     private let cardSpacing: CGFloat = 72
 
@@ -91,7 +93,10 @@ struct HomeView: View {
                             spacing: cardSpacing,
                             onReorder: handleReorder,
                             onAddPot: { _ in showingAddPot = true },
-                            onAddTransaction: { _ in showingAddExpense = true },
+                            onAddTransaction: { account in
+                                transactionSourceAccountId = account.id
+                                showingAddTransaction = true
+                            },
                             onManageCards: { showingCardReorder = true },
                             onDelete: { account in
                                 Task { await accountsStore.deleteAccount(id: account.id) }
@@ -147,10 +152,15 @@ struct HomeView: View {
                     .help("Toggle mark mode")
 
                     Menu {
+                        Button("Add Transaction") {
+                            transactionSourceAccountId = nil
+                            showingAddTransaction = true
+                        }
+                        Button("Add Expense", action: { showingAddExpense = true })
+                        Button("Add Income", action: { showingAddIncome = true })
+                        Divider()
                         Button("Add Account", action: { showingAddAccount = true })
                         Button("Add Pot", action: { showingAddPot = true })
-                        Button("Add Income", action: { showingAddIncome = true })
-                        Button("Add Expense", action: { showingAddExpense = true })
                         Divider()
                         Button("Import Data (JSON)") { showingImporter = true }
                         Button("Export Data (JSON)") { Task { await exportAllData() } }
@@ -222,6 +232,9 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showingAddExpense) {
                 ExpenseFormView(isPresented: $showingAddExpense)
+            }
+            .sheet(isPresented: $showingAddTransaction) {
+                TransactionFormView(isPresented: $showingAddTransaction, defaultFromAccountId: transactionSourceAccountId)
             }
             .sheet(isPresented: $showingPotsManager) {
                 PotsManagementView(isPresented: $showingPotsManager)
@@ -631,6 +644,10 @@ private struct ActivityFeedSection: View {
             if let id = numericId, let context = scheduledPaymentsStore.items.first(where: { $0.accountId == accountId && $0.payment.id == id }) {
                 await scheduledPaymentsStore.deletePayment(context: context)
             }
+        case .transfer:
+            if let transactionIdString = activity.metadata["transactionId"], let transactionId = Int(transactionIdString) {
+                await accountsStore.deleteTransaction(id: transactionId)
+            }
         }
     }
 }
@@ -697,9 +714,14 @@ struct ActivityRow: View {
                 Text(activity.title)
                     .font(.subheadline)
                     .fontWeight(.medium)
-                Text("\(activity.accountName)\(activity.potName != nil ? " · \(activity.potName!)" : "")")
+                Text(detailLine(for: activity))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let vendor = vendorLine(for: activity) {
+                    Text(vendor)
+                        .font(.caption2)
+                        .foregroundStyle(Color(.tertiaryLabel))
+                }
             }
 
             Spacer()
@@ -724,6 +746,7 @@ struct ActivityRow: View {
         case .income: return .green
         case .expense: return .red
         case .scheduledPayment: return .purple
+        case .transfer: return .blue
         }
     }
 
@@ -732,11 +755,66 @@ struct ActivityRow: View {
         case .income: return "arrow.down.circle.fill"
         case .expense: return "arrow.up.circle.fill"
         case .scheduledPayment: return "calendar"
+        case .transfer: return "arrow.left.arrow.right.circle.fill"
         }
     }
 
     private func dayOfMonth(_ date: Date) -> String {
         String(Calendar.current.component(.day, from: date))
+    }
+
+    private func detailLine(for activity: ActivityItem) -> String {
+        switch activity.category {
+        case .income:
+            if let pot = activity.potName, !pot.isEmpty {
+                return "\(activity.accountName) · \(pot)"
+            }
+            return activity.accountName
+        case .expense:
+            var parts: [String] = [activity.accountName]
+            if let pot = activity.metadata["toPotName"], !pot.isEmpty {
+                parts.append("· \(pot)")
+            }
+            if let destination = activity.metadata["toAccountName"], !destination.isEmpty {
+                parts.append("→ \(destination)")
+            }
+            return parts.joined(separator: " ")
+        case .scheduledPayment:
+            if let pot = activity.potName, !pot.isEmpty {
+                return "\(activity.accountName) · \(pot)"
+            }
+            return activity.accountName
+        case .transfer:
+            let direction = activity.metadata["direction"] ?? "out"
+            let counterparty = activity.metadata["counterparty"] ?? ""
+            let base: String
+            if direction == "in" {
+                if counterparty.isEmpty {
+                    base = activity.accountName
+                } else {
+                    base = "\(counterparty) → \(activity.accountName)"
+                }
+            } else {
+                if counterparty.isEmpty {
+                    base = activity.accountName
+                } else {
+                    base = "\(activity.accountName) → \(counterparty)"
+                }
+            }
+            let pot = activity.metadata["potName"].flatMap { $0.isEmpty ? nil : $0 } ?? activity.potName
+            if let pot, !pot.isEmpty {
+                return "\(base) · \(pot)"
+            }
+            return base
+        }
+    }
+
+    private func vendorLine(for activity: ActivityItem) -> String? {
+        guard let company = activity.company, !company.isEmpty else { return nil }
+        if activity.category == .transfer {
+            return "Vendor: \(company)"
+        }
+        return company
     }
 }
 
@@ -920,9 +998,16 @@ private struct ActivityDetailPopover: View {
 
 // MARK: - Activity Editor
 
-private struct ActivityEditorSheet: View {
+struct ActivityEditorSheet: View {
     let activity: ActivityItem
-    var body: some View { ActivityEditorView(activity: activity) }
+    var body: some View {
+        switch activity.category {
+        case .transfer:
+            TransactionActivityEditorView(activity: activity)
+        default:
+            ActivityEditorView(activity: activity)
+        }
+    }
 }
 
 private struct ActivityEditorView: View {
@@ -936,6 +1021,9 @@ private struct ActivityEditorView: View {
     @State private var descriptionText: String = ""
     @State private var company: String = ""
     @State private var dayOfMonth: String = ""
+    @State private var selectedIncomePot: String? = nil
+    @State private var selectedExpenseDestinationAccountId: Int?
+    @State private var selectedExpenseDestinationPot: String? = nil
 
     private var isIncome: Bool { activity.category == .income }
     private var isExpense: Bool { activity.category == .expense }
@@ -943,6 +1031,11 @@ private struct ActivityEditorView: View {
 
     private var accountId: Int? {
         accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id
+    }
+
+    private var destinationAccount: Account? {
+        guard let selectedExpenseDestinationAccountId else { return nil }
+        return accountsStore.account(for: selectedExpenseDestinationAccountId)
     }
 
     private var entityId: Int? {
@@ -971,8 +1064,40 @@ private struct ActivityEditorView: View {
                 }
 
                 if isIncome || isExpense {
+                    if isIncome {
+                        Section("Destination") {
+                            Picker("Pot", selection: $selectedIncomePot) {
+                                Text("None").tag(nil as String?)
+                                if let accountId, let account = accountsStore.account(for: accountId) {
+                                    ForEach(account.pots ?? [], id: \.name) { pot in
+                                        Text(pot.name).tag(pot.name as String?)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if isExpense {
+                        Section("Destination") {
+                            Picker("Account", selection: $selectedExpenseDestinationAccountId) {
+                                Text("None").tag(nil as Int?)
+                                ForEach(accountsStore.accounts) { account in
+                                    Text(account.name).tag(account.id as Int?)
+                                }
+                            }
+                            if let pots = destinationAccount?.pots, !pots.isEmpty {
+                                Picker("Pot", selection: $selectedExpenseDestinationPot) {
+                                    Text("None").tag(nil as String?)
+                                    ForEach(pots, id: \.name) { pot in
+                                        Text(pot.name).tag(pot.name as String?)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Section(isIncome ? "Edit Income" : "Edit Expense") {
-                        TextField("Description", text: $descriptionText)
+                        TextField("Name", text: $descriptionText)
                         if isIncome { TextField("Company", text: $company) }
                         TextField("Amount", text: $amount).keyboardType(.decimalPad)
                         TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
@@ -996,6 +1121,9 @@ private struct ActivityEditorView: View {
                 }
             }
             .onAppear { preload() }
+            .onChange(of: selectedExpenseDestinationAccountId) { _, _ in
+                selectedExpenseDestinationPot = nil
+            }
         }
     }
 
@@ -1013,15 +1141,25 @@ private struct ActivityEditorView: View {
         company = activity.company ?? ""
         amount = String(format: "%.2f", abs(activity.amount))
         dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
+        if isIncome {
+            let pot = activity.metadata["potName"].flatMap { $0.isEmpty ? nil : $0 } ?? activity.potName
+            selectedIncomePot = pot
+        }
+        if isExpense {
+            if let destinationId = activity.metadata["toAccountId"], let value = Int(destinationId) {
+                selectedExpenseDestinationAccountId = value
+            }
+            selectedExpenseDestinationPot = activity.metadata["toPotName"].flatMap { $0.isEmpty ? nil : $0 } ?? activity.potName
+        }
     }
 
     private func save() async {
         guard let accountId = accountId, let id = entityId, let money = Double(amount) else { return }
         if isIncome {
-            let submission = IncomeSubmission(amount: money, description: descriptionText, company: company, date: dayOfMonth)
+            let submission = IncomeSubmission(amount: money, description: descriptionText, company: company, date: dayOfMonth, potName: selectedIncomePot)
             await accountsStore.updateIncome(accountId: accountId, incomeId: id, submission: submission)
         } else if isExpense {
-            let submission = ExpenseSubmission(amount: money, description: descriptionText, date: dayOfMonth)
+            let submission = ExpenseSubmission(amount: money, description: descriptionText, date: dayOfMonth, toAccountId: selectedExpenseDestinationAccountId, toPotName: selectedExpenseDestinationPot)
             await accountsStore.updateExpense(accountId: accountId, expenseId: id, submission: submission)
         }
         dismiss()
@@ -1046,6 +1184,136 @@ private struct ActivityEditorView: View {
             }
             dismiss()
         }
+    }
+}
+
+private struct TransactionActivityEditorView: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let activity: ActivityItem
+
+    @State private var fromAccountId: Int?
+    @State private var toAccountId: Int?
+    @State private var selectedPot: String?
+    @State private var name: String = ""
+    @State private var vendor: String = ""
+    @State private var amount: String = ""
+    @State private var dayOfMonth: String = ""
+
+    private var transactionId: Int? {
+        if let value = activity.metadata["transactionId"], let id = Int(value) { return id }
+        return nil
+    }
+
+    private var toAccount: Account? {
+        guard let toAccountId else { return nil }
+        return accountsStore.account(for: toAccountId)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("From") {
+                    Picker("Account", selection: $fromAccountId) {
+                        Text("Select Account").tag(nil as Int?)
+                        ForEach(accountsStore.accounts) { account in
+                            Text(account.name).tag(account.id as Int?)
+                        }
+                    }
+                }
+
+                Section("To") {
+                    Picker("Account", selection: $toAccountId) {
+                        Text("Select Account").tag(nil as Int?)
+                        ForEach(accountsStore.accounts) { account in
+                            Text(account.name).tag(account.id as Int?)
+                        }
+                    }
+                    if let pots = toAccount?.pots, !pots.isEmpty {
+                        Picker("Pot", selection: $selectedPot) {
+                            Text("None").tag(nil as String?)
+                            ForEach(pots, id: \.name) { pot in
+                                Text(pot.name).tag(pot.name as String?)
+                            }
+                        }
+                    }
+                }
+
+                Section("Details") {
+                    TextField("Name", text: $name)
+                    TextField("Vendor", text: $vendor)
+                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Transaction")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { dismiss() } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                    Button(role: .destructive) { Task { await deleteItem() } } label: { Text("Delete") }
+                }
+            }
+            .onAppear { preload() }
+            .onChange(of: toAccountId) { _, _ in selectedPot = nil }
+        }
+    }
+
+    private var canSave: Bool {
+        guard let _ = fromAccountId, let _ = toAccountId, let money = Double(amount), money > 0 else { return false }
+        guard !name.isEmpty, !vendor.isEmpty, let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+        return true
+    }
+
+    private func preload() {
+        if let recordId = transactionId, let record = accountsStore.transaction(for: recordId) {
+            fromAccountId = record.fromAccountId
+            toAccountId = record.toAccountId
+            selectedPot = record.toPotName
+            name = record.name
+            vendor = record.vendor
+            amount = String(format: "%.2f", record.amount)
+            if let day = Int(record.date) {
+                dayOfMonth = String(day)
+            } else {
+                dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
+            }
+        } else {
+            fromAccountId = accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id
+            toAccountId = accountsStore.accounts.first(where: { $0.name == activity.metadata["counterparty"] })?.id
+            selectedPot = activity.metadata["potName"].flatMap { $0.isEmpty ? nil : $0 }
+            name = activity.title
+            vendor = activity.company ?? ""
+            amount = String(format: "%.2f", abs(activity.amount))
+            dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
+        }
+    }
+
+    private func save() async {
+        guard let recordId = transactionId,
+              let fromAccountId,
+              let toAccountId,
+              let money = Double(amount)
+        else { return }
+
+        let submission = TransactionSubmission(
+            name: name,
+            vendor: vendor,
+            amount: money,
+            date: dayOfMonth,
+            fromAccountId: fromAccountId,
+            toAccountId: toAccountId,
+            toPotName: selectedPot
+        )
+        await accountsStore.updateTransaction(id: recordId, submission: submission)
+        dismiss()
+    }
+
+    private func deleteItem() async {
+        guard let recordId = transactionId else { return }
+        await accountsStore.deleteTransaction(id: recordId)
+        dismiss()
     }
 }
 
