@@ -23,25 +23,6 @@ const swaggerDocument = YAML.load(path.join(__dirname, 'swagger.yaml'));
 // Serve Swagger UI
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
-// Add helper functions at the top
-const executeTransfer = async (fromAccount, toAccount, amount, toPotName) => {
-  if (fromAccount.balance < amount) {
-    throw new Error('Insufficient balance');
-  }
-
-  fromAccount.balance -= amount;
-
-  if (toPotName) {
-    const pot = toAccount.pots.find(p => p.name === toPotName);
-    if (!pot) {
-      throw new Error('Destination pot not found');
-    }
-    pot.balance += amount;
-  } else {
-    toAccount.balance += amount;
-  }
-};
-
 // Update the helper functions for better error handling and data validation
 const readData = () => {
   const filePath = path.join(__dirname, 'budget_data.json');
@@ -59,8 +40,7 @@ const readData = () => {
           resolve({
             accounts: [],
             scheduled_incomes: [],
-            income_schedules: [],
-            transfer_schedules: []
+            income_schedules: []
           });
           return;
         }
@@ -76,7 +56,8 @@ const readData = () => {
         budgetData.accounts = budgetData.accounts || [];
         budgetData.scheduled_incomes = budgetData.scheduled_incomes || [];
         budgetData.income_schedules = budgetData.income_schedules || [];
-        budgetData.transfer_schedules = budgetData.transfer_schedules || [];
+        // Drop legacy schedule data if present
+        delete budgetData.transfer_schedules;
 
         resolve(budgetData);
       } catch (error) {
@@ -99,8 +80,7 @@ const writeData = async (data) => {
   const validatedData = {
     accounts: data.accounts || [],
     scheduled_incomes: data.scheduled_incomes || [],
-    income_schedules: data.income_schedules || [],
-    transfer_schedules: data.transfer_schedules || []
+    income_schedules: data.income_schedules || []
   };
 
   return new Promise((resolve, reject) => {
@@ -644,15 +624,6 @@ app.post('/reset-balances', async (req, res) => {
       };
     });
 
-    // Reset all transfer schedules
-    if (data.transfer_schedules) {
-      data.transfer_schedules = data.transfer_schedules.map(schedule => ({
-        ...schedule,
-        isCompleted: false,
-        lastExecuted: null
-      }));
-    }
-
     // Reset all income schedules
     if (data.income_schedules) {
       data.income_schedules = data.income_schedules.map(schedule => ({
@@ -667,8 +638,7 @@ app.post('/reset-balances', async (req, res) => {
     res.status(200).json({
       message: 'Balances and schedules reset successfully',
       accounts: data.accounts,
-      income_schedules: data.income_schedules,
-      transfer_schedules: data.transfer_schedules
+      income_schedules: data.income_schedules
     });
   } catch (error) {
     console.error('Error resetting balances:', error);
@@ -925,313 +895,6 @@ app.delete('/delete-income-schedule', (req, res) => {
   });
 });
 
-// Get all transfer schedules
-app.get('/transfer-schedules', (req, res) => {
-  const filePath = path.join(__dirname, 'budget_data.json');
-  
-  fs.readFile(filePath, 'utf8', (err, data) => {
-    if (err) {
-      return res.status(500).send('Error reading file');
-    }
-    
-    try {
-      const budgetData = JSON.parse(data);
-      res.status(200).json(budgetData.transfer_schedules || []);
-    } catch (error) {
-      res.status(500).send('Error processing data');
-    }
-  });
-});
-
-// Update add-transfer-schedule endpoint to remove isScheduled marking
-app.post('/add-transfer-schedule', async (req, res) => {
-  try {
-    const { 
-      fromAccountId, 
-      fromPotId, 
-      toAccountId, 
-      toPotName,
-      amount, 
-      description,
-      isDirectPotTransfer,
-      items 
-    } = req.body;
-
-    const data = await readData();
-    
-    // Validate required fields
-    if (!fromAccountId && !fromPotId) {
-      throw new Error('Either fromAccountId or fromPotId is required');
-    }
-    if (!toAccountId) {
-      throw new Error('toAccountId is required');
-    }
-    if (!amount || amount <= 0) {
-      throw new Error('Valid amount is required');
-    }
-
-    const newSchedule = {
-      id: Date.now(),
-      fromAccountId,
-      fromPotId,
-      toAccountId,
-      toPotName: isDirectPotTransfer ? toPotName : undefined,
-      amount,
-      description,
-      isActive: true,
-      isCompleted: false,
-      items: items || [],
-      isDirectPotTransfer,
-      lastExecuted: null
-    };
-
-    if (!data.transfer_schedules) {
-      data.transfer_schedules = [];
-    }
-
-    data.transfer_schedules.push(newSchedule);
-    await writeData(data);
-    
-    res.json(newSchedule);
-  } catch (error) {
-    console.error('Error adding transfer schedule:', error);
-    res.status(400).json({ error: error.message || 'Failed to add transfer schedule' });
-  }
-});
-
-// Update the execute-transfer-schedule endpoint
-const handleCreditCardPayment = async (accountId, amount, toPotName = null, toAccountId = null) => {
-  const data = await readData();
-  const creditCard = data.accounts.find(acc => acc.id === accountId);
-  
-  if (!creditCard || creditCard.type !== 'credit') {
-    throw new Error('Invalid credit card account');
-  }
-
-  // Subtract amount from credit card balance
-  creditCard.balance = Number((creditCard.balance - amount).toFixed(2));
-
-  // If there's a destination pot, add the amount to it
-  if (toPotName && toAccountId) {
-    const destAccount = data.accounts.find(acc => acc.id === toAccountId);
-    if (!destAccount) {
-      throw new Error('Destination account not found');
-    }
-
-    const destPot = destAccount.pots?.find(p => p.name === toPotName);
-    if (!destPot) {
-      throw new Error('Destination pot not found');
-    }
-
-    destPot.balance = Number((destPot.balance + amount).toFixed(2));
-  }
-
-  await writeData(data);
-  return { creditCard, updatedAccount: toAccountId ? data.accounts.find(acc => acc.id === toAccountId) : null };
-};
-
-app.post('/execute-transfer-schedule', async (req, res) => {
-  const { scheduleId } = req.body;
-  
-  if (!scheduleId) {
-    return res.status(400).json({ error: 'Schedule ID is required' });
-  }
-
-  try {
-    const data = await readData();
-    const schedule = data.transfer_schedules?.find(s => s.id === scheduleId);
-    
-    if (!schedule) {
-      return res.status(404).json({ error: 'Schedule not found' });
-    }
-
-    if (schedule.isCompleted) {
-      return res.status(400).json({ error: 'Schedule already completed' });
-    }
-
-    let fromAccount;
-    let fromPot;
-
-    // Handle transfers from pots
-    if (schedule.fromPotId) {
-      fromAccount = data.accounts.find(account => 
-        account.pots?.some(pot => pot.name === schedule.fromPotId)
-      );
-      
-      if (!fromAccount) {
-        return res.status(404).json({ error: 'Source account not found' });
-      }
-
-      fromPot = fromAccount.pots.find(pot => pot.name === schedule.fromPotId);
-      if (!fromPot) {
-        return res.status(404).json({ error: 'Source pot not found' });
-      }
-
-      // Check pot balance before proceeding
-      if (fromPot.balance < schedule.amount) {
-        return res.status(400).json({ 
-          error: 'Insufficient balance',
-          details: `Pot "${fromPot.name}" has insufficient balance (${fromPot.balance} < ${schedule.amount})`
-        });
-      }
-    } else {
-      // Regular account-to-account transfer
-      fromAccount = data.accounts.find(a => a.id === schedule.fromAccountId);
-      if (!fromAccount) {
-        return res.status(404).json({ error: 'Source account not found' });
-      }
-
-      // Check account balance before proceeding
-      if (fromAccount.balance < schedule.amount) {
-        return res.status(400).json({ 
-          error: 'Insufficient balance',
-          details: `Account "${fromAccount.name}" has insufficient balance (${fromAccount.balance} < ${schedule.amount})`
-        });
-      }
-    }
-
-    const toAccount = data.accounts.find(a => a.id === schedule.toAccountId);
-    if (!toAccount) {
-      return res.status(404).json({ error: 'Destination account not found' });
-    }
-
-    // Perform the transfer with proper error handling
-    try {
-      if (fromPot) {
-        fromPot.balance = Number((fromPot.balance - schedule.amount).toFixed(2));
-      } else {
-        fromAccount.balance = Number((fromAccount.balance - schedule.amount).toFixed(2));
-      }
-
-      if (schedule.toPotName) {
-        const toPot = toAccount.pots?.find(p => p.name === schedule.toPotName);
-        if (!toPot) {
-          throw new Error('Destination pot not found');
-        }
-        toPot.balance = Number((toPot.balance + schedule.amount).toFixed(2));
-      } else {
-        toAccount.balance = Number((toAccount.balance + schedule.amount).toFixed(2));
-      }
-
-      // Mark schedule as completed
-      schedule.isCompleted = true;
-      schedule.lastExecuted = new Date().toISOString();
-
-      await writeData(data);
-
-      res.status(200).json({
-        success: true,
-        schedule,
-        accounts: [fromAccount, toAccount].filter(Boolean)
-      });
-    } catch (transferError) {
-      // Revert changes if something goes wrong during transfer
-      if (fromPot) {
-        fromPot.balance = Number((fromPot.balance + schedule.amount).toFixed(2));
-      } else {
-        fromAccount.balance = Number((fromAccount.balance + schedule.amount).toFixed(2));
-      }
-      throw transferError;
-    }
-  } catch (error) {
-    console.error('Error executing transfer schedule:', error);
-    res.status(500).json({ 
-      error: 'Failed to execute transfer schedule',
-      details: error.message
-    });
-  }
-});
-
-app.delete('/delete-transfer-schedule', async (req, res) => {
-  const { scheduleId } = req.body;
-  if (!scheduleId) {
-    return res.status(400).json({ error: 'Schedule ID is required' });
-  }
-
-  try {
-    const data = await readData();
-    // Convert scheduleId to number for comparison
-    const numericScheduleId = Number(scheduleId);
-    
-    if (!data.transfer_schedules) {
-      return res.status(404).json({ error: 'No transfer schedules found' });
-    }
-
-    const scheduleIndex = data.transfer_schedules.findIndex(s => Number(s.id) === numericScheduleId);
-    
-    if (scheduleIndex === -1) {
-      return res.status(404).json({ error: 'Schedule not found' });
-    }
-
-    // Remove the schedule
-    data.transfer_schedules.splice(scheduleIndex, 1);
-    
-    await writeData(data);
-    
-    res.status(200).json({ 
-      message: 'Transfer schedule deleted successfully',
-      deletedId: scheduleId 
-    });
-  } catch (error) {
-    console.error('Error deleting transfer schedule:', error);
-    res.status(500).json({ error: error.message || 'Failed to delete transfer schedule' });
-  }
-});
-
-// Add this endpoint to execute all pending transfer schedules
-app.post('/execute-all-transfer-schedules', async (req, res) => {
-  try {
-    const data = await readData();
-    const pendingSchedules = data.transfer_schedules?.filter(s => !s.isCompleted) || [];
-    let executedCount = 0;
-
-    // Execute all pending schedules
-    for (const schedule of pendingSchedules) {
-      const fromAccount = data.accounts.find(a => a.id === schedule.fromAccountId);
-      const toAccount = data.accounts.find(a => a.id === schedule.toAccountId);
-
-      if (fromAccount && toAccount && fromAccount.balance >= schedule.amount) {
-        try {
-          // Perform the transfer
-          fromAccount.balance = Number((fromAccount.balance - schedule.amount).toFixed(2));
-          
-          if (schedule.toPotName) {
-            const toPot = toAccount.pots?.find(p => p.name === schedule.toPotName);
-            if (toPot) {
-              toPot.balance = Number((toPot.balance + schedule.amount).toFixed(2));
-            }
-          } else {
-            toAccount.balance = Number((toAccount.balance + schedule.amount).toFixed(2));
-          }
-
-          // Mark schedule as completed
-          schedule.isCompleted = true;
-          schedule.lastExecuted = new Date().toISOString();
-          executedCount++;
-        } catch (error) {
-          console.error('Error executing schedule:', error);
-          // Revert changes if something goes wrong
-          fromAccount.balance = Number((fromAccount.balance + schedule.amount).toFixed(2));
-        }
-      }
-    }
-
-    await writeData(data);
-
-    res.status(200).json({
-      message: 'Transfer schedules executed successfully',
-      accounts: data.accounts,
-      executed_count: executedCount
-    });
-  } catch (error) {
-    console.error('Error executing transfer schedules:', error);
-    res.status(500).json({
-      error: 'Failed to execute transfer schedules',
-      details: error.message
-    });
-  }
-});
-
 // Add scheduled payment endpoint
 app.post('/add-scheduled-payment', async (req, res) => {
   const { accountId, payment } = req.body;
@@ -1409,15 +1072,8 @@ app.delete('/delete-account', async (req, res) => {
     // Remove account
     data.accounts.splice(accountIndex, 1);
 
-    // Also clean up any related schedules
-    if (data.transfer_schedules) {
-      data.transfer_schedules = data.transfer_schedules.filter(schedule => 
-        schedule.fromAccountId !== accountId && schedule.toAccountId !== accountId
-      );
-    }
-
     if (data.income_schedules) {
-      data.income_schedules = data.income_schedules.filter(schedule => 
+      data.income_schedules = data.income_schedules.filter(schedule =>
         schedule.accountId !== accountId
       );
     }
@@ -1427,85 +1083,6 @@ app.delete('/delete-account', async (req, res) => {
   } catch (error) {
     console.error('Error deleting account:', error);
     res.status(500).json({ error: 'Failed to delete account' });
-  }
-});
-
-// Update the /get-available-transfers endpoint to ensure consistent structure
-app.get('/get-available-transfers', async (req, res) => {
-  try {
-    const data = await readData();
-    const groupedTransfers = {
-      byAccount: [],
-      byPot: []
-    };
-
-    data.accounts.forEach(account => {
-      // Group account expenses
-      if (account.expenses?.length > 0) {
-        groupedTransfers.byAccount.push({
-          destinationId: account.id,
-          destinationType: 'account',
-          destinationName: `${account.name} · Main Account`,
-          accountName: account.name,
-          totalAmount: account.expenses.reduce((sum, exp) => sum + exp.amount, 0),
-          items: account.expenses.map(expense => ({
-            id: expense.id,
-            amount: expense.amount,
-            description: expense.description,
-            date: expense.date,
-            type: 'expense'
-          }))
-        });
-      }
-
-      // Group pot payments with scheduled payments
-      account.pots?.forEach(pot => {
-        if (pot.scheduled_payments?.length > 0) {
-          // Ensure all payments have a type
-          const payments = pot.scheduled_payments.map(payment => ({
-            ...payment,
-            type: payment.type || 'direct_debit' // Default to direct_debit if no type
-          }));
-
-          // Separate direct debits and card payments
-          const directDebits = payments.filter(p => p.type === 'direct_debit');
-          const cardPayments = payments.filter(p => p.type === 'card');
-
-          if (payments.length > 0) {
-            groupedTransfers.byPot.push({
-              destinationId: account.id,
-              destinationType: 'pot',
-              destinationName: pot.name,
-              accountName: account.name,
-              totalAmount: payments.reduce((sum, payment) => sum + payment.amount, 0),
-              items: {
-                directDebits: directDebits.map(payment => ({
-                  id: payment.id,
-                  amount: payment.amount,
-                  description: payment.name,
-                  date: payment.date,
-                  company: payment.company,
-                  type: 'direct_debit'
-                })),
-                cardPayments: cardPayments.map(payment => ({
-                  id: payment.id,
-                  amount: payment.amount,
-                  description: payment.name,
-                  date: payment.date,
-                  company: payment.company,
-                  type: 'card'
-                }))
-              }
-            });
-          }
-        }
-      });
-    });
-
-    res.json(groupedTransfers);
-  } catch (error) {
-    console.error('Error getting available transfers:', error);
-    res.status(500).json({ error: 'Failed to get available transfers' });
   }
 });
 

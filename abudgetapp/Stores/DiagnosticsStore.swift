@@ -67,10 +67,6 @@ final class DiagnosticsStore: ObservableObject {
                 _ = try await self.service.deleteAccount(accountId: accountId)
                 return "Deleted diagnostics account"
             }),
-            ("Execute Transfers", {
-                let response = try await self.service.executeAllTransferSchedules()
-                return response.success == true ? "Executed transfers" : (response.error ?? "No transfers executed")
-            }),
             ("Execute Incomes", {
                 let response = try await self.service.executeAllIncomeSchedules()
                 return "Executed \(response.executed_count) income schedules"
@@ -79,10 +75,6 @@ final class DiagnosticsStore: ObservableObject {
                 let reset = try await self.service.resetBalances()
                 self.accountsStore?.applyAccounts(reset.accounts)
                 return "Reset \(reset.accounts.count) accounts"
-            }),
-            ("Available Transfers", {
-                let available = try await self.service.getAvailableTransfers()
-                return "\(available.byAccount.count + available.byPot.count) groups"
             })
         ]
 
@@ -115,10 +107,8 @@ final class DiagnosticsStore: ObservableObject {
             DiagnosticStep(name: "Add Pot"),
             DiagnosticStep(name: "Delete Pot"),
             DiagnosticStep(name: "Delete Account"),
-            DiagnosticStep(name: "Execute Transfers"),
             DiagnosticStep(name: "Execute Incomes"),
-            DiagnosticStep(name: "Reset Balances"),
-            DiagnosticStep(name: "Available Transfers")
+            DiagnosticStep(name: "Reset Balances")
         ]
     }
 }

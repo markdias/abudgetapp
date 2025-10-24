@@ -15,8 +15,6 @@ tags:
     description: Pot management endpoints
   - name: Scheduled Payments
     description: Payment scheduling and management
-  - name: Transfers
-    description: Transfer schedules and execution
   - name: Income
     description: Income management endpoints
   - name: Expenses
@@ -228,37 +226,6 @@ paths:
           description: Payment not found
         '500':
           description: Server error
-
-  /transfer-schedules:
-    get:
-      tags: [Transfers]
-      summary: Get all transfer schedules
-      responses:
-        '200':
-          description: List of transfer schedules
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TransferSchedule'
-
-  /execute-transfer-schedule:
-    post:
-      tags: [Transfers]
-      summary: Execute a transfer schedule
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                scheduleId:
-                  type: integer
-      responses:
-        '200':
-          description: Transfer executed successfully
 
   /reset-balances:
     post:
@@ -562,28 +529,6 @@ components:
           format: date-time
         potName:
           type: string
-
-    TransferSchedule:
-      type: object
-      properties:
-        id:
-          type: integer
-        fromAccountId:
-          type: integer
-        toAccountId:
-          type: integer
-        amount:
-          type: number
-        description:
-          type: string
-        isCompleted:
-          type: boolean
-        lastExecuted:
-          type: string
-          format: date-time
-        toPotName:
-          type: string
-          description: When omitted the transfer lands in the main account balance and is treated as an expense
 
     NewScheduledPayment:
       type: object

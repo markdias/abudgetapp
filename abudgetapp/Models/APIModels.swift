@@ -27,24 +27,10 @@ public struct ExclusionResponse: Codable {
 public struct ResetResponse: Codable {
     public let accounts: [Account]
     public let income_schedules: [IncomeSchedule]
-    public let transfer_schedules: [TransferSchedule]
-    
-    public init(accounts: [Account], income_schedules: [IncomeSchedule], transfer_schedules: [TransferSchedule]) {
+
+    public init(accounts: [Account], income_schedules: [IncomeSchedule]) {
         self.accounts = accounts
         self.income_schedules = income_schedules
-        self.transfer_schedules = transfer_schedules
-    }
-}
-
-public struct TransferExecutionResponse: Codable {
-    public let success: Bool?
-    public let accounts: [Account]?
-    public let error: String?
-    
-    public init(success: Bool? = nil, accounts: [Account]? = nil, error: String? = nil) {
-        self.success = success
-        self.accounts = accounts
-        self.error = error
     }
 }
 
@@ -67,120 +53,6 @@ public struct CardOrderResponse: Codable {
         self.success = success
         self.message = message
         self.accounts = accounts
-    }
-}
-
-public struct AvailableTransfers: Codable {
-    public let byAccount: [AvailableAccountTransfer]
-    public let byPot: [AvailablePotTransfer]
-
-    public init(byAccount: [AvailableAccountTransfer], byPot: [AvailablePotTransfer]) {
-        self.byAccount = byAccount
-        self.byPot = byPot
-    }
-}
-
-public struct AvailableAccountTransfer: Codable, Identifiable {
-    public let id = UUID()
-    public let destinationId: Int
-    public let destinationType: String
-    public let destinationName: String
-    public let accountName: String
-    public let totalAmount: Double
-    public let items: [AvailableTransferItem]
-
-    enum CodingKeys: String, CodingKey {
-        case destinationId
-        case destinationType
-        case destinationName
-        case accountName
-        case totalAmount
-        case items
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.destinationId = try container.decode(Int.self, forKey: .destinationId)
-        self.destinationType = try container.decode(String.self, forKey: .destinationType)
-        self.destinationName = try container.decode(String.self, forKey: .destinationName)
-        self.accountName = try container.decode(String.self, forKey: .accountName)
-        self.totalAmount = try container.decode(Double.self, forKey: .totalAmount)
-        self.items = try container.decode([AvailableTransferItem].self, forKey: .items)
-    }
-
-    public init(destinationId: Int, destinationType: String, destinationName: String, accountName: String, totalAmount: Double, items: [AvailableTransferItem]) {
-        self.destinationId = destinationId
-        self.destinationType = destinationType
-        self.destinationName = destinationName
-        self.accountName = accountName
-        self.totalAmount = totalAmount
-        self.items = items
-    }
-}
-
-public struct AvailablePotTransfer: Codable, Identifiable {
-    public let id = UUID()
-    public let destinationId: Int
-    public let destinationType: String
-    public let destinationName: String
-    public let accountName: String
-    public let totalAmount: Double
-    public let items: AvailablePotTransferItems
-
-    enum CodingKeys: String, CodingKey {
-        case destinationId
-        case destinationType
-        case destinationName
-        case accountName
-        case totalAmount
-        case items
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.destinationId = try container.decode(Int.self, forKey: .destinationId)
-        self.destinationType = try container.decode(String.self, forKey: .destinationType)
-        self.destinationName = try container.decode(String.self, forKey: .destinationName)
-        self.accountName = try container.decode(String.self, forKey: .accountName)
-        self.totalAmount = try container.decode(Double.self, forKey: .totalAmount)
-        self.items = try container.decode(AvailablePotTransferItems.self, forKey: .items)
-    }
-
-    public init(destinationId: Int, destinationType: String, destinationName: String, accountName: String, totalAmount: Double, items: AvailablePotTransferItems) {
-        self.destinationId = destinationId
-        self.destinationType = destinationType
-        self.destinationName = destinationName
-        self.accountName = accountName
-        self.totalAmount = totalAmount
-        self.items = items
-    }
-}
-
-public struct AvailablePotTransferItems: Codable {
-    public let directDebits: [AvailableTransferItem]
-    public let cardPayments: [AvailableTransferItem]
-
-    public init(directDebits: [AvailableTransferItem], cardPayments: [AvailableTransferItem]) {
-        self.directDebits = directDebits
-        self.cardPayments = cardPayments
-    }
-}
-
-public struct AvailableTransferItem: Codable, Identifiable {
-    public let id: Int
-    public let amount: Double
-    public let description: String
-    public let date: String?
-    public let company: String?
-    public let type: String
-
-    public init(id: Int, amount: Double, description: String, date: String? = nil, company: String? = nil, type: String) {
-        self.id = id
-        self.amount = amount
-        self.description = description
-        self.date = date
-        self.company = company
-        self.type = type
     }
 }
 
@@ -367,100 +239,6 @@ public struct ScheduledPayment: Identifiable, Codable, Hashable {
 }
 
 // MARK: - Schedule Models
-public enum TransferDestinationKind: String, Codable, CaseIterable {
-    case account
-    case pot
-
-    public var displayLabel: String {
-        switch self {
-        case .account: return "Expense · Main Account"
-        case .pot: return "Transfer · Pot"
-        }
-    }
-
-    public var helperDescription: String {
-        switch self {
-        case .account: return "Funds remain in the main account balance."
-        case .pot: return "Funds move into the selected pot."
-        }
-    }
-}
-
-public struct TransferSchedule: Identifiable, Codable, Hashable {
-    public let id: Int
-    public var fromAccountId: Int?
-    public var fromPotId: String?
-    public let toAccountId: Int
-    public var toPotName: String?
-    public let amount: Double
-    public let description: String
-    public let isActive: Bool
-    public var isCompleted: Bool
-    public var items: [TransferItem]?
-    public var isDirectPotTransfer: Bool?
-    public var lastExecuted: String?
-
-    public init(id: Int, fromAccountId: Int? = nil, fromPotId: String? = nil, toAccountId: Int, toPotName: String? = nil,
-         amount: Double, description: String, isActive: Bool, isCompleted: Bool, items: [TransferItem]? = nil,
-         isDirectPotTransfer: Bool? = nil, lastExecuted: String? = nil) {
-        self.id = id
-        self.fromAccountId = fromAccountId
-        self.fromPotId = fromPotId
-        self.toAccountId = toAccountId
-        self.toPotName = toPotName
-        self.amount = amount
-        self.description = description
-        self.isActive = isActive
-        self.isCompleted = isCompleted
-        self.items = items
-        self.isDirectPotTransfer = isDirectPotTransfer
-        self.lastExecuted = lastExecuted
-    }
-
-    public var destinationKind: TransferDestinationKind {
-        if let name = toPotName, !name.isEmpty {
-            return .pot
-        }
-        return .account
-    }
-    
-    public static func == (lhs: TransferSchedule, rhs: TransferSchedule) -> Bool {
-        return lhs.id == rhs.id
-    }
-    
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-}
-
-public struct TransferItem: Codable, Hashable {
-    public let id: Int?
-    public let amount: Double
-    public let description: String
-    public let date: String?
-    public let company: String?
-    public let type: String?
-    
-    public init(id: Int? = nil, amount: Double, description: String, date: String? = nil, company: String? = nil,
-         type: String? = nil) {
-        self.id = id
-        self.amount = amount
-        self.description = description
-        self.date = date
-        self.company = company
-        self.type = type
-    }
-    
-    public func hash(into hasher: inout Hasher) {
-        if let id = id {
-            hasher.combine(id)
-        } else {
-            hasher.combine(description)
-            hasher.combine(amount)
-        }
-    }
-}
-
 public struct IncomeSchedule: Identifiable, Codable, Hashable {
     public let id: Int
     public let accountId: Int
@@ -577,29 +355,6 @@ public struct ScheduledPaymentSubmission: Codable {
         self.type = type
         self.isCompleted = isCompleted
         self.lastExecuted = lastExecuted
-    }
-}
-
-public struct TransferScheduleSubmission: Codable {
-    public var fromAccountId: Int?
-    public var fromPotId: String?
-    public let toAccountId: Int
-    public var toPotName: String?
-    public let amount: Double
-    public let description: String
-    public var items: [TransferItem]?
-    public var isDirectPotTransfer: Bool?
-    
-    public init(fromAccountId: Int? = nil, fromPotId: String? = nil, toAccountId: Int, toPotName: String? = nil,
-         amount: Double, description: String, items: [TransferItem]? = nil, isDirectPotTransfer: Bool? = nil) {
-        self.fromAccountId = fromAccountId
-        self.fromPotId = fromPotId
-        self.toAccountId = toAccountId
-        self.toPotName = toPotName
-        self.amount = amount
-        self.description = description
-        self.items = items
-        self.isDirectPotTransfer = isDirectPotTransfer
     }
 }
 
