@@ -6,8 +6,7 @@ final class ActivityStore: ObservableObject {
         case all = "All"
         case income = "Income"
         case expenses = "Expenses"
-        case transfers = "Transfers"
-        case scheduled = "Scheduled"
+        case transactions = "Transactions"
 
         var id: String { rawValue }
 
@@ -16,8 +15,7 @@ final class ActivityStore: ObservableObject {
             case .all: return nil
             case .income: return .income
             case .expenses: return .expense
-            case .transfers: return .transfer
-            case .scheduled: return .scheduledPayment
+            case .transactions: return .transaction
             }
         }
     }
@@ -117,16 +115,13 @@ final class ActivityStore: ObservableObject {
                         metadata["toAccountId"] = String(toId)
                         metadata["toAccountName"] = toAccount.name
                     }
-                    if let potName = expense.toPotName {
-                        metadata["toPotName"] = potName
-                    }
                     items.append(ActivityItem(
                         id: id,
                         title: expense.description,
                         amount: expense.amount,
                         date: date,
                         accountName: account.name,
-                        potName: expense.toPotName,
+                        potName: nil,
                         company: nil,
                         category: .expense,
                         metadata: metadata
@@ -211,7 +206,7 @@ final class ActivityStore: ObservableObject {
                 accountName: toAccount.name,
                 potName: transaction.toPotName,
                 company: transaction.vendor,
-                category: .transfer,
+                category: .transaction,
                 metadata: metadata
             ))
         }

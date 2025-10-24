@@ -55,7 +55,7 @@ struct TransactionsView: View {
                     ContentUnavailableView(
                         "No Activity",
                         systemImage: "tray",
-                        description: Text("Adjust the filters or search to see transactions.")
+                        description: Text("Adjust the filters or search to see activity items.")
                     )
                 }
             }
@@ -88,7 +88,7 @@ struct TransactionsView: View {
             if let id = numericId, let context = scheduledPaymentsStore.items.first(where: { $0.accountId == accountId && $0.payment.id == id }) {
                 await scheduledPaymentsStore.deletePayment(context: context)
             }
-        case .transfer:
+        case .transaction:
             if let transactionIdString = activity.metadata["transactionId"], let transactionId = Int(transactionIdString) {
                 await accountsStore.deleteTransaction(id: transactionId)
             }

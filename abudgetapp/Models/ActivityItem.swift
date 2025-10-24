@@ -4,14 +4,14 @@ public enum ActivityCategory: String, CaseIterable, Codable {
     case scheduledPayment = "Scheduled"
     case expense = "Expense"
     case income = "Income"
-    case transfer = "Transfer"
+    case transaction = "Transaction"
 
     public var colorName: String {
         switch self {
         case .scheduledPayment: return "Purple"
         case .expense: return "Red"
         case .income: return "Green"
-        case .transfer: return "Blue"
+        case .transaction: return "Blue"
         }
     }
 }
@@ -54,7 +54,7 @@ public struct ActivityItem: Identifiable, Hashable {
             sign = "+"
         case .expense, .scheduledPayment:
             sign = "-"
-        case .transfer:
+        case .transaction:
             let direction = metadata["direction"] ?? "out"
             sign = direction == "in" ? "+" : "-"
         }
