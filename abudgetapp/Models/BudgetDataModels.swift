@@ -166,11 +166,11 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     public let vendor: String
     public let amount: Double
     public let date: String
-    public let fromAccountId: Int
+    public let fromAccountId: Int?
     public let toAccountId: Int
     public let toPotName: String?
 
-    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int, toAccountId: Int, toPotName: String? = nil) {
+    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil) {
         self.id = id
         self.name = name
         self.vendor = vendor
@@ -362,11 +362,11 @@ public struct TransactionSubmission: Codable {
     public let vendor: String
     public let amount: Double
     public let date: String?
-    public let fromAccountId: Int
+    public let fromAccountId: Int?
     public let toAccountId: Int
     public var toPotName: String?
 
-    public init(name: String, vendor: String, amount: Double, date: String? = nil, fromAccountId: Int, toAccountId: Int, toPotName: String? = nil) {
+    public init(name: String, vendor: String, amount: Double, date: String? = nil, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil) {
         self.name = name
         self.vendor = vendor
         self.amount = amount

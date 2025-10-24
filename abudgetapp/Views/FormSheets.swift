@@ -267,7 +267,6 @@ struct TransactionFormView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @Binding var isPresented: Bool
 
-    @State private var fromAccountId: Int?
     @State private var toAccountId: Int?
     @State private var selectedPotName: String? = nil
     @State private var name = ""
@@ -275,23 +274,14 @@ struct TransactionFormView: View {
     @State private var amount = "0"
     @State private var dayOfMonth = ""
 
-    init(isPresented: Binding<Bool>, defaultFromAccountId: Int? = nil) {
+    init(isPresented: Binding<Bool>, defaultToAccountId: Int? = nil) {
         self._isPresented = isPresented
-        self._fromAccountId = State(initialValue: defaultFromAccountId)
+        self._toAccountId = State(initialValue: defaultToAccountId)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("From Account") {
-                    Picker("Account", selection: $fromAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
-                        }
-                    }
-                }
-
                 Section("To Account") {
                     Picker("Account", selection: $toAccountId) {
                         Text("Select Account").tag(nil as Int?)
@@ -326,7 +316,7 @@ struct TransactionFormView: View {
     }
 
     private var isValid: Bool {
-        guard fromAccountId != nil, toAccountId != nil, !name.isEmpty, !vendor.isEmpty, let money = Double(amount), money > 0 else { return false }
+        guard toAccountId != nil, !name.isEmpty, !vendor.isEmpty, let money = Double(amount), money > 0 else { return false }
         if let day = Int(dayOfMonth), (1...31).contains(day) {
             return true
         }
@@ -334,13 +324,13 @@ struct TransactionFormView: View {
     }
 
     private func save() {
-        guard let fromAccountId, let toAccountId, let money = Double(amount) else { return }
+        guard let toAccountId, let money = Double(amount) else { return }
         let submission = TransactionSubmission(
             name: name,
             vendor: vendor,
             amount: money,
             date: dayOfMonth.isEmpty ? nil : dayOfMonth,
-            fromAccountId: fromAccountId,
+            fromAccountId: nil,
             toAccountId: toAccountId,
             toPotName: selectedPotName
         )
