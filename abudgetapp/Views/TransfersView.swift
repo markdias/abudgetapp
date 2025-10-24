@@ -35,6 +35,13 @@ struct TransfersView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+
+                    let queuedCount = accountsStore.transferQueue.count
+                    if queuedCount > 0 {
+                        Label("Queued transfers: \(queuedCount)", systemImage: "arrow.right.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Transfer Operations") {
@@ -65,88 +72,30 @@ struct TransfersView: View {
 
 // MARK: - Manage Transfer Schedules
 
-private enum TransferDestinationScope: String, CaseIterable, Identifiable {
-    case accounts = "Accounts"
-    case pots = "Pots"
-    case expenses = "Expenses"
-
-    var id: String { rawValue }
-}
-
-private struct TransferScheduleGroup: Identifiable {
-    let id = UUID()
-    let title: String
-    let subtitle: String?
-    let contexts: [ScheduledPaymentsStore.ScheduledPaymentContext]
-
-    var totalAmount: Double {
-        contexts.reduce(0) { $0 + $1.payment.amount }
-    }
-}
-
 struct ManageTransferSchedulesView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
-    @EnvironmentObject private var potsStore: PotsStore
-    @EnvironmentObject private var scheduledPaymentsStore: ScheduledPaymentsStore
 
     @State private var selectedAccountId: Int?
-    @State private var destinationScope: TransferDestinationScope = .accounts
-    @State private var expandedGroupIDs: Set<UUID> = []
 
     private var accounts: [Account] { accountsStore.accounts }
 
-    private var filteredGroups: [TransferScheduleGroup] {
-        guard !scheduledPaymentsStore.items.isEmpty else { return [] }
-        let sourceId = selectedAccountId
-        let contexts = scheduledPaymentsStore.items.filter { context in
-            guard let sourceId else { return true }
-            return context.accountId == sourceId
-        }
-
-        let filtered: [ScheduledPaymentsStore.ScheduledPaymentContext]
-        switch destinationScope {
-        case .accounts:
-            filtered = contexts.filter { $0.potName == nil }
-        case .pots:
-            filtered = contexts.filter { $0.potName != nil }
-        case .expenses:
-            filtered = contexts.filter { ($0.payment.type ?? "").lowercased().contains("expense") }
-        }
-
-        let groups = Dictionary(grouping: filtered) { context -> String in
-            switch destinationScope {
-            case .accounts:
-                return context.accountName
-            case .pots:
-                return context.potName ?? context.accountName
-            case .expenses:
-                return context.payment.company
-            }
-        }
-
-        let sortedKeys = groups.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-
-        return sortedKeys.compactMap { key in
-            guard let contexts = groups[key] else { return nil }
-            let subtitle: String?
-            switch destinationScope {
-            case .accounts:
-                subtitle = nil
-            case .pots:
-                let accountName = contexts.first?.accountName
-                subtitle = accountName
-            case .expenses:
-                let account = contexts.first?.accountName
-                let pot = contexts.first?.potName
-                if let pot { subtitle = "Account: \(account ?? "-") · Pot: \(pot)" } else { subtitle = account }
-            }
-            return TransferScheduleGroup(title: key, subtitle: subtitle, contexts: contexts)
-        }
+    private var sourceAccount: Account? {
+        guard let selectedAccountId else { return accounts.first }
+        return accountsStore.account(for: selectedAccountId)
     }
 
-    private var availablePotNames: [String] {
-        guard let sourceId = selectedAccountId else { return [] }
-        return potsStore.potsByAccount[sourceId]?.map { $0.name }.sorted() ?? []
+    private var transferCandidates: [TransferScheduleItem] {
+        guard let account = sourceAccount else { return [] }
+        return accountsStore.transferCandidates(fromAccountId: account.id)
+    }
+
+    private var scheduledTransfers: [TransferScheduleItem] {
+        accountsStore.transferQueue.sorted { lhs, rhs in
+            if lhs.fromAccountName == rhs.fromAccountName {
+                return lhs.destinationDisplayName.localizedCaseInsensitiveCompare(rhs.destinationDisplayName) == .orderedAscending
+            }
+            return lhs.fromAccountName.localizedCaseInsensitiveCompare(rhs.fromAccountName) == .orderedAscending
+        }
     }
 
     var body: some View {
@@ -169,87 +118,34 @@ struct ManageTransferSchedulesView: View {
                 }
             }
 
-            Section("Destination") {
-                Picker("Focus", selection: $destinationScope) {
-                    ForEach(TransferDestinationScope.allCases) { scope in
-                        Text(scope.rawValue).tag(scope)
+            Section("Transfer Groups") {
+                if transferCandidates.isEmpty {
+                    ContentUnavailableView {
+                        Label("No transfer candidates", systemImage: "calendar")
+                    } description: {
+                        Text("Assign destinations to expenses for this account to build a schedule.")
                     }
-                }
-                .pickerStyle(.segmented)
-
-                if destinationScope == .pots {
-                    if availablePotNames.isEmpty {
-                        Text("No pots available for the selected account.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Pots in \(accounts.first(where: { $0.id == (selectedAccountId ?? accounts.first?.id ?? -1) })?.name ?? "this account"):")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(availablePotNames, id: \.self) { pot in
-                                    Label(pot, systemImage: "tray")
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
+                } else {
+                    ForEach(transferCandidates) { item in
+                        TransferCandidateRow(
+                            item: item,
+                            isQueued: accountsStore.isTransferQueued(item),
+                            toggleAction: { toggleCandidate(item) }
+                        )
                     }
                 }
             }
 
-            Section("Scheduled Items") {
-                if filteredGroups.isEmpty {
-                    ContentUnavailableView {
-                        Label("No schedules", systemImage: "calendar")
-                    } description: {
-                        Text("Create a schedule from an account or pot to see it listed here.")
+            if !scheduledTransfers.isEmpty {
+                Section("Scheduled Transfers") {
+                    ForEach(scheduledTransfers) { item in
+                        TransferQueueRow(item: item, removeAction: { accountsStore.dequeueTransfer(item) })
                     }
-                } else {
-                    ForEach(filteredGroups) { group in
-                        DisclosureGroup(isExpanded: Binding<Bool>(
-                            get: { expandedGroupIDs.contains(group.id) },
-                            set: { isExpanded in
-                                if isExpanded { expandedGroupIDs.insert(group.id) } else { expandedGroupIDs.remove(group.id) }
-                            }
-                        )) {
-                            ForEach(group.contexts) { context in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(context.payment.name)
-                                        .font(.subheadline)
-                                    Text(context.payment.company)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    HStack {
-                                        Label(context.payment.date, systemImage: "calendar")
-                                        Spacer()
-                                        Text(context.payment.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
-                                            .fontWeight(.semibold)
-                                    }
-                                    .font(.caption)
-                                }
-                                .padding(.vertical, 6)
-                            }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(group.title)
-                                        .font(.headline)
-                                    if let subtitle = group.subtitle {
-                                        Text(subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                Text(group.totalAmount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
-                                    .fontWeight(.semibold)
-                            }
-                            .padding(.vertical, 4)
-                        }
+                    Button(role: .destructive) {
+                        accountsStore.clearTransferQueue()
+                    } label: {
+                        Label("Clear Scheduled Transfers", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -268,6 +164,94 @@ struct ManageTransferSchedulesView: View {
             }
         }
     }
+
+    private func toggleCandidate(_ item: TransferScheduleItem) {
+        if accountsStore.isTransferQueued(item) {
+            accountsStore.dequeueTransfer(item)
+        } else {
+            accountsStore.enqueueTransfer(item)
+        }
+    }
+}
+
+private struct TransferCandidateRow: View {
+    let item: TransferScheduleItem
+    let isQueued: Bool
+    let toggleAction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.destinationDisplayName)
+                        .font(.headline)
+                    if let subtitle = item.destinationSubtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Text(item.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                    .fontWeight(.semibold)
+            }
+
+            if !item.contexts.isEmpty {
+                Text("Covers \(item.expenseCount) expense\(item.expenseCount == 1 ? "" : "s"): \(item.expenseSummary)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(action: toggleAction) {
+                Label(isQueued ? "Remove from Schedule" : "Add to Schedule",
+                      systemImage: isQueued ? "checkmark.circle.fill" : "plus.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(isQueued ? .green : .accentColor)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private struct TransferQueueRow: View {
+    let item: TransferScheduleItem
+    let removeAction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.destinationDisplayName)
+                        .font(.headline)
+                    if let subtitle = item.destinationSubtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("From: \(item.fromAccountName)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(item.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                    .fontWeight(.semibold)
+            }
+
+            if !item.contexts.isEmpty {
+                Text(item.expenseSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(role: .destructive, action: removeAction) {
+                Label("Remove", systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(.vertical, 6)
+    }
 }
 
 // MARK: - Execute Transfer Schedules
@@ -279,6 +263,7 @@ struct ExecuteTransferSchedulesView: View {
 
     @State private var executingIncome = false
     @State private var executingTransfers = false
+    @State private var executingQueuedTransfers = false
 
     private var pendingIncomeSchedules: [IncomeSchedule] {
         incomeStore.schedules.filter { !$0.isCompleted }
@@ -288,8 +273,60 @@ struct ExecuteTransferSchedulesView: View {
         scheduledPaymentsStore.items.filter { $0.payment.isCompleted != true }
     }
 
+    private var queuedTransfers: [TransferScheduleItem] { accountsStore.transferQueue }
+
+    private var queuedTotal: Double {
+        queuedTransfers.reduce(0) { $0 + $1.amount }
+    }
+
     var body: some View {
         List {
+            Section("Transfer Queue") {
+                if queuedTransfers.isEmpty {
+                    Label("No transfers queued for execution.", systemImage: "tray")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(queuedTransfers) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.destinationDisplayName)
+                                .font(.subheadline)
+                            Text("From: \(item.fromAccountName)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                Text(item.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                                Spacer()
+                                Text("\(item.expenseCount) expense\(item.expenseCount == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    HStack {
+                        Text("Total")
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text(queuedTotal, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                            .fontWeight(.semibold)
+                    }
+                }
+
+                Button {
+                    Task {
+                        executingQueuedTransfers = true
+                        defer { executingQueuedTransfers = false }
+                        await accountsStore.executeQueuedTransfers()
+                    }
+                } label: {
+                    Label("Execute Transfer Queue", systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .disabled(executingQueuedTransfers || queuedTransfers.isEmpty)
+            }
+
             Section("Income") {
                 if pendingIncomeSchedules.isEmpty {
                     Label("All income schedules are up to date.", systemImage: "checkmark.circle")

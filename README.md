@@ -25,7 +25,7 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Dashboard (Home)** – Stacked, swipeable account cards with drag-to-reorder, quick actions, search, and an add menu for transactions, expenses, and incomes. Activity rows support inline editing for every entry type, including transfers.
 * **Income Planner** – Board view for managing recurring income schedules with inline execution and status tracking.
 * **Activity Tab** – Full history view with filters that share the same activity source as the dashboard feed.
-* **Transfers** – Dedicated hub for planning transfer schedules, executing income and transfer runs, resetting balances, and sorting salaries into pots.
+* **Transfers** – Dedicated hub for planning transfer schedules, queuing expense-driven pot/account transfers, executing income and transfer runs, resetting balances, and sorting salaries into pots.
 * **Budget** – Summaries derived from pots and scheduled payments plus an upcoming payments list.
 * **Settings** – Local storage management (restore sample data, reload), card reorder flow, and diagnostics launcher.
 * **Diagnostics** – Developer QA surface that adds/removes sample data, executes income schedules, resets balances, and reports status for each step.

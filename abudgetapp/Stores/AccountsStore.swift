@@ -10,6 +10,7 @@ final class AccountsStore: ObservableObject {
     @Published private(set) var transactions: [TransactionRecord] = [] {
         didSet { publishAccountsChange() }
     }
+    @Published private(set) var transferQueue: [TransferScheduleItem] = []
     @Published var isLoading = false
     @Published var statusMessage: StatusMessage?
     @Published var lastError: BudgetDataError?
@@ -29,6 +30,7 @@ final class AccountsStore: ObservableObject {
         let fetchedAccounts = await store.currentAccounts()
         transactions = fetchedTransactions
         accounts = fetchedAccounts
+        pruneTransferQueue()
     }
 
     func addAccount(_ submission: AccountSubmission) async {
@@ -292,6 +294,111 @@ final class AccountsStore: ObservableObject {
         transactions.first { $0.id == id }
     }
 
+    func transferCandidates(fromAccountId: Int) -> [TransferScheduleItem] {
+        guard let account = account(for: fromAccountId) else { return [] }
+        guard let expenses = account.expenses, !expenses.isEmpty else { return [] }
+
+        struct Key: Hashable {
+            let toAccountId: Int
+            let toPotName: String?
+        }
+
+        var grouped: [Key: (amount: Double, contexts: [TransferScheduleItem.Context])] = [:]
+
+        for expense in expenses {
+            guard expense.amount > 0 else { continue }
+            let hasDestinationAccount = expense.toAccountId != nil
+            let hasDestinationPot = (expense.toPotName?.isEmpty == false)
+            guard hasDestinationAccount || hasDestinationPot else { continue }
+
+            let destinationAccountId = expense.toAccountId ?? account.id
+            guard let destinationAccount = self.account(for: destinationAccountId) else { continue }
+
+            let key = Key(toAccountId: destinationAccountId, toPotName: expense.toPotName)
+            var existing = grouped[key] ?? (amount: 0, contexts: [])
+            existing.amount += expense.amount
+            existing.contexts.append(TransferScheduleItem.Context(
+                expenseId: expense.id,
+                description: expense.description,
+                amount: expense.amount,
+                date: expense.date
+            ))
+            grouped[key] = existing
+        }
+
+        let items: [TransferScheduleItem] = grouped.compactMap { key, value in
+            guard let destinationAccount = account(for: key.toAccountId) else { return nil }
+            return TransferScheduleItem(
+                fromAccountId: account.id,
+                fromAccountName: account.name,
+                toAccountId: destinationAccount.id,
+                toAccountName: destinationAccount.name,
+                toPotName: key.toPotName,
+                amount: value.amount,
+                contexts: value.contexts
+            )
+        }
+
+        return items.sorted { lhs, rhs in
+            if lhs.destinationDisplayName == rhs.destinationDisplayName {
+                return lhs.amount > rhs.amount
+            }
+            return lhs.destinationDisplayName.localizedCaseInsensitiveCompare(rhs.destinationDisplayName) == .orderedAscending
+        }
+    }
+
+    func enqueueTransfer(_ item: TransferScheduleItem) {
+        guard !transferQueue.contains(where: { $0.id == item.id }) else { return }
+        transferQueue.append(item)
+    }
+
+    func dequeueTransfer(_ item: TransferScheduleItem) {
+        transferQueue.removeAll { $0.id == item.id }
+    }
+
+    func clearTransferQueue() {
+        transferQueue.removeAll()
+    }
+
+    func isTransferQueued(_ item: TransferScheduleItem) -> Bool {
+        transferQueue.contains(where: { $0.id == item.id })
+    }
+
+    func executeQueuedTransfers() async {
+        guard !transferQueue.isEmpty else { return }
+
+        let items = transferQueue
+        do {
+            for item in items {
+                let submission = TransactionSubmission(
+                    name: "Transfer to \(item.destinationDisplayName)",
+                    vendor: "Transfer Schedule",
+                    amount: item.amount,
+                    date: nil,
+                    fromAccountId: item.fromAccountId,
+                    toAccountId: item.toAccountId,
+                    toPotName: item.toPotName
+                )
+                _ = try await store.addTransaction(submission)
+            }
+            transferQueue.removeAll()
+            await loadAccounts()
+            statusMessage = StatusMessage(
+                title: "Transfers Executed",
+                message: "Moved scheduled transfer amounts",
+                kind: .success
+            )
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Execute Transfers Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Execute Transfers Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
     private func publishAccountsChange() {
         NotificationCenter.default.post(
             name: AccountsStore.accountsDidChangeNotification,
@@ -301,6 +408,19 @@ final class AccountsStore: ObservableObject {
                 "transactions": transactions
             ]
         )
+    }
+
+    private func pruneTransferQueue() {
+        guard !transferQueue.isEmpty else { return }
+        transferQueue.removeAll { item in
+            guard let _ = account(for: item.fromAccountId),
+                  let destinationAccount = account(for: item.toAccountId) else { return true }
+            if let potName = item.toPotName, !potName.isEmpty {
+                let potExists = destinationAccount.pots?.contains(where: { $0.name.caseInsensitiveCompare(potName) == .orderedSame }) ?? false
+                return !potExists
+            }
+            return false
+        }
     }
 }
 
