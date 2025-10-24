@@ -67,10 +67,6 @@ final class DiagnosticsStore: ObservableObject {
                 try await self.store.deleteAccount(id: accountId)
                 return "Deleted diagnostics account"
             }),
-            ("Execute Incomes", {
-                let response = try await self.store.executeAllIncomeSchedules()
-                return "Executed \(response.executed_count) income schedules"
-            }),
             ("Reset Balances", {
                 let reset = try await self.store.resetBalances()
                 self.accountsStore?.applyAccounts(reset.accounts)
@@ -111,7 +107,6 @@ final class DiagnosticsStore: ObservableObject {
             DiagnosticStep(name: "Add Pot"),
             DiagnosticStep(name: "Delete Pot"),
             DiagnosticStep(name: "Delete Account"),
-            DiagnosticStep(name: "Execute Incomes"),
             DiagnosticStep(name: "Reset Balances")
         ]
     }
