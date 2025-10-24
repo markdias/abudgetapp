@@ -1036,20 +1036,27 @@ private struct ActivityEditorView: View {
         return nil
     }
 
+    private var sourceAccountName: String? {
+        guard let accountId, let account = accountsStore.account(for: accountId) else { return nil }
+        return account.name
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("Activity") {
-                    HStack {
-                        Text("Account")
-                        Spacer()
-                        Text(activity.accountName).foregroundStyle(.secondary)
-                    }
-                    if let pot = activity.potName {
+                if !isExpense {
+                    Section("Activity") {
                         HStack {
-                            Text("Pot")
+                            Text("Account")
                             Spacer()
-                            Text(pot).foregroundStyle(.secondary)
+                            Text(activity.accountName).foregroundStyle(.secondary)
+                        }
+                        if let pot = activity.potName {
+                            HStack {
+                                Text("Pot")
+                                Spacer()
+                                Text(pot).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -1075,6 +1082,11 @@ private struct ActivityEditorView: View {
                                 ForEach(accountsStore.accounts) { account in
                                     Text(account.name).tag(account.id as Int?)
                                 }
+                            }
+                            if let sourceAccountName {
+                                Text("Funds leave \(sourceAccountName)")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -1108,7 +1120,8 @@ private struct ActivityEditorView: View {
     }
 
     private var canSave: Bool {
-        let hasAmount = Double(amount) != nil
+        let numericAmount = Double(amount) ?? 0
+        let hasAmount = numericAmount > 0
         let hasDescription = !descriptionText.isEmpty
         let companyValid = isIncome ? !company.isEmpty : true
         let destinationValid = isExpense ? selectedExpenseDestinationAccountId != nil : true
@@ -1133,11 +1146,15 @@ private struct ActivityEditorView: View {
             if let destinationId = activity.metadata["toAccountId"], let value = Int(destinationId) {
                 selectedExpenseDestinationAccountId = value
             }
+            if selectedExpenseDestinationAccountId == nil {
+                selectedExpenseDestinationAccountId = accountId
+            }
         }
     }
 
     private func save() async {
-        guard let accountId = accountId, let id = entityId, let money = Double(amount) else { return }
+        guard let accountId = accountId, let id = entityId, let numericAmount = Double(amount) else { return }
+        let money = abs(numericAmount)
         if isIncome {
             let submission = IncomeSubmission(amount: money, description: descriptionText, company: company, date: dayOfMonth, potName: selectedIncomePot)
             await accountsStore.updateIncome(accountId: accountId, incomeId: id, submission: submission)

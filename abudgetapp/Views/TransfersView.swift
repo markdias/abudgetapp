@@ -483,20 +483,70 @@ struct ManageTransfersDetailView: View {
 struct ManageTransactionsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
 
+    private var queuedTransfers: [TransferScheduleItem] {
+        accountsStore.transferQueue.sorted { lhs, rhs in
+            if lhs.fromAccountName == rhs.fromAccountName {
+                return lhs.destinationDisplayName.localizedCaseInsensitiveCompare(rhs.destinationDisplayName) == .orderedAscending
+            }
+            return lhs.fromAccountName.localizedCaseInsensitiveCompare(rhs.fromAccountName) == .orderedAscending
+        }
+    }
+
+    private var recentTransactions: [TransactionRecord] { accountsStore.transactions }
+
     var body: some View {
         List {
-            Section("Recent Transactions") {
-                if accountsStore.transactions.isEmpty {
+            Section("Scheduled Transactions") {
+                if queuedTransfers.isEmpty {
+                    ContentUnavailableView {
+                        Label("Nothing queued", systemImage: "calendar")
+                    } description: {
+                        Text("Open Manage Transfer Schedules to choose expenses to move between accounts or pots.")
+                    }
+                } else {
+                    ForEach(queuedTransfers) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(item.destinationDisplayName)
+                                .font(.headline)
+                            Text("From: \(item.fromAccountName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(item.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                                    .fontWeight(.semibold)
+                                Spacer()
+                                Text("\(item.expenseCount) expense\(item.expenseCount == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if !item.expenseSummary.isEmpty {
+                                Text(item.expenseSummary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            }
+
+            Section("Recently Executed") {
+                if recentTransactions.isEmpty {
                     ContentUnavailableView {
                         Label("No transactions", systemImage: "list.bullet")
                     } description: {
-                        Text("Add transactions from the dashboard or import data to see them listed here.")
+                        Text("Execute a schedule or log a transfer to see it listed here.")
                     }
                 } else {
-                    ForEach(accountsStore.transactions) { record in
+                    ForEach(recentTransactions) { record in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(record.name)
                                 .font(.headline)
+                            if !record.vendor.isEmpty {
+                                Text(record.vendor)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             HStack {
                                 Text(record.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
                                     .fontWeight(.semibold)
@@ -515,11 +565,34 @@ struct ManageTransactionsView: View {
     }
 }
 
+private struct ExpenseContext: Identifiable {
+    let id: Int
+    let sourceAccountName: String
+    let destinationAccountName: String?
+    let amount: Double
+    let description: String
+    let date: String
+
+    init(expense: Expense, source: Account, destination: Account?) {
+        self.id = expense.id
+        self.sourceAccountName = source.name
+        self.destinationAccountName = destination?.name
+        self.amount = expense.amount
+        self.description = expense.description
+        self.date = expense.date
+    }
+}
+
 struct ManageExpensesView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
 
-    private var expenses: [Expense] {
-        accountsStore.accounts.flatMap { $0.expenses ?? [] }
+    private var expenses: [ExpenseContext] {
+        accountsStore.accounts.flatMap { account in
+            (account.expenses ?? []).map { expense in
+                let destination = expense.toAccountId.flatMap { accountsStore.account(for: $0) }
+                return ExpenseContext(expense: expense, source: account, destination: destination)
+            }
+        }
     }
 
     @ViewBuilder
@@ -528,26 +601,24 @@ struct ManageExpensesView: View {
             Label("No expenses configured.", systemImage: "creditcard")
                 .foregroundStyle(.secondary)
         } else {
-            ForEach(expenses, id: \.id) { expense in
+            ForEach(expenses) { context in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(expense.description)
+                    Text(context.description)
                         .font(.headline)
                     HStack(spacing: 8) {
-                        if let toAccountId = expense.toAccountId {
-                            Text("To Account #\(toAccountId)")
+                        Text("From: \(context.sourceAccountName)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let destinationName = context.destinationAccountName {
+                            Text("To: \(destinationName)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        if let toPot = expense.toPotName {
-                            Text("Pot: \(toPot)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Text("Day: \(expense.date)")
+                        Text("Day: \(context.date)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text(expense.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                    Text(abs(context.amount), format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
                         .fontWeight(.semibold)
                 }
                 .padding(.vertical, 6)
@@ -625,22 +696,93 @@ struct ExecuteTransfersView: View {
 struct ExecuteTransactionsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
 
+    @State private var executingQueuedTransfers = false
+
+    private var queuedTransfers: [TransferScheduleItem] {
+        accountsStore.transferQueue
+    }
+
+    private var queuedTotal: Double {
+        queuedTransfers.reduce(0) { $0 + $1.amount }
+    }
+
+    private var recentTransactions: [TransactionRecord] { accountsStore.transactions }
+
     var body: some View {
         List {
-            Section("Transactions") {
-                ForEach(accountsStore.transactions) { record in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(record.name)
-                            .font(.headline)
-                        HStack {
-                            Text(record.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
-                            Spacer()
-                            Text(record.date)
-                                .font(.caption)
+            Section("Queued Transactions") {
+                if queuedTransfers.isEmpty {
+                    Label("No transfers queued for execution.", systemImage: "tray")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(queuedTransfers) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.destinationDisplayName)
+                                .font(.headline)
+                            Text("From: \(item.fromAccountName)")
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
+                            HStack {
+                                Text(item.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                                    .fontWeight(.semibold)
+                                Spacer()
+                                Text("\(item.expenseCount) expense\(item.expenseCount == 1 ? "" : "s")")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 6)
+                    HStack {
+                        Text("Total")
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text(queuedTotal, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                            .fontWeight(.semibold)
+                    }
+                    Button {
+                        Task {
+                            executingQueuedTransfers = true
+                            defer { executingQueuedTransfers = false }
+                            await accountsStore.executeQueuedTransfers()
+                        }
+                    } label: {
+                        Label("Execute Transfer Queue", systemImage: "arrow.right.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(executingQueuedTransfers)
+                }
+            }
+
+            Section("Recently Executed") {
+                if recentTransactions.isEmpty {
+                    ContentUnavailableView {
+                        Label("No transactions", systemImage: "list.bullet")
+                    } description: {
+                        Text("Execute a transfer schedule to move funds between accounts.")
+                    }
+                } else {
+                    ForEach(recentTransactions) { record in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(record.name)
+                                .font(.headline)
+                            if !record.vendor.isEmpty {
+                                Text(record.vendor)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                Text(record.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                                    .fontWeight(.semibold)
+                                Spacer()
+                                Text(record.date)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
                 }
             }
         }
@@ -651,33 +793,36 @@ struct ExecuteTransactionsView: View {
 struct ExecuteExpensesView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
 
-    private var expenses: [Expense] {
-        accountsStore.accounts.flatMap { $0.expenses ?? [] }
+    private var expenses: [ExpenseContext] {
+        accountsStore.accounts.flatMap { account in
+            (account.expenses ?? []).map { expense in
+                let destination = expense.toAccountId.flatMap { accountsStore.account(for: $0) }
+                return ExpenseContext(expense: expense, source: account, destination: destination)
+            }
+        }
     }
 
     var body: some View {
         List {
             Section {
-                ForEach(expenses, id: \.id) { expense in
+                ForEach(expenses) { context in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(expense.description)
+                        Text(context.description)
                             .font(.headline)
                         HStack(spacing: 8) {
-                            if let toAccountId = expense.toAccountId {
-                                Text("To Account #\(toAccountId)")
+                            Text("From: \(context.sourceAccountName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let destinationName = context.destinationAccountName {
+                                Text("To: \(destinationName)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            if let toPot = expense.toPotName {
-                                Text("Pot: \(toPot)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text("Day: \(expense.date)")
+                            Text("Day: \(context.date)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Text(expense.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                        Text(abs(context.amount), format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
                     }
                     .padding(.vertical, 6)
                 }

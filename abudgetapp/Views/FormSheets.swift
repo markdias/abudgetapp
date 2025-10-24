@@ -126,7 +126,7 @@ struct IncomeFormView: View {
     @State private var company = ""
     @State private var dayOfMonth = ""
     @State private var selectedPotName: String? = nil
-    
+
 
     var body: some View {
         NavigationStack {
@@ -196,8 +196,6 @@ struct ExpenseFormView: View {
     @State private var amount = "0"
     @State private var name = ""
     @State private var dayOfMonth = ""
-    @State private var selectedPotName: String? = nil
-
     private let defaultSourceAccountId: Int?
 
     init(isPresented: Binding<Bool>, defaultSourceAccountId: Int? = nil) {
@@ -254,6 +252,11 @@ struct ExpenseFormView: View {
             }
             
         }
+        .onAppear {
+            if toAccountId == nil {
+                toAccountId = accountsStore.accounts.first?.id
+            }
+        }
     }
 
     private var isValid: Bool {
@@ -266,8 +269,9 @@ struct ExpenseFormView: View {
     }
 
     private func save() {
-        guard let sourceAccountId, let toAccountId, let money = Double(amount) else { return }
-        let submission = ExpenseSubmission(amount: money, description: name, date: dayOfMonth, toAccountId: toAccountId, toPotName: selectedPotName)
+        guard let sourceAccountId, let toAccountId, let rawAmount = Double(amount) else { return }
+        let money = abs(rawAmount)
+        let submission = ExpenseSubmission(amount: money, description: name, date: dayOfMonth, toAccountId: toAccountId, toPotName: nil)
         Task {
             await accountsStore.addExpense(accountId: sourceAccountId, submission: submission)
             isPresented = false
