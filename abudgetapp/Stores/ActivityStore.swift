@@ -49,13 +49,12 @@ final class ActivityStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self = self else { return }
             guard let accounts = notification.userInfo?["accounts"] as? [Account] else { return }
-            if let transactions = notification.userInfo?["transactions"] as? [TransactionRecord] {
-                self.currentTransactions = transactions
-            }
-            let items = Self.buildActivities(from: accounts, transactions: self.currentTransactions)
-            Task { @MainActor in
+            let transactions = notification.userInfo?["transactions"] as? [TransactionRecord]
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if let transactions { self.currentTransactions = transactions }
+                let items = Self.buildActivities(from: accounts, transactions: self.currentTransactions)
                 self.activities = items
                 self.applyFilter()
             }

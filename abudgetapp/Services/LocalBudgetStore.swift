@@ -315,10 +315,10 @@ actor LocalBudgetStore {
     }
 
     func addTransaction(_ submission: TransactionSubmission) throws -> TransactionRecord {
-        guard let fromIndex = state.accounts.firstIndex(where: { $0.id == submission.fromAccountId }) else {
+        guard state.accounts.contains(where: { $0.id == submission.fromAccountId }) else {
             throw StoreError.notFound("Account #\(submission.fromAccountId) not found")
         }
-        guard let toIndex = state.accounts.firstIndex(where: { $0.id == submission.toAccountId }) else {
+        guard state.accounts.contains(where: { $0.id == submission.toAccountId }) else {
             throw StoreError.notFound("Account #\(submission.toAccountId) not found")
         }
 
@@ -932,4 +932,3 @@ private struct BudgetState: Codable {
         )
     }
 }
-

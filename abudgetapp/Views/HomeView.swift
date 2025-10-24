@@ -998,7 +998,7 @@ private struct ActivityDetailPopover: View {
 
 // MARK: - Activity Editor
 
-private struct ActivityEditorSheet: View {
+struct ActivityEditorSheet: View {
     let activity: ActivityItem
     var body: some View {
         switch activity.category {

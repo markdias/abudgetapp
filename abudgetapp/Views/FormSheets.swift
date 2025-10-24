@@ -326,7 +326,7 @@ struct TransactionFormView: View {
     }
 
     private var isValid: Bool {
-        guard let fromAccountId, let toAccountId, !name.isEmpty, !vendor.isEmpty, let money = Double(amount), money > 0 else { return false }
+        guard fromAccountId != nil, toAccountId != nil, !name.isEmpty, !vendor.isEmpty, let money = Double(amount), money > 0 else { return false }
         if let day = Int(dayOfMonth), (1...31).contains(day) {
             return true
         }
@@ -350,4 +350,3 @@ struct TransactionFormView: View {
         }
     }
 }
-
