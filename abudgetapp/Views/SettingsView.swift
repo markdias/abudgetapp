@@ -31,9 +31,6 @@ struct SettingsView: View {
 
                 Section("Data Management") {
                     Button("Reload Data") { refreshAll() }
-                    Button("Reset Balances", role: .destructive) {
-                        Task { await accountsStore.resetBalances(); await incomeStore.load() }
-                    }
                     Button("Execute All Incomes") { Task { await incomeStore.executeAll() } }
                         .disabled(incomeStore.schedules.isEmpty)
                 }
