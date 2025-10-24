@@ -52,6 +52,10 @@ actor LocalBudgetStore {
         state.transactions
     }
 
+    func currentTargets() -> [TargetRecord] {
+        state.targets
+    }
+
     func addAccount(_ submission: AccountSubmission) throws -> Account {
         let account = Account(
             id: state.nextAccountId,
@@ -201,7 +205,6 @@ actor LocalBudgetStore {
         state.nextIncomeId += 1
         incomes.append(income)
         account.incomes = incomes
-        account.balance += submission.amount
         state.accounts[index] = account
         try persist()
         return income
@@ -226,9 +229,6 @@ actor LocalBudgetStore {
         )
         incomes[incomeIndex] = updated
         account.incomes = incomes
-        // Adjust account balance by the delta
-        let delta = submission.amount - old.amount
-        account.balance += delta
         state.accounts[index] = account
         try persist()
         return updated
@@ -294,7 +294,6 @@ actor LocalBudgetStore {
         }
         let income = incomes.remove(at: incomeIndex)
         account.incomes = incomes
-        account.balance -= income.amount
         state.accounts[index] = account
         try persist()
     }
@@ -331,8 +330,6 @@ actor LocalBudgetStore {
         )
         state.nextTransactionId += 1
         state.transactions.append(record)
-
-        try adjustTransactionBalances(for: record, multiplier: 1)
         try persist()
         return record
     }
@@ -353,10 +350,7 @@ actor LocalBudgetStore {
             toPotName: submission.toPotName
         )
 
-        let existing = state.transactions[index]
-        try adjustTransactionBalances(for: existing, multiplier: -1)
         state.transactions[index] = updated
-        try adjustTransactionBalances(for: updated, multiplier: 1)
         try persist()
         return updated
     }
@@ -365,8 +359,51 @@ actor LocalBudgetStore {
         guard let index = state.transactions.firstIndex(where: { $0.id == id }) else {
             throw StoreError.notFound("Transaction #\(id) not found")
         }
-        let record = state.transactions.remove(at: index)
-        try adjustTransactionBalances(for: record, multiplier: -1)
+        _ = state.transactions.remove(at: index)
+        try persist()
+    }
+
+    // MARK: - Targets (Account-only, balance neutral)
+
+    func addTarget(_ submission: TargetSubmission) throws -> TargetRecord {
+        guard state.accounts.contains(where: { $0.id == submission.accountId }) else {
+            throw StoreError.notFound("Account #\(submission.accountId) not found")
+        }
+        let record = TargetRecord(
+            id: state.nextTargetId,
+            name: submission.name,
+            amount: submission.amount,
+            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
+            accountId: submission.accountId
+        )
+        state.nextTargetId += 1
+        state.targets.append(record)
+        try persist()
+        return record
+    }
+
+    func updateTarget(id: Int, submission: TargetSubmission) throws -> TargetRecord {
+        guard let index = state.targets.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.notFound("Target #\(id) not found")
+        }
+        let existing = state.targets[index]
+        let updated = TargetRecord(
+            id: id,
+            name: submission.name,
+            amount: submission.amount,
+            date: submission.date ?? existing.date,
+            accountId: submission.accountId
+        )
+        state.targets[index] = updated
+        try persist()
+        return updated
+    }
+
+    func deleteTarget(id: Int) throws {
+        guard let index = state.targets.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.notFound("Target #\(id) not found")
+        }
+        state.targets.remove(at: index)
         try persist()
     }
 
@@ -689,12 +726,14 @@ private struct BudgetState: Codable {
     var accounts: [Account]
     var incomeSchedules: [IncomeSchedule]
     var transactions: [TransactionRecord]
+    var targets: [TargetRecord]
     var lastResetAt: String?
     var nextAccountId: Int
     var nextPotId: Int
     var nextIncomeId: Int
     var nextExpenseId: Int
     var nextTransactionId: Int
+    var nextTargetId: Int
     var nextScheduledPaymentId: Int
     var nextIncomeScheduleId: Int
 
@@ -702,24 +741,28 @@ private struct BudgetState: Codable {
         accounts: [Account],
         incomeSchedules: [IncomeSchedule],
         transactions: [TransactionRecord],
+        targets: [TargetRecord],
         lastResetAt: String? = nil,
         nextAccountId: Int,
         nextPotId: Int,
         nextIncomeId: Int,
         nextExpenseId: Int,
         nextTransactionId: Int,
+        nextTargetId: Int,
         nextScheduledPaymentId: Int,
         nextIncomeScheduleId: Int
     ) {
         self.accounts = accounts
         self.incomeSchedules = incomeSchedules
         self.transactions = transactions
+        self.targets = targets
         self.lastResetAt = lastResetAt
         self.nextAccountId = nextAccountId
         self.nextPotId = nextPotId
         self.nextIncomeId = nextIncomeId
         self.nextExpenseId = nextExpenseId
         self.nextTransactionId = nextTransactionId
+        self.nextTargetId = nextTargetId
         self.nextScheduledPaymentId = nextScheduledPaymentId
         self.nextIncomeScheduleId = nextIncomeScheduleId
     }
@@ -728,12 +771,14 @@ private struct BudgetState: Codable {
         case accounts
         case incomeSchedules = "income_schedules"
         case transactions
+        case targets
         case lastResetAt = "last_reset_at"
         case nextAccountId
         case nextPotId
         case nextIncomeId
         case nextExpenseId
         case nextTransactionId
+        case nextTargetId
         case nextScheduledPaymentId
         case nextIncomeScheduleId
     }
@@ -742,12 +787,14 @@ private struct BudgetState: Codable {
         case accounts
         case incomeSchedules
         case transactions
+        case targets
         case lastResetAt
         case nextAccountId
         case nextPotId
         case nextIncomeId
         case nextExpenseId
         case nextTransactionId
+        case nextTargetId
         case nextScheduledPaymentId
         case nextIncomeScheduleId
     }
@@ -757,12 +804,14 @@ private struct BudgetState: Codable {
             accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
             incomeSchedules = try container.decodeIfPresent([IncomeSchedule].self, forKey: .incomeSchedules) ?? []
             transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
+            targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
             lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
             nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
             nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
             nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
             nextExpenseId = try container.decodeIfPresent(Int.self, forKey: .nextExpenseId) ?? 1
             nextTransactionId = try container.decodeIfPresent(Int.self, forKey: .nextTransactionId) ?? 1
+            nextTargetId = try container.decodeIfPresent(Int.self, forKey: .nextTargetId) ?? 1
             nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
             nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
             return
@@ -772,12 +821,14 @@ private struct BudgetState: Codable {
         accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
         incomeSchedules = try container.decodeIfPresent([IncomeSchedule].self, forKey: .incomeSchedules) ?? []
         transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
+        targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
         lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
         nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
         nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
         nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
         nextExpenseId = try container.decodeIfPresent(Int.self, forKey: .nextExpenseId) ?? 1
         nextTransactionId = try container.decodeIfPresent(Int.self, forKey: .nextTransactionId) ?? 1
+        nextTargetId = try container.decodeIfPresent(Int.self, forKey: .nextTargetId) ?? 1
         nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
         nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
     }
@@ -813,6 +864,9 @@ private struct BudgetState: Codable {
         let incomeScheduleMax = incomeSchedules.map { $0.id }.max() ?? 0
         normalizedState.nextIncomeScheduleId = max(nextIncomeScheduleId, incomeScheduleMax + 1)
 
+        let targetMax = targets.map { $0.id }.max() ?? 0
+        normalizedState.nextTargetId = max(nextTargetId, targetMax + 1)
+
         return normalizedState
     }
 
@@ -821,12 +875,14 @@ private struct BudgetState: Codable {
             accounts: [],
             incomeSchedules: [],
             transactions: [],
+            targets: [],
             lastResetAt: nil,
             nextAccountId: 1,
             nextPotId: 1,
             nextIncomeId: 1,
             nextExpenseId: 1,
             nextTransactionId: 1,
+            nextTargetId: 1,
             nextScheduledPaymentId: 1,
             nextIncomeScheduleId: 1
         )
@@ -937,12 +993,14 @@ private struct BudgetState: Codable {
             accounts: [personalAccount, householdAccount, savingsAccount],
             incomeSchedules: [incomeSchedule],
             transactions: [],
+            targets: [],
             lastResetAt: nil,
             nextAccountId: 4,
             nextPotId: 5,
             nextIncomeId: 3,
             nextExpenseId: 3,
             nextTransactionId: 1,
+            nextTargetId: 1,
             nextScheduledPaymentId: 4,
             nextIncomeScheduleId: 2
         )
