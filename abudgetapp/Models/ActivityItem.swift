@@ -52,12 +52,15 @@ public struct ActivityItem: Identifiable, Hashable {
         switch category {
         case .income:
             sign = "+"
-        case .expense, .scheduledPayment:
+        case .expense:
+            sign = ""
+        case .scheduledPayment:
             sign = "-"
         case .transfer:
             let direction = metadata["direction"] ?? "out"
             sign = direction == "in" ? "+" : "-"
         }
-        return "\(sign)£\(String(format: "%.2f", amount))"
+        let formattedAmount = String(format: "%.2f", abs(amount))
+        return sign.isEmpty ? "£\(formattedAmount)" : "\(sign)£\(formattedAmount)"
     }
 }

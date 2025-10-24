@@ -191,24 +191,36 @@ struct ExpenseFormView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @Binding var isPresented: Bool
 
-    @State private var fromAccountId: Int?
     @State private var toAccountId: Int?
     @State private var amount = "0"
     @State private var name = ""
     @State private var dayOfMonth = ""
     @State private var selectedPotName: String? = nil
 
+    private let defaultSourceAccountId: Int?
+
+    init(isPresented: Binding<Bool>, defaultSourceAccountId: Int? = nil) {
+        self._isPresented = isPresented
+        self.defaultSourceAccountId = defaultSourceAccountId
+    }
+
+    private var sourceAccountId: Int? {
+        if let defaultSourceAccountId,
+           accountsStore.accounts.contains(where: { $0.id == defaultSourceAccountId }) {
+            return defaultSourceAccountId
+        }
+        return accountsStore.accounts.first?.id
+    }
+
+    private var sourceAccountName: String? {
+        guard let sourceAccountId,
+              let account = accountsStore.account(for: sourceAccountId) else { return nil }
+        return account.name
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("From Account") {
-                    Picker("Account", selection: $fromAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
-                        }
-                    }
-                }
                 Section("To Account") {
                     Picker("Account", selection: $toAccountId) {
                         Text("Select Account").tag(nil as Int?)
@@ -231,6 +243,15 @@ struct ExpenseFormView: View {
                         .keyboardType(.decimalPad)
                     TextField("Day of Month (1-31)", text: $dayOfMonth)
                         .keyboardType(.numberPad)
+                    if let sourceAccountName {
+                        Label("Funds will be deducted from \(sourceAccountName)", systemImage: "arrow.left.arrow.right")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Add an account before creating expenses.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("Add Expense")
@@ -245,7 +266,7 @@ struct ExpenseFormView: View {
     }
 
     private var isValid: Bool {
-        fromAccountId != nil && toAccountId != nil && !name.isEmpty && Double(amount) != nil && validDay
+        sourceAccountId != nil && toAccountId != nil && !name.isEmpty && Double(amount) != nil && validDay
     }
 
     private var validDay: Bool {
@@ -254,10 +275,10 @@ struct ExpenseFormView: View {
     }
 
     private func save() {
-        guard let fromAccountId, let toAccountId, let money = Double(amount) else { return }
+        guard let sourceAccountId, let toAccountId, let money = Double(amount) else { return }
         let submission = ExpenseSubmission(amount: money, description: name, date: dayOfMonth, toAccountId: toAccountId, toPotName: selectedPotName)
         Task {
-            await accountsStore.addExpense(accountId: fromAccountId, submission: submission)
+            await accountsStore.addExpense(accountId: sourceAccountId, submission: submission)
             isPresented = false
         }
     }
