@@ -4,9 +4,6 @@ import UniformTypeIdentifiers
 struct HomeView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var potsStore: PotsStore
-    @EnvironmentObject private var incomeStore: IncomeSchedulesStore
-    @EnvironmentObject private var savingsStore: SavingsInvestmentsStore
-    @EnvironmentObject private var activityStore: ActivityStore
     @EnvironmentObject private var scheduledPaymentsStore: ScheduledPaymentsStore
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
 
@@ -15,22 +12,18 @@ struct HomeView: View {
     @State private var searchText = ""
     @State private var showingAddAccount = false
     @State private var showingAddPot = false
-    @State private var showingAddIncome = false
-    @State private var showingAddExpense = false
-    @State private var showingAddTransaction = false
+    // Removed income/expense/transaction add sheets
     @State private var showingPotsManager = false
-    @State private var showingSavings = false
-    @State private var showingIncomeSchedules = false
+    // Removed savings and income schedules
     @State private var showingCardReorder = false
     @State private var showingDiagnostics = false
-    @State private var selectedActivity: ActivityItem?
     @State private var selectedAccountId: Int? = nil
     @State private var showingImporter = false
     @State private var showingExporter = false
     @State private var exportDocument = JSONDocument()
     @State private var showingDeleteAllConfirm = false
     @State private var selectedPotContext: PotEditContext? = nil
-    @State private var transactionDestinationAccountId: Int? = nil
+    // Removed transaction destination context
 
     private let cardSpacing: CGFloat = 72
 
@@ -48,31 +41,9 @@ struct HomeView: View {
         accountsStore.accounts.reduce(0) { $0 + $1.balance }
     }
 
-    private var todaysSpending: Double {
-        let today = Calendar.current.startOfDay(for: Date())
-        return activityStore.activities
-            .filter { $0.category == .expense && Calendar.current.isDate($0.date, inSameDayAs: today) }
-            .reduce(0) { $0 + $1.amount }
-    }
+    private var todaysSpending: Double { 0 }
 
-    private var filteredActivities: [ActivityItem] {
-        // Start from store-level category filtering
-        var items = activityStore.filteredActivities
-
-        // If an account is selected, show only that account's items
-        if let selectedId = selectedAccountId,
-           let account = accountsStore.accounts.first(where: { $0.id == selectedId }) {
-            items = items.filter { $0.accountName == account.name }
-        }
-
-        // Apply text search if present
-        if searchText.isEmpty { return items }
-        return items.filter { activity in
-            activity.title.localizedCaseInsensitiveContains(searchText) ||
-            activity.accountName.localizedCaseInsensitiveContains(searchText) ||
-            (activity.potName?.localizedCaseInsensitiveContains(searchText) ?? false)
-        }
-    }
+    // Activity feed removed
 
     var body: some View {
         NavigationStack {
@@ -93,22 +64,13 @@ struct HomeView: View {
                             spacing: cardSpacing,
                             onReorder: handleReorder,
                             onAddPot: { _ in showingAddPot = true },
-                            onAddTransaction: { account in
-                                transactionDestinationAccountId = account.id
-                                showingAddTransaction = true
-                            },
                             onManageCards: { showingCardReorder = true },
                             onDelete: { account in
                                 Task { await accountsStore.deleteAccount(id: account.id) }
                             }
                         )
                     }
-                    ActivityFeedSection(
-                        activityStore: activityStore,
-                        activities: filteredActivities,
-                        selectedActivity: $selectedActivity,
-                        onViewAll: { selectedTab = 1 }
-                    )
+                    // Activity feed removed
 
                     PotsPanelSection(
                         accounts: accountsStore.accounts,
@@ -123,11 +85,9 @@ struct HomeView: View {
 
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
-                        onSavings: { showingSavings = true },
-                        onIncome: { showingIncomeSchedules = true },
                         onReorder: { showingCardReorder = true },
                         onDiagnostics: { showingDiagnostics = true },
-                        onSettings: { selectedTab = 2 }
+                        onSettings: { selectedTab = 1 }
                     )
 
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
@@ -146,19 +106,7 @@ struct HomeView: View {
                 }
 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Button(action: { activityStore.isMarking.toggle() }) {
-                        Image(systemName: activityStore.isMarking ? "checkmark.circle.fill" : "checkmark.circle")
-                    }
-                    .help("Toggle mark mode")
-
                     Menu {
-                        Button("Add Transaction") {
-                            transactionDestinationAccountId = nil
-                            showingAddTransaction = true
-                        }
-                        Button("Add Expense", action: { showingAddExpense = true })
-                        Button("Add Income", action: { showingAddIncome = true })
-                        Divider()
                         Button("Add Account", action: { showingAddAccount = true })
                         Button("Add Pot", action: { showingAddPot = true })
                         Divider()
@@ -206,7 +154,7 @@ struct HomeView: View {
                 Button("Delete", role: .destructive) { Task { await deleteAllData() } }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This will permanently erase all accounts, pots, expenses, incomes, and schedules. This cannot be undone.")
+                Text("This will permanently erase all accounts, pots, and schedules. This cannot be undone.")
             }
             .toolbar { // chip to clear selected account when active
                 if let selectedId = selectedAccountId,
@@ -227,23 +175,8 @@ struct HomeView: View {
             .sheet(isPresented: $showingAddPot) {
                 PotFormView(isPresented: $showingAddPot)
             }
-            .sheet(isPresented: $showingAddIncome) {
-                IncomeFormView(isPresented: $showingAddIncome)
-            }
-            .sheet(isPresented: $showingAddExpense) {
-                ExpenseFormView(isPresented: $showingAddExpense, defaultSourceAccountId: selectedAccountId)
-            }
-            .sheet(isPresented: $showingAddTransaction) {
-                TransactionFormView(isPresented: $showingAddTransaction, defaultToAccountId: transactionDestinationAccountId)
-            }
             .sheet(isPresented: $showingPotsManager) {
                 PotsManagementView(isPresented: $showingPotsManager)
-            }
-            .sheet(isPresented: $showingSavings) {
-                SavingsInvestmentsView(isPresented: $showingSavings)
-            }
-            .sheet(isPresented: $showingIncomeSchedules) {
-                IncomeSchedulesBoardView(isPresented: $showingIncomeSchedules)
             }
             .sheet(isPresented: $showingCardReorder) {
                 CardReorderView(isPresented: $showingCardReorder)
@@ -254,24 +187,16 @@ struct HomeView: View {
             .sheet(item: $selectedPotContext) { context in
                 PotEditorSheet(context: context)
             }
-            .sheet(item: $selectedActivity) { activity in
-                ActivityEditorSheet(activity: activity)
-            }
+            // Activity editor removed
         }
     }
 
     private func refreshAllData() {
-        Task {
-            await accountsStore.loadAccounts()
-            await savingsStore.load()
-            await incomeStore.load()
-        }
+        Task { await accountsStore.loadAccounts() }
     }
 
     private func refreshAllAfterImport() async {
         await accountsStore.loadAccounts()
-        await incomeStore.load()
-        await savingsStore.load()
     }
 
     private func exportAllData() async {
@@ -355,7 +280,6 @@ private struct StackedAccountDeck: View {
     let spacing: CGFloat
     let onReorder: (Int, Int) -> Void
     let onAddPot: (Account) -> Void
-    let onAddTransaction: (Account) -> Void
     let onManageCards: () -> Void
     let onDelete: (Account) -> Void
 
@@ -391,7 +315,6 @@ private struct StackedAccountDeck: View {
                 .gesture(dragGesture(for: account, at: index))
                 .contextMenu {
                     Button("Add Pot") { onAddPot(account) }
-                    Button("New Transaction") { onAddTransaction(account) }
                     Button("Manage Cards") { onManageCards() }
                     Divider()
                     Button(role: .destructive) { onDelete(account) } label: {
@@ -521,8 +444,6 @@ private struct AccountCardView: View {
 
 private struct QuickActionsView: View {
     let onManagePots: () -> Void
-    let onSavings: () -> Void
-    let onIncome: () -> Void
     let onReorder: () -> Void
     let onDiagnostics: () -> Void
     let onSettings: () -> Void
@@ -533,14 +454,12 @@ private struct QuickActionsView: View {
                 .font(.headline)
             HStack(spacing: 16) {
                 QuickActionButton(icon: "tray.and.arrow.down", title: "Pots", action: onManagePots)
-                QuickActionButton(icon: "banknote", title: "Savings", action: onSavings)
-                QuickActionButton(icon: "calendar.badge.clock", title: "Incomes", action: onIncome)
-            }
-            HStack(spacing: 16) {
                 QuickActionButton(icon: "rectangle.stack", title: "Reorder", action: onReorder)
                 QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", action: onDiagnostics)
+            }
+            HStack(spacing: 16) {
                 QuickActionButton(icon: "gearshape", title: "Settings", action: onSettings)
-        }
+            }
         }
         .padding()
         .frame(maxWidth: .infinity)
@@ -573,6 +492,43 @@ private struct QuickActionButton: View {
     }
 }
 
+struct PotsManagementView: View {
+    @EnvironmentObject private var potsStore: PotsStore
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(accountsStore.accounts) { account in
+                    Section(account.name) {
+                        if let pots = potsStore.potsByAccount[account.id], !pots.isEmpty {
+                            ForEach(pots, id: \.id) { pot in
+                                VStack(alignment: .leading) {
+                                    Text(pot.name)
+                                    Text("£\(String(format: "%.2f", pot.balance))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } else {
+                            Text("No pots")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Pots")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { isPresented = false }
+                }
+            }
+        }
+    }
+}
+
+#if false
 // MARK: - Activity Feed
 
 private struct ActivityFeedSection: View {
@@ -815,6 +771,7 @@ private func icon(for category: ActivityCategory) -> String {
     }
 }
 
+#endif
 // MARK: - Pots Panel
 
 private struct PotEditContext: Identifiable, Hashable {
@@ -985,6 +942,7 @@ private struct PotRow: View {
     }
 }
 
+#if false
 private struct ActivityDetailPopover: View {
     let activity: ActivityItem
 
@@ -1394,6 +1352,7 @@ struct IncomeSchedulesBoardView: View {
         }
     }
 }
+#endif
 
 struct CardReorderView: View {
     @EnvironmentObject private var accountsStore: AccountsStore

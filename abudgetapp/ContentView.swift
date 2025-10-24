@@ -18,23 +18,11 @@ struct ContentView: View {
                 }
                 .tag(0)
 
-            TransactionsView()
-                .tabItem {
-                    Label("Activity", systemImage: "list.bullet")
-                }
-                .tag(1)
-
-            TransfersView()
-                .tabItem {
-                    Label("Transfers", systemImage: "arrow.left.arrow.right")
-                }
-                .tag(2)
-
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(3)
+                .tag(1)
         }
         .tint(.purple)
     }
