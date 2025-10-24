@@ -174,10 +174,15 @@ struct HomeView: View {
                             let accessed = url.startAccessingSecurityScopedResource()
                             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
                             let data = try Data(contentsOf: url)
-                            _ = try await APIService.shared.importBudgetState(from: data)
+                            _ = try await LocalBudgetStore.shared.importStateData(data)
                             await refreshAllAfterImport()
+                            accountsStore.statusMessage = StatusMessage(title: "Import", message: "Budget restored from file", kind: .success)
+                        } catch let error as LocalBudgetStore.StoreError {
+                            let dataError = error.asBudgetDataError
+                            accountsStore.statusMessage = StatusMessage(title: "Import Failed", message: dataError.localizedDescription, kind: .error)
                         } catch {
-                            print("Import failed: \(error)")
+                            let dataError = BudgetDataError.unknown(error)
+                            accountsStore.statusMessage = StatusMessage(title: "Import Failed", message: dataError.localizedDescription, kind: .error)
                         }
                     }
                 case .failure(let error):
@@ -258,20 +263,30 @@ struct HomeView: View {
 
     private func exportAllData() async {
         do {
-            let data = try await APIService.shared.exportBudgetState()
+            let data = try await LocalBudgetStore.shared.exportStateData()
             exportDocument = JSONDocument(data: data)
             showingExporter = true
+            accountsStore.statusMessage = StatusMessage(title: "Export", message: "Budget exported", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            accountsStore.statusMessage = StatusMessage(title: "Export Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            print("Export failed: \(error)")
+            let dataError = BudgetDataError.unknown(error)
+            accountsStore.statusMessage = StatusMessage(title: "Export Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     private func deleteAllData() async {
         do {
-            _ = try await APIService.shared.clearAllData()
+            _ = try await LocalBudgetStore.shared.clearAll()
             await refreshAllAfterImport()
+            accountsStore.statusMessage = StatusMessage(title: "Delete", message: "All data cleared", kind: .warning)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            accountsStore.statusMessage = StatusMessage(title: "Delete Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            print("Delete all failed: \(error)")
+            let dataError = BudgetDataError.unknown(error)
+            accountsStore.statusMessage = StatusMessage(title: "Delete Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 

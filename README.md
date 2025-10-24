@@ -16,7 +16,7 @@ The app uses a collection of domain-focused observable stores to keep local stat
 | `ActivityStore` | Builds an activity feed by merging incomes, expenses, and scheduled payments with mark-mode support. |
 | `DiagnosticsStore` | Runs an offline validation suite that exercises add/execute/delete/reset operations against local data. |
 
-`APIService` now wraps a local `LocalBudgetStore` actor that reads and writes a JSON snapshot stored in the app's Application Support directory. All requests use `async/await` and map storage errors to `APIServiceError` values for consistent status messaging.
+All stores work directly with the `LocalBudgetStore` actor that reads and writes a JSON snapshot stored in the app's Application Support directory. Calls are made with `async/await`, and storage failures surface as user-friendly `BudgetDataError` values so the UI can show actionable messages without relying on any remote service.
 
 All stores broadcast updates so dependent views remain in sync without ad-hoc refresh calls. The environment is wired in `MyBudgetApp`, which bootstraps initial data fetches when the app launches.
 

@@ -38,7 +38,7 @@ actor LocalBudgetStore {
         }
     }
 
-    // MARK: - Public API
+    // MARK: - Public Interface
 
     func currentAccounts() -> [Account] {
         state.accounts

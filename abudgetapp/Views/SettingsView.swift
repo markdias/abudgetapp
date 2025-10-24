@@ -77,7 +77,7 @@ struct SettingsView: View {
         isRestoringSample = true
         Task {
             do {
-                let snapshot = try await APIService.shared.restoreSampleData()
+                let snapshot = try await LocalBudgetStore.shared.restoreSample()
                 await MainActor.run {
                     accountsStore.applyAccounts(snapshot.accounts)
                     storageStatus = "Sample data restored"
@@ -85,13 +85,14 @@ struct SettingsView: View {
                 }
                 await incomeStore.load()
                 await savingsStore.load()
-            } catch let error as APIServiceError {
+            } catch let error as LocalBudgetStore.StoreError {
+                let dataError = error.asBudgetDataError
                 await MainActor.run {
-                    storageStatus = error.localizedDescription
+                    storageStatus = dataError.localizedDescription
                     storageStatusIsSuccess = false
                 }
             } catch {
-                let apiError = APIServiceError.unknown(error)
+                let apiError = BudgetDataError.unknown(error)
                 await MainActor.run {
                     storageStatus = apiError.localizedDescription
                     storageStatusIsSuccess = false

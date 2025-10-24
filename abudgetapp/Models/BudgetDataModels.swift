@@ -1,6 +1,4 @@
-// filepath: /Users/markdias/project/abudgetapp/abudgetapp/Models/APIModels.swift
-//
-//  APIModels.swift
+//  BudgetDataModels.swift
 //  abudgetapp
 //
 
@@ -13,14 +11,6 @@ public struct MessageResponse: Codable {
     
     public init(message: String) {
         self.message = message
-    }
-}
-
-public struct ExclusionResponse: Codable {
-    public let excludeFromReset: Bool
-    
-    public init(excludeFromReset: Bool) {
-        self.excludeFromReset = excludeFromReset
     }
 }
 
@@ -41,18 +31,6 @@ public struct IncomeExecutionResponse: Codable {
     public init(accounts: [Account], executed_count: Int) {
         self.accounts = accounts
         self.executed_count = executed_count
-    }
-}
-
-public struct CardOrderResponse: Codable {
-    public let success: Bool
-    public let message: String?
-    public let accounts: [Account]?
-
-    public init(success: Bool, message: String? = nil, accounts: [Account]? = nil) {
-        self.success = success
-        self.message = message
-        self.accounts = accounts
     }
 }
 
