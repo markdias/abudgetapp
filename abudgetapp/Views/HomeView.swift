@@ -231,7 +231,7 @@ struct HomeView: View {
                 IncomeFormView(isPresented: $showingAddIncome)
             }
             .sheet(isPresented: $showingAddExpense) {
-                ExpenseFormView(isPresented: $showingAddExpense)
+                ExpenseFormView(isPresented: $showingAddExpense, defaultSourceAccountId: selectedAccountId)
             }
             .sheet(isPresented: $showingAddTransaction) {
                 TransactionFormView(isPresented: $showingAddTransaction, defaultToAccountId: transactionDestinationAccountId)
