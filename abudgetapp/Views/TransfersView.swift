@@ -157,7 +157,7 @@ struct ManageTransferSchedulesView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    Picker("Account", selection: Binding(
+                    Picker("Account", selection: Binding<Int?>(
                         get: { selectedAccountId ?? accounts.first?.id },
                         set: { selectedAccountId = $0 }
                     )) {
@@ -203,12 +203,14 @@ struct ManageTransferSchedulesView: View {
 
             Section("Scheduled Items") {
                 if filteredGroups.isEmpty {
-                    ContentUnavailableView("No schedules", systemImage: "calendar") {
+                    ContentUnavailableView {
+                        Label("No schedules", systemImage: "calendar")
+                    } description: {
                         Text("Create a schedule from an account or pot to see it listed here.")
                     }
                 } else {
                     ForEach(filteredGroups) { group in
-                        DisclosureGroup(isExpanded: Binding(
+                        DisclosureGroup(isExpanded: Binding<Bool>(
                             get: { expandedGroupIDs.contains(group.id) },
                             set: { isExpanded in
                                 if isExpanded { expandedGroupIDs.insert(group.id) } else { expandedGroupIDs.remove(group.id) }
@@ -386,7 +388,9 @@ struct ManageIncomesView: View {
         List {
             Section("Scheduled Incomes") {
                 if incomeStore.schedules.isEmpty {
-                    ContentUnavailableView("No income schedules", systemImage: "tray") {
+                    ContentUnavailableView {
+                        Label("No income schedules", systemImage: "tray")
+                    } description: {
                         Text("Create a schedule from an account to see it listed here.")
                     }
                 } else {
@@ -446,22 +450,21 @@ struct ManageTransactionsView: View {
         List {
             Section("Recent Transactions") {
                 if accountsStore.transactions.isEmpty {
-                    ContentUnavailableView("No transactions", systemImage: "list.bullet") {
+                    ContentUnavailableView {
+                        Label("No transactions", systemImage: "list.bullet")
+                    } description: {
                         Text("Add transactions from the dashboard or import data to see them listed here.")
                     }
                 } else {
                     ForEach(accountsStore.transactions) { record in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(record.transaction.name)
+                            Text(record.name)
                                 .font(.headline)
-                            Text(record.transaction.category.title)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                             HStack {
-                                Text(record.transaction.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                                Text(record.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
                                     .fontWeight(.semibold)
                                 Spacer()
-                                Text(record.transaction.date.formatted(date: .numeric, time: .omitted))
+                                Text(record.date)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -482,26 +485,45 @@ struct ManageExpensesView: View {
         accountsStore.accounts.flatMap { $0.expenses ?? [] }
     }
 
-    var body: some View {
-        List {
-            Section("Recurring Expenses") {
-                if expenses.isEmpty {
-                    Label("No expenses configured.", systemImage: "creditcard")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(expenses) { expense in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(expense.description)
-                                .font(.headline)
-                            Text(expense.company)
+    @ViewBuilder
+    private var expensesSectionContent: some View {
+        if expenses.isEmpty {
+            Label("No expenses configured.", systemImage: "creditcard")
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(expenses, id: \.id) { expense in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(expense.description)
+                        .font(.headline)
+                    HStack(spacing: 8) {
+                        if let toAccountId = expense.toAccountId {
+                            Text("To Account #\(toAccountId)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text(expense.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
-                                .fontWeight(.semibold)
                         }
-                        .padding(.vertical, 6)
+                        if let toPot = expense.toPotName {
+                            Text("Pot: \(toPot)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("Day: \(expense.date)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+                    Text(expense.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                        .fontWeight(.semibold)
                 }
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                expensesSectionContent
+            } header: {
+                Text("Recurring Expenses")
             }
         }
         .navigationTitle("Manage Expenses")
@@ -571,15 +593,12 @@ struct ExecuteTransactionsView: View {
             Section("Transactions") {
                 ForEach(accountsStore.transactions) { record in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(record.transaction.name)
+                        Text(record.name)
                             .font(.headline)
-                        Text(record.transaction.category.title)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                         HStack {
-                            Text(record.transaction.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                            Text(record.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
                             Spacer()
-                            Text(record.transaction.date.formatted(date: .numeric, time: .omitted))
+                            Text(record.date)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -601,18 +620,32 @@ struct ExecuteExpensesView: View {
 
     var body: some View {
         List {
-            Section("Expenses") {
-                ForEach(expenses) { expense in
+            Section {
+                ForEach(expenses, id: \.id) { expense in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(expense.description)
                             .font(.headline)
-                        Text(expense.company)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            if let toAccountId = expense.toAccountId {
+                                Text("To Account #\(toAccountId)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let toPot = expense.toPotName {
+                                Text("Pot: \(toPot)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("Day: \(expense.date)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         Text(expense.amount, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
                     }
                     .padding(.vertical, 6)
                 }
+            } header: {
+                Text("Expenses")
             }
         }
         .navigationTitle("Execute Expenses")
@@ -683,7 +716,7 @@ struct SalarySorterView: View {
     var body: some View {
         Form {
             Section("Select Account") {
-                Picker("Account", selection: Binding(
+                Picker("Account", selection: Binding<Int?>(
                     get: { selectedAccountId ?? accounts.first?.id },
                     set: { newValue in
                         selectedAccountId = newValue
@@ -697,22 +730,19 @@ struct SalarySorterView: View {
                 .pickerStyle(.navigationLink)
             }
 
-            Section("Allocation") {
+            Section {
                 if potsForSelection.isEmpty {
                     Text("Create pots for the selected account to plan your salary distribution.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(potsForSelection) { pot in
+                    ForEach(potsForSelection, id: \.id) { pot in
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(pot.name)
-                                Text(pot.description ?? "")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            TextField("Amount", value: Binding(
+                            TextField("Amount", value: Binding<Double>(
                                 get: { allocation[pot.name, default: 0] },
                                 set: { allocation[pot.name] = $0 }
                             ), format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
@@ -723,6 +753,8 @@ struct SalarySorterView: View {
                         }
                     }
                 }
+            } header: {
+                Text("Allocation")
             }
 
             if !allocation.isEmpty {
