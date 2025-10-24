@@ -9,12 +9,12 @@ final class AccountsStore: ObservableObject {
     }
     @Published var isLoading = false
     @Published var statusMessage: StatusMessage?
-    @Published var lastError: APIServiceError?
+    @Published var lastError: BudgetDataError?
 
-    private let service: APIServiceProtocol
+    private let store: LocalBudgetStore
 
-    init(service: APIServiceProtocol = APIService.shared) {
-        self.service = service
+    init(store: LocalBudgetStore = .shared) {
+        self.store = store
     }
 
     func loadAccounts(force: Bool = false) async {
@@ -22,174 +22,175 @@ final class AccountsStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            let fetched = try await service.getAccounts()
-            accounts = fetched
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Accounts", message: error.localizedDescription, kind: .error)
-        } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Accounts", message: apiError.localizedDescription, kind: .error)
-        }
+        let fetched = await store.currentAccounts()
+        accounts = fetched
     }
 
     func addAccount(_ submission: AccountSubmission) async {
         do {
-            let account = try await service.addAccount(account: submission)
+            let account = try await store.addAccount(submission)
             accounts.append(account)
             statusMessage = StatusMessage(title: "Account Added", message: "Successfully added \(account.name)", kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Add Account Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Account Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Add Account Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Account Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func updateAccount(id: Int, submission: AccountSubmission) async {
         do {
-            let updatedAccount = try await service.updateAccount(accountId: id, updatedAccount: submission)
+            let updatedAccount = try await store.updateAccount(id: id, submission: submission)
             applyAccount(updatedAccount)
             statusMessage = StatusMessage(title: "Account Updated", message: "Updated \(updatedAccount.name)", kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Update Account Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Account Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Update Account Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Account Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func deleteAccount(id: Int) async {
         do {
-            _ = try await service.deleteAccount(accountId: id)
+            try await store.deleteAccount(id: id)
             accounts.removeAll { $0.id == id }
             statusMessage = StatusMessage(title: "Account Deleted", message: "Removed account", kind: .warning)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Delete Account Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Account Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Delete Account Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Account Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func addIncome(accountId: Int, submission: IncomeSubmission) async {
         do {
-            let income = try await service.addIncome(accountId: accountId, income: submission)
+            let income = try await store.addIncome(accountId: accountId, submission: submission)
             mutateAccount(id: accountId) { account in
                 var incomes = account.incomes ?? []
                 incomes.append(income)
                 account.incomes = incomes
             }
             statusMessage = StatusMessage(title: "Income Added", message: income.description, kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Add Income Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Income Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Add Income Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Income Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func updateIncome(accountId: Int, incomeId: Int, submission: IncomeSubmission) async {
         do {
-            _ = try await service.updateIncome(accountId: accountId, incomeId: incomeId, income: submission)
+            _ = try await store.updateIncome(accountId: accountId, incomeId: incomeId, submission: submission)
             await loadAccounts()
             statusMessage = StatusMessage(title: "Income Updated", message: submission.description, kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Update Income Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Income Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Update Income Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Income Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func addExpense(accountId: Int, submission: ExpenseSubmission) async {
         do {
-            let expense = try await service.addExpense(accountId: accountId, expense: submission)
+            let expense = try await store.addExpense(accountId: accountId, submission: submission)
             mutateAccount(id: accountId) { account in
                 var expenses = account.expenses ?? []
                 expenses.append(expense)
                 account.expenses = expenses
             }
             statusMessage = StatusMessage(title: "Expense Added", message: expense.description, kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Add Expense Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Expense Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Add Expense Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Expense Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func updateExpense(accountId: Int, expenseId: Int, submission: ExpenseSubmission) async {
         do {
-            _ = try await service.updateExpense(accountId: accountId, expenseId: expenseId, expense: submission)
+            _ = try await store.updateExpense(accountId: accountId, expenseId: expenseId, submission: submission)
             await loadAccounts()
             statusMessage = StatusMessage(title: "Expense Updated", message: submission.description, kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Update Expense Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Expense Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Update Expense Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Expense Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func deleteIncome(accountId: Int, incomeId: Int) async {
         do {
-            _ = try await service.deleteIncome(accountId: accountId, incomeId: incomeId)
+            try await store.deleteIncome(accountId: accountId, incomeId: incomeId)
             await loadAccounts()
             statusMessage = StatusMessage(title: "Income Deleted", message: "Removed income", kind: .warning)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Delete Income Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Income Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Delete Income Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Income Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func deleteExpense(accountId: Int, expenseId: Int) async {
         do {
-            _ = try await service.deleteExpense(accountId: accountId, expenseId: expenseId)
+            try await store.deleteExpense(accountId: accountId, expenseId: expenseId)
             await loadAccounts()
             statusMessage = StatusMessage(title: "Expense Deleted", message: "Removed expense", kind: .warning)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Delete Expense Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Expense Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Delete Expense Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Expense Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func resetBalances() async {
         do {
-            let response = try await service.resetBalances()
+            let response = try await store.resetBalances()
             accounts = response.accounts
             statusMessage = StatusMessage(title: "Balances Reset", message: "Accounts have been reset", kind: .warning)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Reset Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Reset Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Reset Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Reset Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
@@ -198,18 +199,16 @@ final class AccountsStore: ObservableObject {
         accounts = reordered
         do {
             let ids = accounts.map { $0.id }
-            let response = try await service.updateCardOrder(accountIds: ids)
-            if let returnedAccounts = response.accounts {
-                accounts = returnedAccounts
-            }
-            statusMessage = StatusMessage(title: "Card Order", message: response.message ?? "Card order updated", kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            statusMessage = StatusMessage(title: "Reorder Failed", message: error.localizedDescription, kind: .error)
+            accounts = try await store.reorderAccounts(by: ids)
+            statusMessage = StatusMessage(title: "Card Order", message: "Card order updated", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Reorder Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            statusMessage = StatusMessage(title: "Reorder Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Reorder Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 

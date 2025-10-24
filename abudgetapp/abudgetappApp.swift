@@ -4,7 +4,6 @@ import SwiftUI
 struct MyBudgetApp: App {
     @StateObject private var accountsStore: AccountsStore
     @StateObject private var potsStore: PotsStore
-    @StateObject private var transferSchedulesStore: TransferSchedulesStore
     @StateObject private var incomeSchedulesStore: IncomeSchedulesStore
     @StateObject private var savingsStore: SavingsInvestmentsStore
     @StateObject private var activityStore: ActivityStore
@@ -15,8 +14,6 @@ struct MyBudgetApp: App {
         let accounts = AccountsStore()
         _accountsStore = StateObject(wrappedValue: accounts)
         _potsStore = StateObject(wrappedValue: PotsStore(accountsStore: accounts))
-        let transferStore = TransferSchedulesStore(accountsStore: accounts)
-        _transferSchedulesStore = StateObject(wrappedValue: transferStore)
         let incomeStore = IncomeSchedulesStore(accountsStore: accounts)
         _incomeSchedulesStore = StateObject(wrappedValue: incomeStore)
         _savingsStore = StateObject(wrappedValue: SavingsInvestmentsStore())
@@ -30,7 +27,6 @@ struct MyBudgetApp: App {
             ContentView()
                 .environmentObject(accountsStore)
                 .environmentObject(potsStore)
-                .environmentObject(transferSchedulesStore)
                 .environmentObject(incomeSchedulesStore)
                 .environmentObject(savingsStore)
                 .environmentObject(activityStore)
@@ -48,7 +44,6 @@ struct MyBudgetApp: App {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await accountsStore.loadAccounts() }
             group.addTask { await savingsStore.load() }
-            group.addTask { await transferSchedulesStore.load() }
             group.addTask { await incomeSchedulesStore.load() }
         }
     }

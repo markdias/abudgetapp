@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 struct HomeView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var potsStore: PotsStore
-    @EnvironmentObject private var transferStore: TransferSchedulesStore
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
     @EnvironmentObject private var savingsStore: SavingsInvestmentsStore
     @EnvironmentObject private var activityStore: ActivityStore
@@ -18,12 +17,9 @@ struct HomeView: View {
     @State private var showingAddPot = false
     @State private var showingAddIncome = false
     @State private var showingAddExpense = false
-    @State private var showingTransferComposer = false
     @State private var showingPotsManager = false
     @State private var showingSavings = false
-    @State private var showingTransferBoard = false
     @State private var showingIncomeSchedules = false
-    @State private var showingSalarySorter = false
     @State private var showingCardReorder = false
     @State private var showingDiagnostics = false
     @State private var selectedActivity: ActivityItem?
@@ -123,10 +119,10 @@ struct HomeView: View {
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
                         onSavings: { showingSavings = true },
-                        onTransfers: { showingTransferBoard = true },
                         onIncome: { showingIncomeSchedules = true },
-                        onSalarySorter: { showingSalarySorter = true },
-                        onReorder: { showingCardReorder = true }
+                        onReorder: { showingCardReorder = true },
+                        onDiagnostics: { showingDiagnostics = true },
+                        onSettings: { selectedTab = 2 }
                     )
 
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
@@ -149,11 +145,6 @@ struct HomeView: View {
                         Image(systemName: activityStore.isMarking ? "checkmark.circle.fill" : "checkmark.circle")
                     }
                     .help("Toggle mark mode")
-
-                    Button(action: { showingTransferComposer = true }) {
-                        Image(systemName: "arrowtriangle.right.fill")
-                    }
-                    .help("New transfer schedule")
 
                     Menu {
                         Button("Add Account", action: { showingAddAccount = true })
@@ -183,10 +174,15 @@ struct HomeView: View {
                             let accessed = url.startAccessingSecurityScopedResource()
                             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
                             let data = try Data(contentsOf: url)
-                            _ = try await APIService.shared.importBudgetState(from: data)
+                            _ = try await LocalBudgetStore.shared.importStateData(data)
                             await refreshAllAfterImport()
+                            accountsStore.statusMessage = StatusMessage(title: "Import", message: "Budget restored from file", kind: .success)
+                        } catch let error as LocalBudgetStore.StoreError {
+                            let dataError = error.asBudgetDataError
+                            accountsStore.statusMessage = StatusMessage(title: "Import Failed", message: dataError.localizedDescription, kind: .error)
                         } catch {
-                            print("Import failed: \(error)")
+                            let dataError = BudgetDataError.unknown(error)
+                            accountsStore.statusMessage = StatusMessage(title: "Import Failed", message: dataError.localizedDescription, kind: .error)
                         }
                     }
                 case .failure(let error):
@@ -227,23 +223,14 @@ struct HomeView: View {
             .sheet(isPresented: $showingAddExpense) {
                 ExpenseFormView(isPresented: $showingAddExpense)
             }
-            .sheet(isPresented: $showingTransferComposer) {
-                TransferComposerView(isPresented: $showingTransferComposer)
-            }
             .sheet(isPresented: $showingPotsManager) {
                 PotsManagementView(isPresented: $showingPotsManager)
             }
             .sheet(isPresented: $showingSavings) {
                 SavingsInvestmentsView(isPresented: $showingSavings)
             }
-            .sheet(isPresented: $showingTransferBoard) {
-                TransferBoardView(isPresented: $showingTransferBoard)
-            }
             .sheet(isPresented: $showingIncomeSchedules) {
                 IncomeSchedulesBoardView(isPresented: $showingIncomeSchedules)
-            }
-            .sheet(isPresented: $showingSalarySorter) {
-                SalarySorterView(isPresented: $showingSalarySorter)
             }
             .sheet(isPresented: $showingCardReorder) {
                 CardReorderView(isPresented: $showingCardReorder)
@@ -264,34 +251,42 @@ struct HomeView: View {
         Task {
             await accountsStore.loadAccounts()
             await savingsStore.load()
-            await transferStore.load()
             await incomeStore.load()
         }
     }
 
     private func refreshAllAfterImport() async {
         await accountsStore.loadAccounts()
-        await transferStore.load()
         await incomeStore.load()
         await savingsStore.load()
     }
 
     private func exportAllData() async {
         do {
-            let data = try await APIService.shared.exportBudgetState()
+            let data = try await LocalBudgetStore.shared.exportStateData()
             exportDocument = JSONDocument(data: data)
             showingExporter = true
+            accountsStore.statusMessage = StatusMessage(title: "Export", message: "Budget exported", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            accountsStore.statusMessage = StatusMessage(title: "Export Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            print("Export failed: \(error)")
+            let dataError = BudgetDataError.unknown(error)
+            accountsStore.statusMessage = StatusMessage(title: "Export Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     private func deleteAllData() async {
         do {
-            _ = try await APIService.shared.clearAllData()
+            _ = try await LocalBudgetStore.shared.clearAll()
             await refreshAllAfterImport()
+            accountsStore.statusMessage = StatusMessage(title: "Delete", message: "All data cleared", kind: .warning)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            accountsStore.statusMessage = StatusMessage(title: "Delete Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            print("Delete all failed: \(error)")
+            let dataError = BudgetDataError.unknown(error)
+            accountsStore.statusMessage = StatusMessage(title: "Delete Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
@@ -514,10 +509,10 @@ private struct AccountCardView: View {
 private struct QuickActionsView: View {
     let onManagePots: () -> Void
     let onSavings: () -> Void
-    let onTransfers: () -> Void
     let onIncome: () -> Void
-    let onSalarySorter: () -> Void
     let onReorder: () -> Void
+    let onDiagnostics: () -> Void
+    let onSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -526,13 +521,13 @@ private struct QuickActionsView: View {
             HStack(spacing: 16) {
                 QuickActionButton(icon: "tray.and.arrow.down", title: "Pots", action: onManagePots)
                 QuickActionButton(icon: "banknote", title: "Savings", action: onSavings)
-                QuickActionButton(icon: "arrow.left.arrow.right", title: "Transfers", action: onTransfers)
+                QuickActionButton(icon: "calendar.badge.clock", title: "Incomes", action: onIncome)
             }
             HStack(spacing: 16) {
-                QuickActionButton(icon: "calendar.badge.clock", title: "Incomes", action: onIncome)
-                QuickActionButton(icon: "chart.pie", title: "Salary", action: onSalarySorter)
                 QuickActionButton(icon: "rectangle.stack", title: "Reorder", action: onReorder)
-            }
+                QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", action: onDiagnostics)
+                QuickActionButton(icon: "gearshape", title: "Settings", action: onSettings)
+        }
         }
         .padding()
         .frame(maxWidth: .infinity)
@@ -1120,42 +1115,6 @@ struct SavingsInvestmentsView: View {
     }
 }
 
-struct TransferBoardView: View {
-    @EnvironmentObject private var transferStore: TransferSchedulesStore
-    @Binding var isPresented: Bool
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(transferStore.groupsByDestination()) { group in
-                    Section(group.title) {
-                        if let subtitle = group.subtitle {
-                            Text(subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(group.schedules) { schedule in
-                            VStack(alignment: .leading) {
-                                Text(schedule.description)
-                                Text(schedule.destinationKind.displayLabel)
-                                    .font(.caption2)
-                                    .foregroundStyle(schedule.destinationKind == .account ? .orange : .blue)
-                                Text("£\(String(format: "%.2f", schedule.amount))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Transfer Schedules")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { isPresented = false } }
-            }
-        }
-    }
-}
-
 struct IncomeSchedulesBoardView: View {
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
     @Binding var isPresented: Bool
@@ -1177,475 +1136,6 @@ struct IncomeSchedulesBoardView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { isPresented = false } }
             }
         }
-    }
-}
-
-struct SalarySorterView: View {
-    @EnvironmentObject private var accountsStore: AccountsStore
-    @EnvironmentObject private var transferStore: TransferSchedulesStore
-    @EnvironmentObject private var incomeStore: IncomeSchedulesStore
-    @Binding var isPresented: Bool
-    @State private var expandedAccountIds: Set<Int> = []
-    @State private var expandedTransferIds: Set<Int> = []
-
-    private struct TransferPreview: Identifiable {
-        let id: Int
-        let schedule: TransferSchedule
-        let amount: Double
-        let destinationStartingBalance: Double
-        let destinationFinalBalance: Double
-        let destinationLabel: String
-        let destinationIsPot: Bool
-        let sourceLabel: String?
-        let sourceStartingBalance: Double?
-        let sourceFinalBalance: Double?
-        let items: [TransferItem]
-    }
-
-    private struct AccountPreview: Identifiable {
-        let account: Account
-        let transfers: [TransferPreview]
-        let totalAmount: Double
-        let startingBalance: Double
-        let balanceAfterIncome: Double
-        let balanceAfterTransfers: Double
-
-        var id: Int { account.id }
-    }
-
-    private struct PreviewContext {
-        let accounts: [AccountPreview]
-        let salaryOutflowTotal: Double
-    }
-
-    private struct PotKey: Hashable {
-        let accountId: Int
-        let name: String
-    }
-
-    private var activeIncomes: [IncomeSchedule] {
-        incomeStore.schedules.filter { $0.isActive && !$0.isCompleted }
-    }
-
-    private var incomeTotal: Double {
-        activeIncomes.reduce(0) { $0 + $1.amount }
-    }
-
-    private var activeTransfers: [TransferSchedule] {
-        transferStore.schedules.filter { $0.isActive && !$0.isCompleted }
-    }
-
-    private var incomesByAccount: [Int: Double] {
-        var dict: [Int: Double] = [:]
-        for income in activeIncomes {
-            dict[income.accountId, default: 0] += income.amount
-        }
-        return dict
-    }
-
-    private var previewContext: PreviewContext {
-        guard !accountsStore.accounts.isEmpty else { return PreviewContext(accounts: [], salaryOutflowTotal: 0) }
-
-        let accounts = accountsStore.accounts
-        let accountStartingBalances = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.balance) })
-
-        var accountAfterIncome = accountStartingBalances
-        for (accountId, amount) in incomesByAccount {
-            accountAfterIncome[accountId, default: accountStartingBalances[accountId] ?? 0] += amount
-        }
-
-        var accountBalances = accountAfterIncome
-
-        var potStartingBalances: [PotKey: Double] = [:]
-        var potBalances: [PotKey: Double] = [:]
-        var potLookupById: [Int: PotKey] = [:]
-        var potLookupByName: [String: [PotKey]] = [:]
-
-        for account in accounts {
-            for pot in account.pots ?? [] {
-                let key = PotKey(accountId: account.id, name: pot.name)
-                potStartingBalances[key] = pot.balance
-                potBalances[key] = pot.balance
-                potLookupById[pot.id] = key
-                potLookupByName[pot.name, default: []].append(key)
-            }
-        }
-
-        let resolvePotKey: (String, Int?, Int) -> PotKey? = { identifier, accountHint, destinationAccountId in
-            if let numericId = Int(identifier), let key = potLookupById[numericId] {
-                return key
-            }
-            if let accountId = accountHint {
-                let key = PotKey(accountId: accountId, name: identifier)
-                if potStartingBalances[key] != nil {
-                    return key
-                }
-            }
-            let destinationKey = PotKey(accountId: destinationAccountId, name: identifier)
-            if potStartingBalances[destinationKey] != nil {
-                return destinationKey
-            }
-            if let matches = potLookupByName[identifier] {
-                if matches.count == 1 {
-                    return matches[0]
-                }
-                if let accountId = accountHint, let match = matches.first(where: { $0.accountId == accountId }) {
-                    return match
-                }
-                if let match = matches.first(where: { $0.accountId == destinationAccountId }) {
-                    return match
-                }
-                return matches.first
-            }
-            return nil
-        }
-
-        var previewsByAccount: [Int: [TransferPreview]] = [:]
-        var totalsByAccount: [Int: Double] = [:]
-        var salaryOutflowsByAccount: [Int: Double] = [:]
-
-        for schedule in activeTransfers.sorted(by: { $0.id < $1.id }) {
-            let amount = schedule.amount
-
-            var sourceLabel: String?
-            var sourceStarting: Double?
-            var sourceFinal: Double?
-            var sourceAccountId: Int?
-
-            if let fromPotId = schedule.fromPotId, !fromPotId.isEmpty,
-               let key = resolvePotKey(fromPotId, schedule.fromAccountId, schedule.toAccountId) {
-                let starting = potBalances[key] ?? potStartingBalances[key] ?? 0
-                sourceStarting = starting
-                let newValue = starting - amount
-                potBalances[key] = newValue
-                sourceFinal = newValue
-                sourceAccountId = key.accountId
-                let accountName = accountsStore.account(for: key.accountId)?.name ?? "Account #\(key.accountId)"
-                sourceLabel = "\(accountName) · Pot: \(key.name)"
-            } else if let fromAccountId = schedule.fromAccountId {
-                let starting = accountBalances[fromAccountId]
-                    ?? accountAfterIncome[fromAccountId]
-                    ?? accountStartingBalances[fromAccountId]
-                    ?? 0
-                sourceStarting = starting
-                let newValue = starting - amount
-                accountBalances[fromAccountId] = newValue
-                sourceFinal = newValue
-                sourceAccountId = fromAccountId
-                let accountName = accountsStore.account(for: fromAccountId)?.name ?? "Account #\(fromAccountId)"
-                sourceLabel = accountName
-            } else if let fromPotId = schedule.fromPotId, !fromPotId.isEmpty {
-                sourceLabel = "Pot: \(fromPotId)"
-            }
-
-            if let accountId = sourceAccountId {
-                salaryOutflowsByAccount[accountId, default: 0] += amount
-            }
-
-            let destinationAccountId = schedule.toAccountId
-            let destinationLabel: String
-            let destinationStarting: Double
-            let destinationFinal: Double
-            var isPotDestination = false
-
-            if let potName = schedule.toPotName, !potName.isEmpty {
-                isPotDestination = true
-                let key = PotKey(accountId: destinationAccountId, name: potName)
-                let starting = potBalances[key] ?? potStartingBalances[key] ?? 0
-                destinationStarting = starting
-                let newValue = starting + amount
-                potBalances[key] = newValue
-                destinationFinal = newValue
-                let accountName = accountsStore.account(for: destinationAccountId)?.name ?? "Account #\(destinationAccountId)"
-                destinationLabel = "\(accountName) · Pot: \(potName)"
-            } else {
-                let starting = accountBalances[destinationAccountId]
-                    ?? accountAfterIncome[destinationAccountId]
-                    ?? accountStartingBalances[destinationAccountId]
-                    ?? 0
-                destinationStarting = starting
-                let newValue = starting + amount
-                accountBalances[destinationAccountId] = newValue
-                destinationFinal = newValue
-                let accountName = accountsStore.account(for: destinationAccountId)?.name ?? "Account #\(destinationAccountId)"
-                destinationLabel = "\(accountName) · Main Account"
-            }
-
-            let preview = TransferPreview(
-                id: schedule.id,
-                schedule: schedule,
-                amount: amount,
-                destinationStartingBalance: destinationStarting,
-                destinationFinalBalance: destinationFinal,
-                destinationLabel: destinationLabel,
-                destinationIsPot: isPotDestination,
-                sourceLabel: sourceLabel,
-                sourceStartingBalance: sourceStarting,
-                sourceFinalBalance: sourceFinal,
-                items: schedule.items ?? []
-            )
-            previewsByAccount[destinationAccountId, default: []].append(preview)
-            totalsByAccount[destinationAccountId, default: 0] += amount
-        }
-
-        let previews: [AccountPreview] = previewsByAccount.compactMap { entry in
-            let accountId = entry.key
-            let transfers = entry.value
-            guard let account = accountsStore.account(for: accountId) else { return nil }
-            let starting = accountStartingBalances[accountId] ?? 0
-            let afterIncome = accountAfterIncome[accountId] ?? starting
-            let afterTransfers = accountBalances[accountId] ?? afterIncome
-            return AccountPreview(
-                account: account,
-                transfers: transfers,
-                totalAmount: totalsByAccount[accountId] ?? 0,
-                startingBalance: starting,
-                balanceAfterIncome: afterIncome,
-                balanceAfterTransfers: afterTransfers
-            )
-        }
-        .sorted { $0.account.name < $1.account.name }
-        let incomeAccounts = Set(activeIncomes.map { $0.accountId })
-        let salaryOutflow = incomeAccounts.reduce(0) { partial, accountId in
-            partial + (salaryOutflowsByAccount[accountId] ?? 0)
-        }
-
-        return PreviewContext(accounts: previews, salaryOutflowTotal: salaryOutflow)
-    }
-
-    var body: some View {
-        let context = previewContext
-        let previews = context.accounts
-        let remainingBalance = incomeTotal - context.salaryOutflowTotal
-
-        return NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Income")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(incomeSubtitle())
-                                    .font(.callout.weight(.semibold))
-                            }
-                            Spacer()
-                            Text(formatGBP(incomeTotal))
-                                .font(.title3.bold())
-                        }
-                        if activeIncomes.isEmpty {
-                            Text("Activate an income schedule to preview its salary split.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.green.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Scheduled Transfers")
-                            .font(.headline)
-
-                        if previews.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Nothing to move just yet.")
-                                    .font(.subheadline.weight(.semibold))
-                                Text("Add or activate transfer schedules to see their projected balances.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(.secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        } else {
-                            ForEach(previews) { preview in
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Button {
-                                        if expandedAccountIds.contains(preview.id) { expandedAccountIds.remove(preview.id) } else { expandedAccountIds.insert(preview.id) }
-                                    } label: {
-                                        HStack(alignment: .firstTextBaseline) {
-                                            Image(systemName: expandedAccountIds.contains(preview.id) ? "chevron.down.circle.fill" : "chevron.right.circle")
-                                                .foregroundStyle(.blue)
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(preview.account.name)
-                                                    .font(.headline)
-                                                Text("After incomes \(formatGBP(preview.balanceAfterIncome))")
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            Spacer()
-                                            VStack(alignment: .trailing, spacing: 4) {
-                                                Text(formatGBP(preview.balanceAfterTransfers))
-                                                    .font(.title3.bold())
-                                                Text("Post transfers")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    if expandedAccountIds.contains(preview.id) {
-                                        VStack(spacing: 10) {
-                                            ForEach(preview.transfers) { transfer in
-                                                VStack(alignment: .leading, spacing: 12) {
-                                                    Button {
-                                                        if expandedTransferIds.contains(transfer.id) { expandedTransferIds.remove(transfer.id) } else { expandedTransferIds.insert(transfer.id) }
-                                                    } label: {
-                                                        HStack(alignment: .firstTextBaseline) {
-                                                            Image(systemName: expandedTransferIds.contains(transfer.id) ? "chevron.down" : "chevron.right")
-                                                                .foregroundStyle(.secondary)
-                                                            VStack(alignment: .leading, spacing: 4) {
-                                                                Text(transfer.schedule.description)
-                                                                    .font(.subheadline.weight(.semibold))
-                                                                if let source = transfer.sourceLabel {
-                                                                    Text("From \(source)")
-                                                                        .font(.caption2)
-                                                                        .foregroundStyle(.secondary)
-                                                                }
-                                                                Text("To \(transfer.destinationLabel)")
-                                                                    .font(.caption2)
-                                                                    .foregroundStyle(.secondary)
-                                                            }
-                                                            Spacer()
-                                                            Text(formatGBP(transfer.amount))
-                                                                .font(.subheadline.weight(.semibold))
-                                                                .padding(.horizontal, 12)
-                                                                .padding(.vertical, 6)
-                                                                .background(chipColor(forPot: transfer.destinationIsPot))
-                                                                .clipShape(Capsule())
-                                                        }
-                                                    }
-                                                    .buttonStyle(.plain)
-
-                                                    if expandedTransferIds.contains(transfer.id) {
-                                                        if !transfer.items.isEmpty {
-                                                            VStack(alignment: .leading, spacing: 4) {
-                                                                Text("Breakdown")
-                                                                    .font(.caption2)
-                                                                    .foregroundStyle(.secondary)
-                                                                ForEach(transfer.items, id: \.self) { item in
-                                                                    HStack {
-                                                                        Text(item.description)
-                                                                        Spacer()
-                                                                        Text(formatGBP(item.amount))
-                                                                            .foregroundStyle(.secondary)
-                                                                    }
-                                                                    .font(.caption)
-                                                                }
-                                                            }
-                                                        }
-
-                                                        VStack(alignment: .leading, spacing: 6) {
-                                                            HStack {
-                                                                Text("Current balance")
-                                                                    .font(.caption2)
-                                                                    .foregroundStyle(.secondary)
-                                                                Spacer()
-                                                                Text(formatGBP(transfer.destinationStartingBalance))
-                                                                    .font(.caption.weight(.semibold))
-                                                            }
-                                                            HStack {
-                                                                Text("After transfer")
-                                                                    .font(.caption2)
-                                                                    .foregroundStyle(.secondary)
-                                                                Spacer()
-                                                                Text(formatGBP(transfer.destinationFinalBalance))
-                                                                    .font(.body.weight(.semibold))
-                                                                    .foregroundColor(transfer.destinationFinalBalance >= 0 ? .primary : .red)
-                                                            }
-                                                            if let source = transfer.sourceLabel, let sourceAfter = transfer.sourceFinalBalance {
-                                                                Text("Source after: \(source) → \(formatGBP(sourceAfter))")
-                                                                    .font(.caption2)
-                                                                    .foregroundStyle(.secondary)
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                .padding(12)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                                .background(Color(.systemBackground))
-                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                            }
-                                        }
-
-                                        Divider()
-
-                                        HStack {
-                                            Text("Scheduled total")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                            Spacer()
-                                            Text(formatGBP(preview.totalAmount))
-                                                .font(.caption.weight(.semibold))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                                .padding(16)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            }
-                        }
-                    }
-
-                    if incomeTotal > 0 || context.salaryOutflowTotal > 0 {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Remaining")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(formatGBP(remainingBalance))
-                                .font(.title3.bold())
-                            Text(remainingBalance >= 0 ? "Available after scheduled moves" : "Shortfall after scheduled moves")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(remainingBalance >= 0 ? Color.blue.opacity(0.12) : Color.red.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 24)
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Salary Sorter")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { isPresented = false }
-                }
-            }
-            .task {
-                if accountsStore.accounts.isEmpty {
-                    await accountsStore.loadAccounts()
-                }
-                await incomeStore.load()
-                await transferStore.load()
-            }
-        }
-    }
-
-    private func chipColor(forPot: Bool) -> Color {
-        forPot ? Color.purple.opacity(0.18) : Color.blue.opacity(0.18)
-    }
-
-    private func formatGBP(_ value: Double) -> String {
-        let formatted = String(format: "%.2f", abs(value))
-        let currency = "£" + formatted
-        return value < 0 ? "-\(currency)" : currency
-    }
-
-    private func incomeSubtitle() -> String {
-        if activeIncomes.isEmpty { return "No active schedules" }
-        let companies = Set(activeIncomes.map { $0.company })
-        if companies.count == 1, let company = companies.first { return company }
-        return "\(activeIncomes.count) schedules"
     }
 }
 

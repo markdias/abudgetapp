@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
-    @EnvironmentObject private var transferStore: TransferSchedulesStore
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
     @EnvironmentObject private var savingsStore: SavingsInvestmentsStore
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
@@ -33,10 +32,8 @@ struct SettingsView: View {
                 Section("Data Management") {
                     Button("Reload Data") { refreshAll() }
                     Button("Reset Balances", role: .destructive) {
-                        Task { await accountsStore.resetBalances(); await transferStore.load(); await incomeStore.load() }
+                        Task { await accountsStore.resetBalances(); await incomeStore.load() }
                     }
-                    Button("Execute All Transfers") { Task { await transferStore.executeAll() } }
-                        .disabled(transferStore.schedules.isEmpty)
                     Button("Execute All Incomes") { Task { await incomeStore.executeAll() } }
                         .disabled(incomeStore.schedules.isEmpty)
                 }
@@ -70,7 +67,6 @@ struct SettingsView: View {
         Task {
             await accountsStore.loadAccounts()
             await savingsStore.load()
-            await transferStore.load()
             await incomeStore.load()
         }
     }
@@ -81,22 +77,22 @@ struct SettingsView: View {
         isRestoringSample = true
         Task {
             do {
-                let snapshot = try await APIService.shared.restoreSampleData()
+                let snapshot = try await LocalBudgetStore.shared.restoreSample()
                 await MainActor.run {
                     accountsStore.applyAccounts(snapshot.accounts)
                     storageStatus = "Sample data restored"
                     storageStatusIsSuccess = true
                 }
-                await transferStore.load()
                 await incomeStore.load()
                 await savingsStore.load()
-            } catch let error as APIServiceError {
+            } catch let error as LocalBudgetStore.StoreError {
+                let dataError = error.asBudgetDataError
                 await MainActor.run {
-                    storageStatus = error.localizedDescription
+                    storageStatus = dataError.localizedDescription
                     storageStatusIsSuccess = false
                 }
             } catch {
-                let apiError = APIServiceError.unknown(error)
+                let apiError = BudgetDataError.unknown(error)
                 await MainActor.run {
                     storageStatus = apiError.localizedDescription
                     storageStatusIsSuccess = false
@@ -112,7 +108,6 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .environmentObject(AccountsStore())
-        .environmentObject(TransferSchedulesStore(accountsStore: AccountsStore()))
         .environmentObject(IncomeSchedulesStore(accountsStore: AccountsStore()))
         .environmentObject(SavingsInvestmentsStore())
         .environmentObject(DiagnosticsStore(accountsStore: AccountsStore()))

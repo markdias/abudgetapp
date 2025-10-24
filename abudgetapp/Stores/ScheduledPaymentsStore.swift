@@ -20,15 +20,15 @@ final class ScheduledPaymentsStore: ObservableObject {
 
     @Published private(set) var items: [ScheduledPaymentContext] = []
     @Published var lastMessage: StatusMessage?
-    @Published var lastError: APIServiceError?
+    @Published var lastError: BudgetDataError?
 
-    private let service: APIServiceProtocol
+    private let store: LocalBudgetStore
     private unowned let accountsStore: AccountsStore
     private var accountsObserver: NSObjectProtocol?
 
-    init(accountsStore: AccountsStore, service: APIServiceProtocol = APIService.shared) {
+    init(accountsStore: AccountsStore, store: LocalBudgetStore = .shared) {
         self.accountsStore = accountsStore
-        self.service = service
+        self.store = store
         self.items = Self.buildContexts(from: accountsStore.accounts)
         accountsObserver = NotificationCenter.default.addObserver(
             forName: AccountsStore.accountsDidChangeNotification,
@@ -52,7 +52,7 @@ final class ScheduledPaymentsStore: ObservableObject {
 
     func addPayment(accountId: Int, submission: ScheduledPaymentSubmission, potName: String? = nil) async {
         do {
-            let payment = try await service.addScheduledPayment(accountId: accountId, potName: potName, payment: submission)
+            let payment = try await store.addScheduledPayment(accountId: accountId, potName: potName, submission: submission)
             accountsStore.mutateAccount(id: accountId) { account in
                 if potName == nil {
                     var payments = account.scheduled_payments ?? []
@@ -71,19 +71,20 @@ final class ScheduledPaymentsStore: ObservableObject {
                 }
             }
             lastMessage = StatusMessage(title: "Scheduled", message: "Scheduled \(payment.name)", kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            lastMessage = StatusMessage(title: "Schedule Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Schedule Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            lastMessage = StatusMessage(title: "Schedule Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Schedule Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func deletePayment(context: ScheduledPaymentContext) async {
         do {
-            _ = try await service.deleteScheduledPayment(
+            try await store.deleteScheduledPayment(
                 accountId: context.accountId,
                 paymentName: context.payment.name,
                 paymentDate: context.payment.date,
@@ -103,13 +104,14 @@ final class ScheduledPaymentsStore: ObservableObject {
                 }
             }
             lastMessage = StatusMessage(title: "Scheduled", message: "Deleted \(context.payment.name)", kind: .warning)
-        } catch let error as APIServiceError {
-            lastError = error
-            lastMessage = StatusMessage(title: "Delete Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Delete Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            lastMessage = StatusMessage(title: "Delete Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Delete Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 

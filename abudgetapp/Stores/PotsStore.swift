@@ -4,15 +4,15 @@ import Foundation
 final class PotsStore: ObservableObject {
     @Published private(set) var potsByAccount: [Int: [Pot]] = [:]
     @Published var lastMessage: StatusMessage?
-    @Published var lastError: APIServiceError?
+    @Published var lastError: BudgetDataError?
 
-    private let service: APIServiceProtocol
+    private let store: LocalBudgetStore
     private unowned let accountsStore: AccountsStore
     private var accountsObserver: NSObjectProtocol?
 
-    init(accountsStore: AccountsStore, service: APIServiceProtocol = APIService.shared) {
+    init(accountsStore: AccountsStore, store: LocalBudgetStore = .shared) {
         self.accountsStore = accountsStore
-        self.service = service
+        self.store = store
         self.potsByAccount = Self.buildMap(from: accountsStore.accounts)
         observeAccountChanges()
     }
@@ -25,7 +25,7 @@ final class PotsStore: ObservableObject {
 
     func addPot(to accountId: Int, submission: PotSubmission) async {
         do {
-            let pot = try await service.addPot(accountId: accountId, pot: submission)
+            let pot = try await store.addPot(accountId: accountId, submission: submission)
             updateLocalPot(accountId: accountId) { pots in
                 pots.append(pot)
             }
@@ -35,19 +35,20 @@ final class PotsStore: ObservableObject {
                 account.pots = pots
             }
             lastMessage = StatusMessage(title: "Pot Added", message: "Added \(pot.name)", kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            lastMessage = StatusMessage(title: "Pot Error", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Pot Error", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            lastMessage = StatusMessage(title: "Pot Error", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Pot Error", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func updatePot(accountId: Int, existingPot: Pot, submission: PotSubmission) async {
         do {
-            let updated = try await service.updatePot(originalAccountId: accountId, originalPot: existingPot, updatedPot: submission)
+            let updated = try await store.updatePot(accountId: accountId, potId: existingPot.id, submission: submission)
             updateLocalPot(accountId: accountId) { pots in
                 if let index = pots.firstIndex(where: { $0.id == updated.id }) {
                     pots[index] = updated
@@ -61,20 +62,21 @@ final class PotsStore: ObservableObject {
                 }
             }
             lastMessage = StatusMessage(title: "Pot Updated", message: "Updated \(updated.name)", kind: .success)
-        } catch let error as APIServiceError {
-            lastError = error
-            lastMessage = StatusMessage(title: "Pot Update Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Pot Update Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            lastMessage = StatusMessage(title: "Pot Update Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Pot Update Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func deletePot(accountId: Int, potName: String) async {
         guard let account = accountsStore.account(for: accountId) else { return }
         do {
-            _ = try await service.deletePot(accountName: account.name, potName: potName)
+            try await store.deletePot(accountName: account.name, potName: potName)
             updateLocalPot(accountId: accountId) { pots in
                 pots.removeAll { $0.name == potName }
             }
@@ -82,40 +84,42 @@ final class PotsStore: ObservableObject {
                 account.pots?.removeAll { $0.name == potName }
             }
             lastMessage = StatusMessage(title: "Pot Deleted", message: "Removed \(potName)", kind: .warning)
-        } catch let error as APIServiceError {
-            lastError = error
-            lastMessage = StatusMessage(title: "Delete Pot Failed", message: error.localizedDescription, kind: .error)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Delete Pot Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            lastMessage = StatusMessage(title: "Delete Pot Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Delete Pot Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 
     func toggleExclusion(accountId: Int, potName: String) async {
         do {
-            let response = try await service.togglePotExclusion(accountId: accountId, potName: potName)
+            let exclude = try await store.togglePotExclusion(accountId: accountId, potName: potName)
             updateLocalPot(accountId: accountId) { pots in
                 if let index = pots.firstIndex(where: { $0.name == potName }) {
-                    pots[index].excludeFromReset = response.excludeFromReset
+                    pots[index].excludeFromReset = exclude
                 }
             }
             accountsStore.mutateAccount(id: accountId) { account in
                 guard var pots = account.pots else { return }
                 if let index = pots.firstIndex(where: { $0.name == potName }) {
-                    pots[index].excludeFromReset = response.excludeFromReset
+                    pots[index].excludeFromReset = exclude
                     account.pots = pots
                 }
             }
-            let status: StatusMessage.Kind = response.excludeFromReset ? .info : .success
-            lastMessage = StatusMessage(title: "Pot Updated", message: response.excludeFromReset ? "Excluded from reset" : "Included in reset", kind: status)
-        } catch let error as APIServiceError {
-            lastError = error
-            lastMessage = StatusMessage(title: "Exclusion Failed", message: error.localizedDescription, kind: .error)
+            let status: StatusMessage.Kind = exclude ? .info : .success
+            lastMessage = StatusMessage(title: "Pot Updated", message: exclude ? "Excluded from reset" : "Included in reset", kind: status)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Exclusion Failed", message: dataError.localizedDescription, kind: .error)
         } catch {
-            let apiError = APIServiceError.unknown(error)
-            lastError = apiError
-            lastMessage = StatusMessage(title: "Exclusion Failed", message: apiError.localizedDescription, kind: .error)
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            lastMessage = StatusMessage(title: "Exclusion Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 

@@ -19,11 +19,11 @@ final class DiagnosticsStore: ObservableObject {
     @Published private(set) var steps: [DiagnosticStep] = []
     @Published var isRunning = false
 
-    private let service: APIServiceProtocol
+    private let store: LocalBudgetStore
     private weak var accountsStore: AccountsStore?
 
-    init(service: APIServiceProtocol = APIService.shared, accountsStore: AccountsStore? = nil) {
-        self.service = service
+    init(store: LocalBudgetStore = .shared, accountsStore: AccountsStore? = nil) {
+        self.store = store
         self.accountsStore = accountsStore
         self.steps = DiagnosticsStore.defaultSteps()
     }
@@ -44,45 +44,37 @@ final class DiagnosticsStore: ObservableObject {
         var createdAccountName: String?
 
         let operations: [(String, () async throws -> String?)] = [
-            ("Fetch Accounts", { _ = try await self.service.getAccounts(); return nil }),
+            ("Fetch Accounts", { _ = await self.store.currentAccounts(); return nil }),
             ("Add Account", {
                 let submission = AccountSubmission(name: "Diagnostics \(UUID().uuidString.prefix(4))", balance: 500, type: "current", accountType: "personal")
-                let account = try await self.service.addAccount(account: submission)
+                let account = try await self.store.addAccount(submission)
                 createdAccountId = account.id
                 createdAccountName = account.name
                 return "Created account #\(account.id)"
             }),
             ("Add Pot", {
-                guard let accountId = createdAccountId else { throw APIServiceError.invalidOperation("Missing account for pot") }
-                let pot = try await self.service.addPot(accountId: accountId, pot: PotSubmission(name: "Diagnostics Pot", balance: 120))
+                guard let accountId = createdAccountId else { throw BudgetDataError.invalidOperation("Missing account for pot") }
+                let pot = try await self.store.addPot(accountId: accountId, submission: PotSubmission(name: "Diagnostics Pot", balance: 120))
                 return "Added pot \(pot.name)"
             }),
             ("Delete Pot", {
-                guard let accountName = createdAccountName else { throw APIServiceError.invalidOperation("Missing account for delete pot") }
-                _ = try await self.service.deletePot(accountName: accountName, potName: "Diagnostics Pot")
+                guard let accountName = createdAccountName else { throw BudgetDataError.invalidOperation("Missing account for delete pot") }
+                try await self.store.deletePot(accountName: accountName, potName: "Diagnostics Pot")
                 return "Deleted diagnostics pot"
             }),
             ("Delete Account", {
-                guard let accountId = createdAccountId else { throw APIServiceError.invalidOperation("Missing account for delete") }
-                _ = try await self.service.deleteAccount(accountId: accountId)
+                guard let accountId = createdAccountId else { throw BudgetDataError.invalidOperation("Missing account for delete") }
+                try await self.store.deleteAccount(id: accountId)
                 return "Deleted diagnostics account"
             }),
-            ("Execute Transfers", {
-                let response = try await self.service.executeAllTransferSchedules()
-                return response.success == true ? "Executed transfers" : (response.error ?? "No transfers executed")
-            }),
             ("Execute Incomes", {
-                let response = try await self.service.executeAllIncomeSchedules()
+                let response = try await self.store.executeAllIncomeSchedules()
                 return "Executed \(response.executed_count) income schedules"
             }),
             ("Reset Balances", {
-                let reset = try await self.service.resetBalances()
+                let reset = try await self.store.resetBalances()
                 self.accountsStore?.applyAccounts(reset.accounts)
                 return "Reset \(reset.accounts.count) accounts"
-            }),
-            ("Available Transfers", {
-                let available = try await self.service.getAvailableTransfers()
-                return "\(available.byAccount.count + available.byPot.count) groups"
             })
         ]
 
@@ -95,11 +87,15 @@ final class DiagnosticsStore: ObservableObject {
                 let message = try await operation()
                 updatedSteps[index].status = .success(message)
                 updatedSteps[index].duration = Date().timeIntervalSince(start)
-            } catch let error as APIServiceError {
-                updatedSteps[index].status = .failure(error.localizedDescription)
+            } catch let error as LocalBudgetStore.StoreError {
+                updatedSteps[index].status = .failure(error.asBudgetDataError.localizedDescription)
+                updatedSteps[index].duration = Date().timeIntervalSince(start)
+            } catch let dataError as BudgetDataError {
+                updatedSteps[index].status = .failure(dataError.localizedDescription)
                 updatedSteps[index].duration = Date().timeIntervalSince(start)
             } catch {
-                updatedSteps[index].status = .failure(error.localizedDescription)
+                let fallback = BudgetDataError.unknown(error)
+                updatedSteps[index].status = .failure(fallback.localizedDescription)
                 updatedSteps[index].duration = Date().timeIntervalSince(start)
             }
             steps = updatedSteps
@@ -115,10 +111,8 @@ final class DiagnosticsStore: ObservableObject {
             DiagnosticStep(name: "Add Pot"),
             DiagnosticStep(name: "Delete Pot"),
             DiagnosticStep(name: "Delete Account"),
-            DiagnosticStep(name: "Execute Transfers"),
             DiagnosticStep(name: "Execute Incomes"),
-            DiagnosticStep(name: "Reset Balances"),
-            DiagnosticStep(name: "Available Transfers")
+            DiagnosticStep(name: "Reset Balances")
         ]
     }
 }
