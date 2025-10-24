@@ -12,12 +12,19 @@ struct HomeView: View {
     @State private var searchText = ""
     @State private var showingAddAccount = false
     @State private var showingAddPot = false
+    @State private var showingAddIncome = false
+    @State private var showingAddTransaction = false
+    @State private var showingAddTarget = false
     // Removed income/expense/transaction add sheets
     @State private var showingPotsManager = false
     // Removed savings and income schedules
     // Reorder moved to Settings
     @State private var showingDiagnostics = false
     @State private var selectedAccountId: Int? = nil
+    @State private var addIncomeTargetAccountId: Int? = nil
+    @State private var addTransactionTargetAccountId: Int? = nil
+    @State private var addTransactionTargetPotName: String? = nil
+    @State private var addTargetAccountId: Int? = nil
     // Import/Export/Delete moved to Settings
     @State private var selectedPotContext: PotEditContext? = nil
     @State private var editingAccount: Account? = nil
@@ -68,7 +75,12 @@ struct HomeView: View {
                             }
                         )
                     }
-                    // Activity feed removed
+                    ActivitiesPanelSection(
+                        accounts: accountsStore.accounts,
+                        transactions: accountsStore.transactions,
+                        targets: accountsStore.targets,
+                        selectedAccountId: selectedAccountId
+                    )
 
                     PotsPanelSection(
                         accounts: accountsStore.accounts,
@@ -84,7 +96,7 @@ struct HomeView: View {
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
                         onDiagnostics: { showingDiagnostics = true },
-                        onSettings: { selectedTab = 1 }
+                        onSettings: { selectedTab = 2 }
                     )
 
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
@@ -106,6 +118,19 @@ struct HomeView: View {
                     Menu {
                         Button("Add Account", action: { showingAddAccount = true })
                         Button("Add Pot", action: { showingAddPot = true })
+                        Button("Add Transaction", action: {
+                            addTransactionTargetAccountId = selectedAccountId
+                            addTransactionTargetPotName = nil
+                            showingAddTransaction = true
+                        })
+                        Button("Add Target", action: {
+                            addTargetAccountId = selectedAccountId
+                            showingAddTarget = true
+                        })
+                        Button("Add Income", action: {
+                            addIncomeTargetAccountId = selectedAccountId
+                            showingAddIncome = true
+                        })
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
@@ -130,6 +155,15 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showingAddPot) {
                 PotFormView(isPresented: $showingAddPot)
+            }
+            .sheet(isPresented: $showingAddIncome) {
+                AddIncomeSheet(presetAccountId: addIncomeTargetAccountId, isPresented: $showingAddIncome)
+            }
+            .sheet(isPresented: $showingAddTransaction) {
+                AddTransactionSheet(presetAccountId: addTransactionTargetAccountId, presetPotName: addTransactionTargetPotName, isPresented: $showingAddTransaction)
+            }
+            .sheet(isPresented: $showingAddTarget) {
+                AddTargetSheet(presetAccountId: addTargetAccountId, isPresented: $showingAddTarget)
             }
             .sheet(item: $editingAccount) { account in
                 EditAccountFormView(account: account)
@@ -274,6 +308,457 @@ private struct StackedAccountDeck: View {
                 draggingAccount = nil
                 dragOffset = .zero
             }
+    }
+}
+
+// MARK: - Activities Panel (Combined)
+
+struct ActivitiesPanelSection: View {
+    enum Kind { case income, transaction, target }
+
+    struct Item: Identifiable {
+        let id = UUID()
+        let kind: Kind
+        let title: String
+        let company: String?
+        let amount: Double
+        let dateString: String
+        let accountName: String
+        let potName: String?
+    }
+
+    let accounts: [Account]
+    let transactions: [TransactionRecord]
+    let targets: [TargetRecord]
+    let selectedAccountId: Int?
+    // Optional limit override. If nil, uses settings value. If provided, uses this limit.
+    var limit: Int? = nil
+    @AppStorage("activitiesMaxItems") private var maxItemsSetting: Int = 6
+
+    @State private var filter: Filter = .all
+    @AppStorage("activitiesSortOrder") private var sortOrderRaw: String = "day"
+
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case income = "Income"
+        case transaction = "Transactions"
+        case target = "Budget"
+        var id: String { rawValue }
+    }
+
+    private var combinedItems: [Item] {
+        var list: [Item] = []
+
+        // Incomes from accounts
+        let accountFilter: [Account] = {
+            if let id = selectedAccountId, let a = accounts.first(where: { $0.id == id }) { return [a] }
+            return accounts
+        }()
+        for account in accountFilter {
+            for income in account.incomes ?? [] {
+                list.append(Item(
+                    kind: .income,
+                    title: income.description,
+                    company: income.company,
+                    amount: income.amount,
+                    dateString: income.date,
+                    accountName: account.name,
+                    potName: income.potName
+                ))
+            }
+        }
+
+        // Transactions from store
+        let txFilter = transactions.filter { record in
+            guard let sel = selectedAccountId else { return true }
+            return record.toAccountId == sel || record.fromAccountId == sel
+        }
+        for r in txFilter {
+            let acctName = accounts.first(where: { $0.id == r.toAccountId })?.name
+                ?? (r.fromAccountId.flatMap { id in accounts.first(where: { $0.id == id })?.name } ?? "Unknown")
+            list.append(Item(
+                kind: .transaction,
+                title: r.name,
+                company: r.vendor,
+                amount: r.amount,
+                dateString: r.date,
+                accountName: acctName,
+                potName: r.toPotName
+            ))
+        }
+
+        // Targets (account-only)
+        let targetFilter = targets.filter { t in
+            guard let sel = selectedAccountId else { return true }
+            return t.accountId == sel
+        }
+        for t in targetFilter {
+            let acctName = accounts.first(where: { $0.id == t.accountId })?.name ?? "Unknown"
+            list.append(Item(
+                kind: .target,
+                title: t.name,
+                company: nil,
+                amount: t.amount,
+                dateString: t.date,
+                accountName: acctName,
+                potName: nil
+            ))
+        }
+
+        // Apply filter
+        let filtered: [Item] = {
+            switch filter {
+            case .all: return list
+            case .income: return list.filter { $0.kind == .income }
+            case .transaction: return list.filter { $0.kind == .transaction }
+            case .target: return list.filter { $0.kind == .target }
+            }
+        }()
+
+        // Apply sort from settings
+        let sorted: [Item]
+        switch sortOrderRaw.lowercased() {
+        case "name":
+            sorted = filtered.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case "type":
+            sorted = filtered.sorted {
+                // income, transaction, target; then by title
+                func priority(_ k: Kind) -> Int { k == .income ? 0 : (k == .transaction ? 1 : 2) }
+                let lp = priority($0.kind), rp = priority($1.kind)
+                if lp == rp { return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                return lp < rp
+            }
+        default: // "day"
+            sorted = filtered.sorted {
+                if let ld = Int($0.dateString), let rd = Int($1.dateString) { return ld > rd }
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+        }
+        return sorted
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Activities")
+                        .font(.headline)
+                    Spacer()
+                }
+                Picker("Filter", selection: $filter) {
+                    ForEach(Filter.allCases) { f in
+                        Text(f.rawValue).tag(f)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            let itemsToShow: [Item] = {
+                if let limit { return Array(combinedItems.prefix(limit)) }
+                if maxItemsSetting > 0 { return Array(combinedItems.prefix(maxItemsSetting)) }
+                return combinedItems
+            }()
+
+            if itemsToShow.isEmpty {
+                ContentUnavailableView(
+                    selectedAccountId != nil ? "No Activities for Card" : "No Activities",
+                    systemImage: "tray",
+                    description: Text("Add incomes or transactions to see them here.")
+                )
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(itemsToShow) { item in
+                        ActivityListItemRow(item: item)
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct ActivityListItemRow: View {
+    let item: ActivitiesPanelSection.Item
+
+    private var formattedAmount: String { "£" + String(format: "%.2f", item.amount) }
+
+    private var dayOfMonthText: String {
+        if let d = Int(item.dateString), (1...31).contains(d) { return String(d) }
+        if let date = ISO8601DateFormatter().date(from: item.dateString) { return String(Calendar.current.component(.day, from: date)) }
+        return "—"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(color)
+                .frame(width: 44, height: 44)
+                .overlay(Image(systemName: icon).foregroundColor(.white))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                HStack(spacing: 6) {
+                    Text(item.accountName)
+                    if let pot = item.potName, !pot.isEmpty {
+                        Text("·")
+                        Text(pot)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                if let company = item.company, !company.isEmpty {
+                    Text(company)
+                        .font(.caption2)
+                        .foregroundStyle(Color(.tertiaryLabel))
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(formattedAmount)
+                    .font(.subheadline)
+                    .foregroundColor(isIncome ? .green : .primary)
+                Text(dayOfMonthText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+    }
+
+    private var isIncome: Bool { item.kind == .income }
+    private var isTransaction: Bool { item.kind == .transaction }
+    private var color: Color {
+        switch item.kind {
+        case .income: return .green.opacity(0.85)
+        case .transaction: return .blue.opacity(0.85)
+        case .target: return .orange.opacity(0.85)
+        }
+    }
+    private var icon: String {
+        switch item.kind {
+        case .income: return "arrow.down.circle.fill"
+        case .transaction: return "arrow.left.arrow.right.circle.fill"
+        case .target: return "target"
+        }
+    }
+}
+
+// (combined into ActivitiesPanelSection)
+
+// MARK: - Add Transaction Sheet
+
+private struct AddTransactionSheet: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let presetAccountId: Int?
+    let presetPotName: String?
+    @Binding var isPresented: Bool
+
+    @State private var toAccountId: Int?
+    @State private var potName: String? = nil
+    @State private var type: String = ""
+    @State private var company: String = ""
+    @State private var amount: String = ""
+    @State private var dayOfMonth: String = ""
+
+    private var toAccount: Account? {
+        guard let id = toAccountId else { return nil }
+        return accountsStore.account(for: id)
+    }
+
+    private var canSave: Bool {
+        guard let id = toAccountId, accountsStore.account(for: id) != nil else { return false }
+        guard !type.isEmpty, !company.isEmpty, let money = Double(amount), money > 0 else { return false }
+        guard let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("To") {
+                    Picker("Account", selection: $toAccountId) {
+                        Text("Select Account").tag(nil as Int?)
+                        ForEach(accountsStore.accounts) { account in
+                            Text(account.name).tag(account.id as Int?)
+                        }
+                    }
+                    if let pots = toAccount?.pots, !pots.isEmpty {
+                        Picker("Pot", selection: $potName) {
+                            Text("None").tag(nil as String?)
+                            ForEach(pots, id: \.name) { pot in
+                                Text(pot.name).tag(pot.name as String?)
+                            }
+                        }
+                    }
+                }
+
+                Section("Transaction") {
+                    TextField("Type", text: $type)
+                    TextField("Company", text: $company)
+                    TextField("Value", text: $amount).keyboardType(.decimalPad)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Add Transaction")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(!canSave) }
+            }
+            .onAppear {
+                toAccountId = presetAccountId ?? accountsStore.accounts.first?.id
+                potName = presetPotName
+            }
+        }
+    }
+
+    private func save() async {
+        guard let toAccountId, let money = Double(amount) else { return }
+        let submission = TransactionSubmission(name: type, vendor: company, amount: abs(money), date: dayOfMonth, fromAccountId: nil, toAccountId: toAccountId, toPotName: potName)
+        await accountsStore.addTransaction(submission)
+        isPresented = false
+    }
+}
+
+// MARK: - Add Target Sheet
+
+private struct AddTargetSheet: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let presetAccountId: Int?
+    @Binding var isPresented: Bool
+
+    @State private var accountId: Int?
+    @State private var name: String = ""
+    @State private var amount: String = ""
+    @State private var dayOfMonth: String = ""
+
+    private var canSave: Bool {
+        guard let id = accountId, accountsStore.account(for: id) != nil else { return false }
+        guard !name.isEmpty, let money = Double(amount), money > 0 else { return false }
+        guard let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    Picker("Account", selection: $accountId) {
+                        Text("Select Account").tag(nil as Int?)
+                        ForEach(accountsStore.accounts) { account in
+                            Text(account.name).tag(account.id as Int?)
+                        }
+                    }
+                }
+
+                Section("Target") {
+                    TextField("Name", text: $name)
+                    TextField("Value", text: $amount).keyboardType(.decimalPad)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Add Target")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(!canSave) }
+            }
+            .onAppear {
+                accountId = presetAccountId ?? accountsStore.accounts.first?.id
+            }
+        }
+    }
+
+    private func save() async {
+        guard let id = accountId, let money = Double(amount) else { return }
+        let submission = TargetSubmission(name: name, amount: abs(money), date: dayOfMonth, accountId: id)
+        await accountsStore.addTarget(submission)
+        isPresented = false
+    }
+}
+
+// (combined into ActivitiesPanelSection)
+
+// MARK: - Add Income Sheet
+
+private struct AddIncomeSheet: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let presetAccountId: Int?
+    @Binding var isPresented: Bool
+
+    @State private var selectedAccountId: Int?
+    @State private var name: String = ""
+    @State private var company: String = ""
+    @State private var amount: String = ""
+    @State private var dayOfMonth: String = ""
+
+    private var canSave: Bool {
+        guard let id = selectedAccountId else { return false }
+        guard accountsStore.account(for: id) != nil else { return false }
+        guard !name.isEmpty, !company.isEmpty, let money = Double(amount), money > 0 else { return false }
+        guard let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    if let preset = presetAccountId, let account = accountsStore.account(for: preset) {
+                        HStack {
+                            Text("Selected")
+                            Spacer()
+                            Text(account.name).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Picker("Account", selection: $selectedAccountId) {
+                            Text("Select Account").tag(nil as Int?)
+                            ForEach(accountsStore.accounts) { account in
+                                Text(account.name).tag(account.id as Int?)
+                            }
+                        }
+                    }
+                }
+
+                Section("Income") {
+                    TextField("Name", text: $name)
+                    TextField("Company", text: $company)
+                    TextField("Value", text: $amount).keyboardType(.decimalPad)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Add Income")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                }
+            }
+            .onAppear {
+                selectedAccountId = presetAccountId ?? accountsStore.accounts.first?.id
+            }
+        }
+    }
+
+    private func save() async {
+        guard let id = presetAccountId ?? selectedAccountId, let money = Double(amount) else { return }
+        let submission = IncomeSubmission(amount: abs(money), description: name, company: company, date: dayOfMonth, potName: nil)
+        await accountsStore.addIncome(accountId: id, submission: submission)
+        isPresented = false
     }
 }
 

@@ -18,11 +18,17 @@ struct ContentView: View {
                 }
                 .tag(0)
 
+            ActivitiesView()
+                .tabItem {
+                    Label("Activity", systemImage: "list.bullet")
+                }
+                .tag(1)
+
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(1)
+                .tag(2)
         }
         .tint(.purple)
     }

@@ -190,6 +190,26 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - Target Models
+public struct TargetRecord: Identifiable, Codable, Hashable {
+    public let id: Int
+    public let name: String
+    public let amount: Double
+    public let date: String
+    public let accountId: Int
+
+    public init(id: Int, name: String, amount: Double, date: String, accountId: Int) {
+        self.id = id
+        self.name = name
+        self.amount = amount
+        self.date = date
+        self.accountId = accountId
+    }
+
+    public static func == (lhs: TargetRecord, rhs: TargetRecord) -> Bool { lhs.id == rhs.id }
+    public func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 // MARK: - Scheduled Payment Models
 public struct ScheduledPayment: Identifiable, Codable, Hashable {
     public let id: Int
@@ -374,6 +394,20 @@ public struct TransactionSubmission: Codable {
         self.fromAccountId = fromAccountId
         self.toAccountId = toAccountId
         self.toPotName = toPotName
+    }
+}
+
+public struct TargetSubmission: Codable {
+    public let name: String
+    public let amount: Double
+    public let date: String?
+    public let accountId: Int
+
+    public init(name: String, amount: Double, date: String? = nil, accountId: Int) {
+        self.name = name
+        self.amount = amount
+        self.date = date
+        self.accountId = accountId
     }
 }
 

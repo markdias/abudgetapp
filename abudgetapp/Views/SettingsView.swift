@@ -17,6 +17,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Activities") {
+                    Picker("Sort By", selection: activitiesSortBinding) {
+                        Text("Name").tag("name")
+                        Text("Day").tag("day")
+                        Text("Type").tag("type")
+                    }
+                    Stepper(value: activitiesMaxItemsBinding, in: 1...50) {
+                        HStack {
+                            Text("Items on Home")
+                            Spacer()
+                            Text("\(activitiesMaxItems)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 Section("Local Storage") {
                     Label("Data is stored securely on this device and synced between views automatically.", systemImage: "internaldrive")
                         .foregroundStyle(.secondary)
@@ -111,6 +126,22 @@ struct SettingsView: View {
                 storageStatusIsSuccess = true
             }
         }
+    }
+
+    // MARK: - Preferences
+    @AppStorage("activitiesSortOrder") private var activitiesSortOrder: String = "day"
+    @AppStorage("activitiesMaxItems") private var activitiesMaxItems: Int = 6
+    private var activitiesSortBinding: Binding<String> {
+        Binding<String>(
+            get: { activitiesSortOrder },
+            set: { activitiesSortOrder = $0 }
+        )
+    }
+    private var activitiesMaxItemsBinding: Binding<Int> {
+        Binding<Int>(
+            get: { activitiesMaxItems },
+            set: { activitiesMaxItems = $0 }
+        )
     }
 
     private func refreshAll() {

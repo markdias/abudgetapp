@@ -8,6 +8,8 @@ final class AccountsStore: ObservableObject {
         didSet { publishAccountsChange() }
     }
     // Removed transactions tracking
+    @Published private(set) var transactions: [TransactionRecord] = []
+    @Published private(set) var targets: [TargetRecord] = []
     @Published var isLoading = false
     @Published var statusMessage: StatusMessage?
     @Published var lastError: BudgetDataError?
@@ -25,6 +27,8 @@ final class AccountsStore: ObservableObject {
 
         let fetchedAccounts = await store.currentAccounts()
         accounts = fetchedAccounts
+        transactions = await store.currentTransactions()
+        targets = await store.currentTargets()
         // Removed transfer queue; no pruning needed
     }
 
@@ -77,6 +81,55 @@ final class AccountsStore: ObservableObject {
     }
 
     // Removed income, expense, and transaction management methods
+    // MARK: - Income Management
+
+    func addIncome(accountId: Int, submission: IncomeSubmission) async {
+        do {
+            _ = try await store.addIncome(accountId: accountId, submission: submission)
+            await loadAccounts()
+            statusMessage = StatusMessage(title: "Income Added", message: "Income recorded successfully", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Income Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Income Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func updateIncome(accountId: Int, incomeId: Int, submission: IncomeSubmission) async {
+        do {
+            _ = try await store.updateIncome(accountId: accountId, incomeId: incomeId, submission: submission)
+            await loadAccounts()
+            statusMessage = StatusMessage(title: "Income Updated", message: "Income updated successfully", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Income Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Income Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func deleteIncome(accountId: Int, incomeId: Int) async {
+        do {
+            try await store.deleteIncome(accountId: accountId, incomeId: incomeId)
+            await loadAccounts()
+            statusMessage = StatusMessage(title: "Income Deleted", message: "Income removed", kind: .warning)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Income Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Income Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
 
     func resetBalances() async {
         do {
@@ -135,7 +188,108 @@ final class AccountsStore: ObservableObject {
         accounts.first { $0.id == id }
     }
 
-    // Transactions removed
+    // MARK: - Transactions
+
+    func addTransaction(_ submission: TransactionSubmission) async {
+        do {
+            _ = try await store.addTransaction(submission)
+            transactions = await store.currentTransactions()
+            statusMessage = StatusMessage(title: "Transaction Added", message: "Recorded successfully", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func updateTransaction(id: Int, submission: TransactionSubmission) async {
+        do {
+            _ = try await store.updateTransaction(id: id, submission: submission)
+            transactions = await store.currentTransactions()
+            statusMessage = StatusMessage(title: "Transaction Updated", message: "Updated successfully", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func deleteTransaction(id: Int) async {
+        do {
+            try await store.deleteTransaction(id: id)
+            transactions = await store.currentTransactions()
+            statusMessage = StatusMessage(title: "Transaction Deleted", message: "Removed", kind: .warning)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func transaction(for id: Int) -> TransactionRecord? {
+        transactions.first { $0.id == id }
+    }
+
+    // MARK: - Targets
+    func addTarget(_ submission: TargetSubmission) async {
+        do {
+            _ = try await store.addTarget(submission)
+            targets = await store.currentTargets()
+            statusMessage = StatusMessage(title: "Target Added", message: "Recorded successfully", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Target Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Target Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func updateTarget(id: Int, submission: TargetSubmission) async {
+        do {
+            _ = try await store.updateTarget(id: id, submission: submission)
+            targets = await store.currentTargets()
+            statusMessage = StatusMessage(title: "Target Updated", message: "Updated successfully", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Target Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Target Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func deleteTarget(id: Int) async {
+        do {
+            try await store.deleteTarget(id: id)
+            targets = await store.currentTargets()
+            statusMessage = StatusMessage(title: "Target Deleted", message: "Removed", kind: .warning)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Target Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Target Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
 
     // Transfer scheduling removed
 
