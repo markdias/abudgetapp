@@ -10,6 +10,9 @@ struct SettingsView: View {
     @State private var showingCardReorder = false
     @State private var showingDiagnostics = false
     @State private var showingDeleteAllConfirm = false
+    @State private var showingImporter = false
+    @State private var showingExporter = false
+    @State private var exportDocument = JSONDocument()
 
     var body: some View {
         NavigationStack {
@@ -30,6 +33,8 @@ struct SettingsView: View {
 
                 Section("Data Management") {
                     Button("Reload Data") { refreshAll() }
+                    Button("Import Data (JSON)") { showingImporter = true }
+                    Button("Export Data (JSON)") { Task { await exportAllData() } }
                     Button("Delete All Data", role: .destructive) { showingDeleteAllConfirm = true }
                         .tint(.red)
                         .disabled(accountsStore.accounts.isEmpty)
@@ -62,6 +67,48 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("This will permanently erase all accounts, pots, and schedules. This cannot be undone.")
+            }
+        }
+        .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task {
+                    do {
+                        let accessed = url.startAccessingSecurityScopedResource()
+                        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                        let data = try Data(contentsOf: url)
+                        _ = try await LocalBudgetStore.shared.importStateData(data)
+                        await accountsStore.loadAccounts()
+                        await MainActor.run {
+                            storageStatus = "Budget restored from file"
+                            storageStatusIsSuccess = true
+                        }
+                    } catch let error as LocalBudgetStore.StoreError {
+                        let dataError = error.asBudgetDataError
+                        await MainActor.run {
+                            storageStatus = dataError.localizedDescription
+                            storageStatusIsSuccess = false
+                        }
+                    } catch {
+                        let dataError = BudgetDataError.unknown(error)
+                        await MainActor.run {
+                            storageStatus = dataError.localizedDescription
+                            storageStatusIsSuccess = false
+                        }
+                    }
+                }
+            case .failure:
+                break
+            }
+        }
+        .fileExporter(isPresented: $showingExporter, document: exportDocument, contentType: .json, defaultFilename: "budget_state") { result in
+            if case .failure(let error) = result {
+                storageStatus = error.localizedDescription
+                storageStatusIsSuccess = false
+            } else {
+                storageStatus = "Exported budget to file"
+                storageStatusIsSuccess = true
             }
         }
     }
@@ -121,6 +168,28 @@ struct SettingsView: View {
             let apiError = BudgetDataError.unknown(error)
             await MainActor.run {
                 storageStatus = apiError.localizedDescription
+                storageStatusIsSuccess = false
+            }
+        }
+    }
+
+    private func exportAllData() async {
+        do {
+            let data = try await LocalBudgetStore.shared.exportStateData()
+            await MainActor.run {
+                exportDocument = JSONDocument(data: data)
+                showingExporter = true
+            }
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            await MainActor.run {
+                storageStatus = dataError.localizedDescription
+                storageStatusIsSuccess = false
+            }
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            await MainActor.run {
+                storageStatus = dataError.localizedDescription
                 storageStatusIsSuccess = false
             }
         }

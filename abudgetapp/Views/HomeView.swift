@@ -15,14 +15,12 @@ struct HomeView: View {
     // Removed income/expense/transaction add sheets
     @State private var showingPotsManager = false
     // Removed savings and income schedules
-    @State private var showingCardReorder = false
+    // Reorder moved to Settings
     @State private var showingDiagnostics = false
     @State private var selectedAccountId: Int? = nil
-    @State private var showingImporter = false
-    @State private var showingExporter = false
-    @State private var exportDocument = JSONDocument()
-    @State private var showingDeleteAllConfirm = false
+    // Import/Export/Delete moved to Settings
     @State private var selectedPotContext: PotEditContext? = nil
+    @State private var editingAccount: Account? = nil
     // Removed transaction destination context
 
     private let cardSpacing: CGFloat = 72
@@ -64,7 +62,7 @@ struct HomeView: View {
                             spacing: cardSpacing,
                             onReorder: handleReorder,
                             onAddPot: { _ in showingAddPot = true },
-                            onManageCards: { showingCardReorder = true },
+                            onEditAccount: { account in editingAccount = account },
                             onDelete: { account in
                                 Task { await accountsStore.deleteAccount(id: account.id) }
                             }
@@ -85,7 +83,6 @@ struct HomeView: View {
 
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
-                        onReorder: { showingCardReorder = true },
                         onDiagnostics: { showingDiagnostics = true },
                         onSettings: { selectedTab = 1 }
                     )
@@ -109,53 +106,12 @@ struct HomeView: View {
                     Menu {
                         Button("Add Account", action: { showingAddAccount = true })
                         Button("Add Pot", action: { showingAddPot = true })
-                        Divider()
-                        Button("Import Data (JSON)") { showingImporter = true }
-                        Button("Export Data (JSON)") { Task { await exportAllData() } }
-                        Button(role: .destructive) { showingDeleteAllConfirm = true } label: {
-                            Text("Delete All Data")
-                        }
-                        Divider()
-                        Button("Run Diagnostics", action: { showingDiagnostics = true })
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
                 }
             }
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic))
-            .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    Task {
-                        do {
-                            let accessed = url.startAccessingSecurityScopedResource()
-                            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                            let data = try Data(contentsOf: url)
-                            _ = try await LocalBudgetStore.shared.importStateData(data)
-                            await refreshAllAfterImport()
-                            accountsStore.statusMessage = StatusMessage(title: "Import", message: "Budget restored from file", kind: .success)
-                        } catch let error as LocalBudgetStore.StoreError {
-                            let dataError = error.asBudgetDataError
-                            accountsStore.statusMessage = StatusMessage(title: "Import Failed", message: dataError.localizedDescription, kind: .error)
-                        } catch {
-                            let dataError = BudgetDataError.unknown(error)
-                            accountsStore.statusMessage = StatusMessage(title: "Import Failed", message: dataError.localizedDescription, kind: .error)
-                        }
-                    }
-                case .failure(let error):
-                    print("Importer error: \(error)")
-                }
-            }
-            .fileExporter(isPresented: $showingExporter, document: exportDocument, contentType: .json, defaultFilename: "budget_state") { result in
-                if case .failure(let error) = result { print("Export failed: \(error)") }
-            }
-            .alert("Delete All Data?", isPresented: $showingDeleteAllConfirm) {
-                Button("Delete", role: .destructive) { Task { await deleteAllData() } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will permanently erase all accounts, pots, and schedules. This cannot be undone.")
-            }
             .toolbar { // chip to clear selected account when active
                 if let selectedId = selectedAccountId,
                    let account = accountsStore.accounts.first(where: { $0.id == selectedId }) {
@@ -175,12 +131,13 @@ struct HomeView: View {
             .sheet(isPresented: $showingAddPot) {
                 PotFormView(isPresented: $showingAddPot)
             }
+            .sheet(item: $editingAccount) { account in
+                EditAccountFormView(account: account)
+            }
             .sheet(isPresented: $showingPotsManager) {
                 PotsManagementView(isPresented: $showingPotsManager)
             }
-            .sheet(isPresented: $showingCardReorder) {
-                CardReorderView(isPresented: $showingCardReorder)
-            }
+            // Reorder moved to Settings
             .sheet(isPresented: $showingDiagnostics) {
                 DiagnosticsRunnerView(isPresented: $showingDiagnostics)
             }
@@ -195,38 +152,7 @@ struct HomeView: View {
         Task { await accountsStore.loadAccounts() }
     }
 
-    private func refreshAllAfterImport() async {
-        await accountsStore.loadAccounts()
-    }
-
-    private func exportAllData() async {
-        do {
-            let data = try await LocalBudgetStore.shared.exportStateData()
-            exportDocument = JSONDocument(data: data)
-            showingExporter = true
-            accountsStore.statusMessage = StatusMessage(title: "Export", message: "Budget exported", kind: .success)
-        } catch let error as LocalBudgetStore.StoreError {
-            let dataError = error.asBudgetDataError
-            accountsStore.statusMessage = StatusMessage(title: "Export Failed", message: dataError.localizedDescription, kind: .error)
-        } catch {
-            let dataError = BudgetDataError.unknown(error)
-            accountsStore.statusMessage = StatusMessage(title: "Export Failed", message: dataError.localizedDescription, kind: .error)
-        }
-    }
-
-    private func deleteAllData() async {
-        do {
-            _ = try await LocalBudgetStore.shared.clearAll()
-            await refreshAllAfterImport()
-            accountsStore.statusMessage = StatusMessage(title: "Delete", message: "All data cleared", kind: .warning)
-        } catch let error as LocalBudgetStore.StoreError {
-            let dataError = error.asBudgetDataError
-            accountsStore.statusMessage = StatusMessage(title: "Delete Failed", message: dataError.localizedDescription, kind: .error)
-        } catch {
-            let dataError = BudgetDataError.unknown(error)
-            accountsStore.statusMessage = StatusMessage(title: "Delete Failed", message: dataError.localizedDescription, kind: .error)
-        }
-    }
+    // Import/Export/Delete logic moved to Settings
 
     private func handleReorder(from sourceIndex: Int, to destinationIndex: Int) {
         let target = destinationIndex > sourceIndex ? destinationIndex + 1 : destinationIndex
@@ -280,7 +206,7 @@ private struct StackedAccountDeck: View {
     let spacing: CGFloat
     let onReorder: (Int, Int) -> Void
     let onAddPot: (Account) -> Void
-    let onManageCards: () -> Void
+    let onEditAccount: (Account) -> Void
     let onDelete: (Account) -> Void
 
     @State private var draggingAccount: Account?
@@ -306,7 +232,7 @@ private struct StackedAccountDeck: View {
                             selectedAccountId = account.id
                         }
                     },
-                    onManage: onManageCards
+                    onManage: nil
                 )
                 .offset(y: CGFloat(index) * spacing)
                 .offset(draggingAccount?.id == account.id ? dragOffset : .zero)
@@ -315,7 +241,7 @@ private struct StackedAccountDeck: View {
                 .gesture(dragGesture(for: account, at: index))
                 .contextMenu {
                     Button("Add Pot") { onAddPot(account) }
-                    Button("Manage Cards") { onManageCards() }
+                    Button("Edit Account") { onEditAccount(account) }
                     Divider()
                     Button(role: .destructive) { onDelete(account) } label: {
                         Text("Delete")
@@ -412,18 +338,6 @@ private struct AccountCardView: View {
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.85))
                 }
-
-                Button(action: { onManage?() }) {
-                    Image(systemName: "ellipsis.vertical")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.92))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.15))
-                        .clipShape(Capsule())
-                        .accessibilityLabel("Manage")
-                }
-                .buttonStyle(.plain)
             }
         }
         .padding(.top, 0)
@@ -444,7 +358,6 @@ private struct AccountCardView: View {
 
 private struct QuickActionsView: View {
     let onManagePots: () -> Void
-    let onReorder: () -> Void
     let onDiagnostics: () -> Void
     let onSettings: () -> Void
 
@@ -454,7 +367,6 @@ private struct QuickActionsView: View {
                 .font(.headline)
             HStack(spacing: 16) {
                 QuickActionButton(icon: "tray.and.arrow.down", title: "Pots", action: onManagePots)
-                QuickActionButton(icon: "rectangle.stack", title: "Reorder", action: onReorder)
                 QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", action: onDiagnostics)
             }
             HStack(spacing: 16) {
