@@ -9,7 +9,8 @@
       "pots": [],
       "scheduled_payments": [],
       "id": 4,
-      "excludeFromReset": true
+      "excludeFromReset": true,
+      "transactions": []
     },
     {
       "name": "Virgin Money",
@@ -20,7 +21,8 @@
       "excludeFromReset": true,
       "pots": [],
       "scheduled_payments": [],
-      "id": 3
+      "id": 3,
+      "transactions": []
     },
     {
       "name": "Joint Account",
@@ -253,7 +255,8 @@
           "id": 1739192611310,
           "date": "2025-02-10T13:03:31.310Z"
         }
-      ]
+      ],
+      "transactions": []
     },
     {
       "name": "Personal",
@@ -400,7 +403,8 @@
           "id": 1740145132356,
           "date": "2025-02-21T13:38:52.356Z"
         }
-      ]
+      ],
+      "transactions": []
     },
     {
       "name": "Flex",
@@ -411,7 +415,8 @@
       "scheduled_payments": [],
       "id": 5,
       "accountType": "personal",
-      "excludeFromReset": true
+      "excludeFromReset": true,
+      "transactions": []
     },
     {
       "name": "Savings",
@@ -421,7 +426,8 @@
       "excludeFromReset": true,
       "id": 6,
       "pots": [],
-      "scheduled_payments": []
+      "scheduled_payments": [],
+      "transactions": []
     },
     {
       "name": "Monzo",
@@ -431,7 +437,8 @@
       "excludeFromReset": true,
       "id": 1740747465452,
       "pots": [],
-      "scheduled_payments": []
+      "scheduled_payments": [],
+      "transactions": []
     }
   ],
   "scheduled_incomes": [],
@@ -448,326 +455,5 @@
       "lastExecuted": null
     }
   ],
-  "transfer_schedules": [
-    {
-      "id": 1740151972324,
-      "fromAccountId": 1,
-      "toAccountId": 2,
-      "amount": 995,
-      "description": "Group transfer to Joint Account Expenses",
-      "isActive": true,
-      "isCompleted": false,
-      "items": [
-        {
-          "id": 1739179683810,
-          "amount": 650,
-          "description": "Groceries",
-          "date": "2025-02-10T09:28:03.810Z",
-          "type": "expense"
-        },
-        {
-          "id": 1739179691312,
-          "amount": 100,
-          "description": "Luxury",
-          "date": "2025-02-10T09:28:11.312Z",
-          "type": "expense"
-        },
-        {
-          "id": 1739192492582,
-          "amount": 150,
-          "description": "Takeaways",
-          "date": "2025-02-10T13:01:32.582Z",
-          "type": "expense"
-        },
-        {
-          "id": 1739192520257,
-          "amount": 80,
-          "description": "Car",
-          "date": "2025-02-10T13:02:00.257Z",
-          "type": "expense"
-        },
-        {
-          "id": 1739192611310,
-          "amount": 15,
-          "description": "Windows",
-          "date": "2025-02-10T13:03:31.310Z",
-          "type": "expense"
-        }
-      ],
-      "isDirectPotTransfer": false,
-      "lastExecuted": null
-    },
-    {
-      "id": 1740153242419,
-      "fromAccountId": 1,
-      "toAccountId": 1,
-      "toPotName": "Annabelle's Childcare",
-      "amount": 772,
-      "description": "Group transfer to Annabelle's Childcare",
-      "isActive": true,
-      "isCompleted": false,
-      "items": [
-        {
-          "id": 1740153229889,
-          "amount": 772,
-          "description": "Annabelle's Nursery",
-          "date": "1",
-          "company": "Southover Preschool",
-          "type": "card"
-        }
-      ],
-      "isDirectPotTransfer": true,
-      "lastExecuted": null
-    },
-    {
-      "id": 1740153791861,
-      "fromAccountId": 1,
-      "toAccountId": 1,
-      "toPotName": "Work Travel",
-      "amount": 105.6,
-      "description": "Group transfer to Work Travel",
-      "isActive": true,
-      "isCompleted": false,
-      "items": [
-        {
-          "id": 1740153782889,
-          "amount": 105.6,
-          "description": "Travel",
-          "date": "1",
-          "company": "TFL",
-          "type": "card"
-        }
-      ],
-      "isDirectPotTransfer": true,
-      "lastExecuted": null
-    },
-    {
-      "id": 1740609214979,
-      "fromAccountId": 1,
-      "toAccountId": 1,
-      "toPotName": "My Bills",
-      "amount": 56.040000000000006,
-      "description": "Group transfer to My Bills",
-      "isActive": true,
-      "isCompleted": false,
-      "items": [
-        {
-          "id": 1740147925228,
-          "amount": 3,
-          "description": "Monzo Extra",
-          "date": "20",
-          "company": "Monzo",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740147941215,
-          "amount": 34.99,
-          "description": "Gym",
-          "date": "17",
-          "company": "Buzz Gym",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740147871041,
-          "amount": 8.07,
-          "description": "Copilot",
-          "date": "1",
-          "company": "Github",
-          "type": "card"
-        },
-        {
-          "id": 1740147892431,
-          "amount": 9.98,
-          "description": "Photoshop",
-          "date": "6",
-          "company": "Adobe",
-          "type": "card"
-        }
-      ],
-      "isDirectPotTransfer": true,
-      "lastExecuted": null
-    },
-    {
-      "id": 1740609422583,
-      "fromAccountId": 1,
-      "toAccountId": 1,
-      "toPotName": "Santander Credit Card",
-      "amount": 83.77,
-      "description": "Group transfer to Santander Credit Card",
-      "isActive": true,
-      "isCompleted": false,
-      "items": [
-        {
-          "amount": 83.77,
-          "description": "Card Payment",
-          "date": "1",
-          "company": "Santander",
-          "type": "direct_debit"
-        }
-      ],
-      "isDirectPotTransfer": true,
-      "lastExecuted": null
-    },
-    {
-      "id": 1740686028538,
-      "fromAccountId": 1,
-      "toAccountId": 2,
-      "toPotName": "Joint Bills",
-      "amount": 2781.87,
-      "description": "Group transfer to Joint Bills",
-      "isActive": true,
-      "isCompleted": false,
-      "items": [
-        {
-          "id": 1740144100625,
-          "amount": 150.56,
-          "description": "Energy",
-          "date": "27",
-          "company": "EDF Energy",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740144139039,
-          "amount": 281,
-          "description": "Council Tax",
-          "date": "1",
-          "company": "Barnet Council",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740147998416,
-          "amount": 1649.09,
-          "description": "Mortgage",
-          "date": "3",
-          "company": "Natwest",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740148018281,
-          "amount": 41,
-          "description": "Water",
-          "date": "1",
-          "company": "Affinity Water",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740148041153,
-          "amount": 45.82,
-          "description": "Home Insurance",
-          "date": "1",
-          "company": "Halifax",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740148060695,
-          "amount": 35.43,
-          "description": "Life Insurance",
-          "date": "1",
-          "company": "Legal & General",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740148154251,
-          "amount": 4.34,
-          "description": "Emergency Cover",
-          "date": "10",
-          "company": "Allianz Partners",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740148181953,
-          "amount": 28.86,
-          "description": "Internet",
-          "date": "11",
-          "company": "Community Fibre",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740148207511,
-          "amount": 76.9,
-          "description": "Car Insurance",
-          "date": "13",
-          "company": "Aviva",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740148231625,
-          "amount": 360.95,
-          "description": "Car Lease",
-          "date": "14",
-          "company": "Volkswagen Financal Services",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740149913368,
-          "amount": 47.95,
-          "description": "Phones",
-          "date": "1",
-          "company": "Sky",
-          "type": "direct_debit"
-        },
-        {
-          "amount": 54.98,
-          "description": "TV",
-          "date": "1",
-          "company": "Sky",
-          "type": "direct_debit"
-        },
-        {
-          "id": 1740643393831,
-          "amount": 4.99,
-          "description": "Hayu",
-          "date": "1",
-          "company": "Sky",
-          "type": "direct_debit"
-        }
-      ],
-      "isDirectPotTransfer": true,
-      "lastExecuted": null
-    },
-    {
-      "id": 1740740699033,
-      "fromPotId": "Joint Bills",
-      "toAccountId": 2,
-      "toPotName": "TV Licensing",
-      "amount": 14.13,
-      "description": "Group transfer to TV Licensing",
-      "isActive": true,
-      "isCompleted": false,
-      "items": [
-        {
-          "id": 1740153129778,
-          "amount": 14.13,
-          "description": "Tv License",
-          "date": "1",
-          "company": "TV Licensing",
-          "type": "direct_debit"
-        }
-      ],
-      "isDirectPotTransfer": true,
-      "lastExecuted": null
-    },
-    {
-      "id": 1740740699787,
-      "fromPotId": "Joint Bills",
-      "toAccountId": 2,
-      "toPotName": "Prime",
-      "amount": 7.92,
-      "description": "Group transfer to Prime",
-      "isActive": true,
-      "isCompleted": false,
-      "items": [
-        {
-          "id": 1740153106751,
-          "amount": 7.92,
-          "description": "Prime",
-          "date": "1",
-          "company": "Amazon",
-          "type": "card"
-        }
-      ],
-      "isDirectPotTransfer": true,
-      "lastExecuted": null
-    }
-  ]
+  "nextTransactionId": 1
 }

@@ -7,6 +7,7 @@ final class ActivityStore: ObservableObject {
         case scheduled = "Scheduled"
         case expenses = "Expenses"
         case income = "Income"
+        case transactions = "Transactions"
 
         var id: String { rawValue }
 
@@ -16,6 +17,7 @@ final class ActivityStore: ObservableObject {
             case .scheduled: return .scheduledPayment
             case .expenses: return .expense
             case .income: return .income
+            case .transactions: return .transaction
             }
         }
     }
@@ -94,6 +96,26 @@ final class ActivityStore: ObservableObject {
                         company: income.company,
                         category: .income,
                         metadata: ["type": "income"]
+                    ))
+                }
+            }
+
+            if let transactions = account.transactions {
+                for transaction in transactions {
+                    guard let date = ActivityStore.parse(dateString: transaction.date) else { continue }
+                    let id = "transaction-\(transaction.id)"
+                    items.append(ActivityItem(
+                        id: id,
+                        title: transaction.description,
+                        amount: transaction.amount,
+                        date: date,
+                        accountName: account.name,
+                        potName: nil,
+                        company: transaction.merchant,
+                        category: .transaction,
+                        metadata: [
+                            "direction": transaction.isCredit ? "credit" : "debit"
+                        ]
                     ))
                 }
             }

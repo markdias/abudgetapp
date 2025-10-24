@@ -228,129 +228,68 @@ struct ExpenseFormView: View {
     }
 }
 
-struct TransferComposerView: View {
+
+struct TransactionFormView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
-    @EnvironmentObject private var potsStore: PotsStore
-    @EnvironmentObject private var transferStore: TransferSchedulesStore
     @Binding var isPresented: Bool
 
-    @State private var fromAccountId: Int?
-    @State private var fromPotName: String = ""
-    @State private var toAccountId: Int?
-    @State private var toPotName: String = ""
-    @State private var destinationKind: TransferDestinationKind = .pot
-    @State private var amount = ""
+    @State private var selectedAccountId: Int?
+    @State private var amount = "0"
     @State private var description = ""
-    @State private var isDirectPotTransfer = false
+    @State private var merchant = ""
+    @State private var dayOfMonth = ""
+    @State private var isCredit = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text("From")) {
-                    Picker("Account", selection: $fromAccountId) {
+                Section("Account") {
+                    Picker("Account", selection: $selectedAccountId) {
                         Text("Select Account").tag(nil as Int?)
                         ForEach(accountsStore.accounts) { account in
                             Text(account.name).tag(account.id as Int?)
                         }
                     }
-                    if let accountId = fromAccountId, let pots = potsStore.potsByAccount[accountId], !pots.isEmpty {
-                        Picker("Pot", selection: $fromPotName) {
-                            Text("None").tag("")
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name)
-                            }
-                        }
-                    }
                 }
-                Section(header: Text("To"), footer: Text(destinationKind.helperDescription)) {
-                    Picker("Account", selection: $toAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
-                        }
-                    }
-                    Picker("Type", selection: $destinationKind) {
-                        ForEach(TransferDestinationKind.allCases, id: \.self) { kind in
-                            Text(kind.displayLabel).tag(kind)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    if destinationKind == .pot {
-                        if let accountId = toAccountId, let pots = potsStore.potsByAccount[accountId], !pots.isEmpty {
-                            Picker("Pot", selection: $toPotName) {
-                                Text("Select Pot").tag("")
-                                ForEach(pots, id: \.name) { pot in
-                                    Text(pot.name).tag(pot.name)
-                                }
-                            }
-                        } else if let accountId = toAccountId, (potsStore.potsByAccount[accountId]?.isEmpty ?? true) {
-                            Text("No pots available for this account")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Section(header: Text("Details")) {
+                Section("Transaction") {
+                    TextField("Description", text: $description)
+                    TextField("Merchant", text: $merchant)
                     TextField("Amount", text: $amount)
                         .keyboardType(.decimalPad)
-                    TextField("Description", text: $description)
-                    if destinationKind == .pot {
-                        Toggle("Direct Pot Transfer", isOn: $isDirectPotTransfer)
-                    }
+                    Toggle("Credit (adds to balance)", isOn: $isCredit)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth)
+                        .keyboardType(.numberPad)
                 }
             }
-            .navigationTitle("Transfer Schedule")
+            .navigationTitle("Add Transaction")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { isPresented = false } }
                 ToolbarItem(placement: .topBarTrailing) { Button("Save", action: save).disabled(!isValid) }
-            }
-            .onChange(of: destinationKind) { newValue in
-                if newValue == .account {
-                    toPotName = ""
-                    isDirectPotTransfer = false
-                } else if let accountId = toAccountId,
-                          let pots = potsStore.potsByAccount[accountId],
-                          let firstPot = pots.first {
-                    toPotName = firstPot.name
-                }
-            }
-            .onChange(of: toAccountId) { newValue in
-                guard destinationKind == .pot else { return }
-                if let accountId = newValue, (potsStore.potsByAccount[accountId]?.isEmpty ?? true) {
-                    destinationKind = .account
-                }
             }
         }
     }
 
     private var isValid: Bool {
-        guard let toAccountId = toAccountId, let amountValue = Double(amount) else { return false }
-        if fromAccountId == nil && fromPotName.isEmpty { return false }
-        guard amountValue > 0 && !description.isEmpty && toAccountId > 0 else { return false }
-        return hasSelectedPot
+        selectedAccountId != nil && !description.isEmpty && Double(amount) != nil && validDay
+    }
+
+    private var validDay: Bool {
+        if let d = Int(dayOfMonth), (1...31).contains(d) { return true }
+        return false
     }
 
     private func save() {
-        guard let toAccountId = toAccountId, let amountValue = Double(amount) else { return }
-        let potName = destinationKind == .pot ? (toPotName.isEmpty ? nil : toPotName) : nil
-        let submission = TransferScheduleSubmission(
-            fromAccountId: fromAccountId,
-            fromPotId: fromPotName.isEmpty ? nil : fromPotName,
-            toAccountId: toAccountId,
-            toPotName: potName,
-            amount: amountValue,
+        guard let accountId = selectedAccountId, let money = Double(amount) else { return }
+        let submission = TransactionSubmission(
+            amount: money,
             description: description,
-            items: nil,
-            isDirectPotTransfer: destinationKind == .pot ? isDirectPotTransfer : false
+            date: dayOfMonth,
+            merchant: merchant.isEmpty ? nil : merchant,
+            isCredit: isCredit
         )
         Task {
-            await transferStore.add(submission)
+            await accountsStore.addTransaction(accountId: accountId, submission: submission)
             isPresented = false
         }
-    }
-
-    private var hasSelectedPot: Bool {
-        guard destinationKind == .pot else { return true }
-        return !toPotName.isEmpty
     }
 }

@@ -4,12 +4,14 @@ public enum ActivityCategory: String, CaseIterable, Codable {
     case scheduledPayment = "Scheduled"
     case expense = "Expense"
     case income = "Income"
+    case transaction = "Transaction"
 
     public var colorName: String {
         switch self {
         case .scheduledPayment: return "Purple"
         case .expense: return "Red"
         case .income: return "Green"
+        case .transaction: return "Blue"
         }
     }
 }
@@ -46,7 +48,15 @@ public struct ActivityItem: Identifiable, Hashable {
     }
 
     public var formattedAmount: String {
-        let prefix = category == .income ? "+" : "-"
+        let prefix: String
+        switch category {
+        case .income:
+            prefix = "+"
+        case .transaction:
+            prefix = metadata["direction"] == "credit" ? "+" : "-"
+        default:
+            prefix = "-"
+        }
         return "\(prefix)£\(String(format: "%.2f", amount))"
     }
 }

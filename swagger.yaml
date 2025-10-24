@@ -15,12 +15,12 @@ tags:
     description: Pot management endpoints
   - name: Scheduled Payments
     description: Payment scheduling and management
-  - name: Transfers
-    description: Transfer schedules and execution
   - name: Income
     description: Income management endpoints
   - name: Expenses
     description: Expense management endpoints
+  - name: Transactions
+    description: Transaction management endpoints
   - name: System
     description: System-wide operations
 
@@ -229,37 +229,6 @@ paths:
         '500':
           description: Server error
 
-  /transfer-schedules:
-    get:
-      tags: [Transfers]
-      summary: Get all transfer schedules
-      responses:
-        '200':
-          description: List of transfer schedules
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TransferSchedule'
-
-  /execute-transfer-schedule:
-    post:
-      tags: [Transfers]
-      summary: Execute a transfer schedule
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                scheduleId:
-                  type: integer
-      responses:
-        '200':
-          description: Transfer executed successfully
-
   /reset-balances:
     post:
       tags: [System]
@@ -428,6 +397,108 @@ paths:
               schema:
                 $ref: '#/components/schemas/Income'
 
+  /add-transaction:
+    post:
+      tags: [Transactions]
+      summary: Add a new transaction entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - transaction
+              properties:
+                accountId:
+                  type: integer
+                transaction:
+                  $ref: '#/components/schemas/TransactionSubmission'
+      responses:
+        '200':
+          description: Transaction created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          description: Invalid request data
+        '404':
+          description: Account not found
+        '500':
+          description: Server error
+
+  /update-transaction:
+    put:
+      tags: [Transactions]
+      summary: Update an existing transaction entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - transactionId
+                - transaction
+              properties:
+                accountId:
+                  type: integer
+                transactionId:
+                  type: integer
+                transaction:
+                  $ref: '#/components/schemas/TransactionSubmission'
+      responses:
+        '200':
+          description: Transaction updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          description: Invalid request data
+        '404':
+          description: Account or transaction not found
+        '500':
+          description: Server error
+
+  /delete-transaction:
+    delete:
+      tags: [Transactions]
+      summary: Delete a transaction entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - transactionId
+              properties:
+                accountId:
+                  type: integer
+                transactionId:
+                  type: integer
+      responses:
+        '200':
+          description: Transaction deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '400':
+          description: Invalid request data
+        '404':
+          description: Account or transaction not found
+        '500':
+          description: Server error
+
   /expenses:
     get:
       tags: [Expenses]
@@ -513,6 +584,11 @@ components:
           type: number
         type:
           type: string
+        accountType:
+          type: string
+        credit_limit:
+          type: number
+          nullable: true
         pots:
           type: array
           items:
@@ -523,8 +599,18 @@ components:
             $ref: '#/components/schemas/ScheduledPayment'
         excludeFromReset:
           type: boolean
-        accountType:
-          type: string
+        incomes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Income'
+        expenses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Expense'
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
 
     Pot:
       type: object
@@ -562,28 +648,6 @@ components:
           format: date-time
         potName:
           type: string
-
-    TransferSchedule:
-      type: object
-      properties:
-        id:
-          type: integer
-        fromAccountId:
-          type: integer
-        toAccountId:
-          type: integer
-        amount:
-          type: number
-        description:
-          type: string
-        isCompleted:
-          type: boolean
-        lastExecuted:
-          type: string
-          format: date-time
-        toPotName:
-          type: string
-          description: When omitted the transfer lands in the main account balance and is treated as an expense
 
     NewScheduledPayment:
       type: object
@@ -636,33 +700,29 @@ components:
           type: number
         description:
           type: string
+        company:
+          type: string
         date:
           type: string
-          format: date-time
-        category:
-          type: string
-          enum: [salary, bonus, investment, other]
-        accountId:
-          type: integer
+          description: ISO 8601 timestamp string
 
     NewIncome:
       type: object
       required:
         - amount
         - description
-        - category
-        - accountId
+        - company
       properties:
         amount:
           type: number
           minimum: 0
         description:
           type: string
-        category:
+        company:
           type: string
-          enum: [salary, bonus, investment, other]
-        accountId:
-          type: integer
+        date:
+          type: string
+          description: Optional ISO 8601 timestamp string
 
     Expense:
       type: object
@@ -675,32 +735,58 @@ components:
           type: string
         date:
           type: string
-          format: date-time
-        category:
-          type: string
-          enum: [groceries, utilities, entertainment, transport, health, other]
-        accountId:
-          type: integer
-        potName:
-          type: string
+          description: ISO 8601 timestamp string
 
     NewExpense:
       type: object
       required:
         - amount
         - description
-        - category
-        - accountId
       properties:
         amount:
           type: number
           minimum: 0
         description:
           type: string
-        category:
+        date:
           type: string
-          enum: [groceries, utilities, entertainment, transport, health, other]
-        accountId:
+          description: Optional ISO 8601 timestamp string
+
+    Transaction:
+      type: object
+      properties:
+        id:
           type: integer
-        potName:
+        amount:
+          type: number
+        description:
           type: string
+        date:
+          type: string
+          description: ISO 8601 timestamp string
+        merchant:
+          type: string
+          nullable: true
+        isCredit:
+          type: boolean
+
+    TransactionSubmission:
+      type: object
+      required:
+        - amount
+        - description
+        - date
+        - isCredit
+      properties:
+        amount:
+          type: number
+        description:
+          type: string
+        date:
+          type: string
+          description: ISO 8601 timestamp string or day-of-month string
+        merchant:
+          type: string
+          nullable: true
+        isCredit:
+          type: boolean
