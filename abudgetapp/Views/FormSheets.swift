@@ -126,6 +126,7 @@ struct IncomeFormView: View {
     @State private var company = ""
     @State private var dayOfMonth = ""
     @State private var selectedPotName: String? = nil
+    
 
     var body: some View {
         NavigationStack {
@@ -228,14 +229,6 @@ struct ExpenseFormView: View {
                             Text(account.name).tag(account.id as Int?)
                         }
                     }
-                    if let pots = accountsStore.accounts.first(where: { $0.id == toAccountId })?.pots, !pots.isEmpty {
-                        Picker("Pot", selection: $selectedPotName) {
-                            Text("None").tag(nil as String?)
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name as String?)
-                            }
-                        }
-                    }
                 }
                 Section("Expense Details") {
                     TextField("Name", text: $name)
@@ -259,9 +252,7 @@ struct ExpenseFormView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { isPresented = false } }
                 ToolbarItem(placement: .topBarTrailing) { Button("Save", action: save).disabled(!isValid) }
             }
-            .onChange(of: toAccountId) { _, _ in
-                selectedPotName = nil
-            }
+            
         }
     }
 

@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var isRestoringSample = false
     @State private var showingCardReorder = false
     @State private var showingDiagnostics = false
+    @State private var showingDeleteAllConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -33,6 +34,9 @@ struct SettingsView: View {
                     Button("Reload Data") { refreshAll() }
                     Button("Execute All Incomes") { Task { await incomeStore.executeAll() } }
                         .disabled(incomeStore.schedules.isEmpty)
+                    Button("Delete All Data", role: .destructive) { showingDeleteAllConfirm = true }
+                        .tint(.red)
+                        .disabled(accountsStore.accounts.isEmpty && incomeStore.schedules.isEmpty && savingsStore.accounts.isEmpty)
                 }
 
                 Section("Tools") {
@@ -56,6 +60,12 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingDiagnostics) {
                 DiagnosticsRunnerView(isPresented: $showingDiagnostics)
+            }
+            .alert("Delete All Data?", isPresented: $showingDeleteAllConfirm) {
+                Button("Delete", role: .destructive) { Task { await deleteAllData() } }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will permanently erase all accounts, pots, expenses, incomes, transactions, and schedules. This cannot be undone.")
             }
         }
     }
@@ -97,6 +107,31 @@ struct SettingsView: View {
             }
             await MainActor.run {
                 isRestoringSample = false
+            }
+        }
+    }
+
+    private func deleteAllData() async {
+        do {
+            _ = try await LocalBudgetStore.shared.clearAll()
+            await MainActor.run {
+                storageStatus = "All data cleared"
+                storageStatusIsSuccess = true
+            }
+            await accountsStore.loadAccounts()
+            await incomeStore.load()
+            await savingsStore.load()
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            await MainActor.run {
+                storageStatus = dataError.localizedDescription
+                storageStatusIsSuccess = false
+            }
+        } catch {
+            let apiError = BudgetDataError.unknown(error)
+            await MainActor.run {
+                storageStatus = apiError.localizedDescription
+                storageStatusIsSuccess = false
             }
         }
     }

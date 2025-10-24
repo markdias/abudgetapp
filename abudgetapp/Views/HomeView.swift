@@ -599,7 +599,7 @@ private struct ActivityFeedSection: View {
                 ContentUnavailableView(
                     "No Activity",
                     systemImage: "calendar",
-                    description: Text("Transactions and scheduled payments will appear here once available.")
+                    description: Text("Income, expenses, and transactions will appear here once available.")
                 )
             } else {
                 VStack(spacing: 12) {
@@ -644,7 +644,7 @@ private struct ActivityFeedSection: View {
             if let id = numericId, let context = scheduledPaymentsStore.items.first(where: { $0.accountId == accountId && $0.payment.id == id }) {
                 await scheduledPaymentsStore.deletePayment(context: context)
             }
-        case .transfer:
+        case .transaction:
             if let transactionIdString = activity.metadata["transactionId"], let transactionId = Int(transactionIdString) {
                 await accountsStore.deleteTransaction(id: transactionId)
             }
@@ -746,18 +746,18 @@ struct ActivityRow: View {
         case .income: return .green
         case .expense: return .red
         case .scheduledPayment: return .purple
-        case .transfer: return .blue
-        }
+        case .transaction: return .blue
     }
+}
 
-    private func icon(for category: ActivityCategory) -> String {
-        switch category {
-        case .income: return "arrow.down.circle.fill"
-        case .expense: return "arrow.up.circle.fill"
-        case .scheduledPayment: return "calendar"
-        case .transfer: return "arrow.left.arrow.right.circle.fill"
-        }
+private func icon(for category: ActivityCategory) -> String {
+    switch category {
+    case .income: return "arrow.down.circle.fill"
+    case .expense: return "arrow.up.circle.fill"
+    case .scheduledPayment: return "calendar"
+    case .transaction: return "arrow.left.arrow.right.circle.fill"
     }
+}
 
     private func dayOfMonth(_ date: Date) -> String {
         String(Calendar.current.component(.day, from: date))
@@ -772,11 +772,8 @@ struct ActivityRow: View {
             return activity.accountName
         case .expense:
             var parts: [String] = [activity.accountName]
-            if let pot = activity.metadata["toPotName"], !pot.isEmpty {
-                parts.append("· \(pot)")
-            }
             if let destination = activity.metadata["toAccountName"], !destination.isEmpty {
-                parts.append("→ \(destination)")
+                parts.append("to \(destination)")
             }
             return parts.joined(separator: " ")
         case .scheduledPayment:
@@ -784,7 +781,7 @@ struct ActivityRow: View {
                 return "\(activity.accountName) · \(pot)"
             }
             return activity.accountName
-        case .transfer:
+        case .transaction:
             let direction = activity.metadata["direction"] ?? "out"
             let counterparty = activity.metadata["counterparty"] ?? ""
             let base: String
@@ -811,7 +808,7 @@ struct ActivityRow: View {
 
     private func vendorLine(for activity: ActivityItem) -> String? {
         guard let company = activity.company, !company.isEmpty else { return nil }
-        if activity.category == .transfer {
+        if activity.category == .transaction {
             return "Vendor: \(company)"
         }
         return company
@@ -1002,7 +999,7 @@ struct ActivityEditorSheet: View {
     let activity: ActivityItem
     var body: some View {
         switch activity.category {
-        case .transfer:
+        case .transaction:
             TransactionActivityEditorView(activity: activity)
         default:
             ActivityEditorView(activity: activity)
@@ -1023,7 +1020,6 @@ private struct ActivityEditorView: View {
     @State private var dayOfMonth: String = ""
     @State private var selectedIncomePot: String? = nil
     @State private var selectedExpenseDestinationAccountId: Int?
-    @State private var selectedExpenseDestinationPot: String? = nil
 
     private var isIncome: Bool { activity.category == .income }
     private var isExpense: Bool { activity.category == .expense }
@@ -1031,11 +1027,6 @@ private struct ActivityEditorView: View {
 
     private var accountId: Int? {
         accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id
-    }
-
-    private var destinationAccount: Account? {
-        guard let selectedExpenseDestinationAccountId else { return nil }
-        return accountsStore.account(for: selectedExpenseDestinationAccountId)
     }
 
     private var entityId: Int? {
@@ -1080,17 +1071,9 @@ private struct ActivityEditorView: View {
                     if isExpense {
                         Section("Destination") {
                             Picker("Account", selection: $selectedExpenseDestinationAccountId) {
-                                Text("None").tag(nil as Int?)
+                                Text("Select Account").tag(nil as Int?)
                                 ForEach(accountsStore.accounts) { account in
                                     Text(account.name).tag(account.id as Int?)
-                                }
-                            }
-                            if let pots = destinationAccount?.pots, !pots.isEmpty {
-                                Picker("Pot", selection: $selectedExpenseDestinationPot) {
-                                    Text("None").tag(nil as String?)
-                                    ForEach(pots, id: \.name) { pot in
-                                        Text(pot.name).tag(pot.name as String?)
-                                    }
                                 }
                             }
                         }
@@ -1121,14 +1104,15 @@ private struct ActivityEditorView: View {
                 }
             }
             .onAppear { preload() }
-            .onChange(of: selectedExpenseDestinationAccountId) { _, _ in
-                selectedExpenseDestinationPot = nil
-            }
         }
     }
 
     private var canSave: Bool {
-        Double(amount) != nil && !descriptionText.isEmpty && validDay && (isIncome ? !company.isEmpty : true)
+        let hasAmount = Double(amount) != nil
+        let hasDescription = !descriptionText.isEmpty
+        let companyValid = isIncome ? !company.isEmpty : true
+        let destinationValid = isExpense ? selectedExpenseDestinationAccountId != nil : true
+        return hasAmount && hasDescription && validDay && companyValid && destinationValid
     }
 
     private var validDay: Bool {
@@ -1149,7 +1133,6 @@ private struct ActivityEditorView: View {
             if let destinationId = activity.metadata["toAccountId"], let value = Int(destinationId) {
                 selectedExpenseDestinationAccountId = value
             }
-            selectedExpenseDestinationPot = activity.metadata["toPotName"].flatMap { $0.isEmpty ? nil : $0 } ?? activity.potName
         }
     }
 
@@ -1159,7 +1142,8 @@ private struct ActivityEditorView: View {
             let submission = IncomeSubmission(amount: money, description: descriptionText, company: company, date: dayOfMonth, potName: selectedIncomePot)
             await accountsStore.updateIncome(accountId: accountId, incomeId: id, submission: submission)
         } else if isExpense {
-            let submission = ExpenseSubmission(amount: money, description: descriptionText, date: dayOfMonth, toAccountId: selectedExpenseDestinationAccountId, toPotName: selectedExpenseDestinationPot)
+            guard let selectedExpenseDestinationAccountId else { return }
+            let submission = ExpenseSubmission(amount: money, description: descriptionText, date: dayOfMonth, toAccountId: selectedExpenseDestinationAccountId, toPotName: nil)
             await accountsStore.updateExpense(accountId: accountId, expenseId: id, submission: submission)
         }
         dismiss()
