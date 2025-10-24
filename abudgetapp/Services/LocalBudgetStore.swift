@@ -48,6 +48,10 @@ actor LocalBudgetStore {
         state.incomeSchedules
     }
 
+    func currentTransactions() -> [TransactionRecord] {
+        state.transactions
+    }
+
     func addAccount(_ submission: AccountSubmission) throws -> Account {
         let account = Account(
             id: state.nextAccountId,
@@ -95,6 +99,11 @@ actor LocalBudgetStore {
         guard let index = state.accounts.firstIndex(where: { $0.id == id }) else {
             throw StoreError.notFound("Account #\(id) not found")
         }
+        let relatedTransactions = state.transactions.filter { $0.fromAccountId == id || $0.toAccountId == id }
+        for record in relatedTransactions {
+            try adjustTransactionBalances(for: record, multiplier: -1)
+        }
+        state.transactions.removeAll { $0.fromAccountId == id || $0.toAccountId == id }
         state.accounts.remove(at: index)
         state.incomeSchedules.removeAll { $0.accountId == id }
         try persist()
@@ -186,7 +195,8 @@ actor LocalBudgetStore {
             amount: submission.amount,
             description: submission.description,
             company: submission.company,
-            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date())
+            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
+            potName: submission.potName
         )
         state.nextIncomeId += 1
         incomes.append(income)
@@ -211,7 +221,8 @@ actor LocalBudgetStore {
             amount: submission.amount,
             description: submission.description,
             company: submission.company,
-            date: submission.date ?? old.date
+            date: submission.date ?? old.date,
+            potName: submission.potName
         )
         incomes[incomeIndex] = updated
         account.incomes = incomes
@@ -233,7 +244,9 @@ actor LocalBudgetStore {
             id: state.nextExpenseId,
             amount: submission.amount,
             description: submission.description,
-            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date())
+            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
+            toAccountId: submission.toAccountId,
+            toPotName: submission.toPotName
         )
         state.nextExpenseId += 1
         expenses.append(expense)
@@ -257,7 +270,9 @@ actor LocalBudgetStore {
             id: old.id,
             amount: submission.amount,
             description: submission.description,
-            date: submission.date ?? old.date
+            date: submission.date ?? old.date,
+            toAccountId: submission.toAccountId,
+            toPotName: submission.toPotName
         )
         expenses[expenseIndex] = updated
         account.expenses = expenses
@@ -296,6 +311,65 @@ actor LocalBudgetStore {
         account.expenses = expenses
         account.balance += expense.amount
         state.accounts[index] = account
+        try persist()
+    }
+
+    func addTransaction(_ submission: TransactionSubmission) throws -> TransactionRecord {
+        guard let fromIndex = state.accounts.firstIndex(where: { $0.id == submission.fromAccountId }) else {
+            throw StoreError.notFound("Account #\(submission.fromAccountId) not found")
+        }
+        guard let toIndex = state.accounts.firstIndex(where: { $0.id == submission.toAccountId }) else {
+            throw StoreError.notFound("Account #\(submission.toAccountId) not found")
+        }
+
+        let record = TransactionRecord(
+            id: state.nextTransactionId,
+            name: submission.name,
+            vendor: submission.vendor,
+            amount: submission.amount,
+            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
+            fromAccountId: submission.fromAccountId,
+            toAccountId: submission.toAccountId,
+            toPotName: submission.toPotName
+        )
+        state.nextTransactionId += 1
+        state.transactions.append(record)
+
+        try adjustTransactionBalances(for: record, multiplier: 1)
+        try persist()
+        return record
+    }
+
+    func updateTransaction(id: Int, submission: TransactionSubmission) throws -> TransactionRecord {
+        guard let index = state.transactions.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.notFound("Transaction #\(id) not found")
+        }
+
+        let updated = TransactionRecord(
+            id: id,
+            name: submission.name,
+            vendor: submission.vendor,
+            amount: submission.amount,
+            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
+            fromAccountId: submission.fromAccountId,
+            toAccountId: submission.toAccountId,
+            toPotName: submission.toPotName
+        )
+
+        let existing = state.transactions[index]
+        try adjustTransactionBalances(for: existing, multiplier: -1)
+        state.transactions[index] = updated
+        try adjustTransactionBalances(for: updated, multiplier: 1)
+        try persist()
+        return updated
+    }
+
+    func deleteTransaction(id: Int) throws {
+        guard let index = state.transactions.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.notFound("Transaction #\(id) not found")
+        }
+        let record = state.transactions.remove(at: index)
+        try adjustTransactionBalances(for: record, multiplier: -1)
         try persist()
     }
 
@@ -540,6 +614,49 @@ actor LocalBudgetStore {
         }
     }
 
+    private func adjustTransactionBalances(for record: TransactionRecord, multiplier: Double) throws {
+        guard let fromIndex = state.accounts.firstIndex(where: { $0.id == record.fromAccountId }) else {
+            throw StoreError.notFound("Account #\(record.fromAccountId) not found")
+        }
+        guard let toIndex = state.accounts.firstIndex(where: { $0.id == record.toAccountId }) else {
+            throw StoreError.notFound("Account #\(record.toAccountId) not found")
+        }
+
+        if fromIndex == toIndex {
+            var account = state.accounts[fromIndex]
+            if let potName = record.toPotName, !potName.isEmpty {
+                guard var pots = account.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
+                    throw StoreError.notFound("Pot \(potName) not found")
+                }
+                var pot = pots[potIndex]
+                pot.balance += record.amount * multiplier
+                pots[potIndex] = pot
+                account.pots = pots
+            }
+            state.accounts[fromIndex] = account
+            return
+        }
+
+        var fromAccount = state.accounts[fromIndex]
+        var toAccount = state.accounts[toIndex]
+
+        fromAccount.balance -= record.amount * multiplier
+        toAccount.balance += record.amount * multiplier
+
+        if let potName = record.toPotName, !potName.isEmpty {
+            guard var pots = toAccount.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
+                throw StoreError.notFound("Pot \(potName) not found")
+            }
+            var pot = pots[potIndex]
+            pot.balance += record.amount * multiplier
+            pots[potIndex] = pot
+            toAccount.pots = pots
+        }
+
+        state.accounts[fromIndex] = fromAccount
+        state.accounts[toIndex] = toAccount
+    }
+
     private static func makePersistenceURL() -> URL {
         let fileManager = FileManager.default
         let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -555,32 +672,38 @@ actor LocalBudgetStore {
 private struct BudgetState: Codable {
     var accounts: [Account]
     var incomeSchedules: [IncomeSchedule]
+    var transactions: [TransactionRecord]
     var lastResetAt: String?
     var nextAccountId: Int
     var nextPotId: Int
     var nextIncomeId: Int
     var nextExpenseId: Int
+    var nextTransactionId: Int
     var nextScheduledPaymentId: Int
     var nextIncomeScheduleId: Int
 
     init(
         accounts: [Account],
         incomeSchedules: [IncomeSchedule],
+        transactions: [TransactionRecord],
         lastResetAt: String? = nil,
         nextAccountId: Int,
         nextPotId: Int,
         nextIncomeId: Int,
         nextExpenseId: Int,
+        nextTransactionId: Int,
         nextScheduledPaymentId: Int,
         nextIncomeScheduleId: Int
     ) {
         self.accounts = accounts
         self.incomeSchedules = incomeSchedules
+        self.transactions = transactions
         self.lastResetAt = lastResetAt
         self.nextAccountId = nextAccountId
         self.nextPotId = nextPotId
         self.nextIncomeId = nextIncomeId
         self.nextExpenseId = nextExpenseId
+        self.nextTransactionId = nextTransactionId
         self.nextScheduledPaymentId = nextScheduledPaymentId
         self.nextIncomeScheduleId = nextIncomeScheduleId
     }
@@ -588,11 +711,13 @@ private struct BudgetState: Codable {
     private enum CodingKeys: String, CodingKey {
         case accounts
         case incomeSchedules = "income_schedules"
+        case transactions
         case lastResetAt = "last_reset_at"
         case nextAccountId
         case nextPotId
         case nextIncomeId
         case nextExpenseId
+        case nextTransactionId
         case nextScheduledPaymentId
         case nextIncomeScheduleId
     }
@@ -600,11 +725,13 @@ private struct BudgetState: Codable {
     private enum LegacyKeys: String, CodingKey {
         case accounts
         case incomeSchedules
+        case transactions
         case lastResetAt
         case nextAccountId
         case nextPotId
         case nextIncomeId
         case nextExpenseId
+        case nextTransactionId
         case nextScheduledPaymentId
         case nextIncomeScheduleId
     }
@@ -613,11 +740,13 @@ private struct BudgetState: Codable {
         if let container = try? decoder.container(keyedBy: CodingKeys.self) {
             accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
             incomeSchedules = try container.decodeIfPresent([IncomeSchedule].self, forKey: .incomeSchedules) ?? []
+            transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
             lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
             nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
             nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
             nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
             nextExpenseId = try container.decodeIfPresent(Int.self, forKey: .nextExpenseId) ?? 1
+            nextTransactionId = try container.decodeIfPresent(Int.self, forKey: .nextTransactionId) ?? 1
             nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
             nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
             return
@@ -626,11 +755,13 @@ private struct BudgetState: Codable {
         let container = try decoder.container(keyedBy: LegacyKeys.self)
         accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
         incomeSchedules = try container.decodeIfPresent([IncomeSchedule].self, forKey: .incomeSchedules) ?? []
+        transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
         lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
         nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
         nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
         nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
         nextExpenseId = try container.decodeIfPresent(Int.self, forKey: .nextExpenseId) ?? 1
+        nextTransactionId = try container.decodeIfPresent(Int.self, forKey: .nextTransactionId) ?? 1
         nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
         nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
     }
@@ -653,6 +784,9 @@ private struct BudgetState: Codable {
         let expenseMax = accounts.compactMap { $0.expenses?.map { $0.id }.max() }.max() ?? 0
         normalizedState.nextExpenseId = max(nextExpenseId, expenseMax + 1)
 
+        let transactionMax = transactions.map { $0.id }.max() ?? 0
+        normalizedState.nextTransactionId = max(nextTransactionId, transactionMax + 1)
+
         let scheduledAccountMax = accounts.compactMap { $0.scheduled_payments?.map { $0.id }.max() }.max() ?? 0
         let scheduledPotMax = accounts
             .compactMap { $0.pots?.compactMap { $0.scheduled_payments?.map { $0.id }.max() }.max() }
@@ -670,11 +804,13 @@ private struct BudgetState: Codable {
         BudgetState(
             accounts: [],
             incomeSchedules: [],
+            transactions: [],
             lastResetAt: nil,
             nextAccountId: 1,
             nextPotId: 1,
             nextIncomeId: 1,
             nextExpenseId: 1,
+            nextTransactionId: 1,
             nextScheduledPaymentId: 1,
             nextIncomeScheduleId: 1
         )
@@ -784,10 +920,13 @@ private struct BudgetState: Codable {
         return BudgetState(
             accounts: [personalAccount, householdAccount, savingsAccount],
             incomeSchedules: [incomeSchedule],
+            transactions: [],
+            lastResetAt: nil,
             nextAccountId: 4,
             nextPotId: 5,
             nextIncomeId: 3,
             nextExpenseId: 3,
+            nextTransactionId: 1,
             nextScheduledPaymentId: 4,
             nextIncomeScheduleId: 2
         )

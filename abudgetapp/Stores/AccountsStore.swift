@@ -7,6 +7,9 @@ final class AccountsStore: ObservableObject {
     @Published private(set) var accounts: [Account] = [] {
         didSet { publishAccountsChange() }
     }
+    @Published private(set) var transactions: [TransactionRecord] = [] {
+        didSet { publishAccountsChange() }
+    }
     @Published var isLoading = false
     @Published var statusMessage: StatusMessage?
     @Published var lastError: BudgetDataError?
@@ -22,8 +25,10 @@ final class AccountsStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        let fetched = await store.currentAccounts()
-        accounts = fetched
+        let fetchedTransactions = await store.currentTransactions()
+        let fetchedAccounts = await store.currentAccounts()
+        transactions = fetchedTransactions
+        accounts = fetchedAccounts
     }
 
     func addAccount(_ submission: AccountSubmission) async {
@@ -178,6 +183,54 @@ final class AccountsStore: ObservableObject {
         }
     }
 
+    func addTransaction(_ submission: TransactionSubmission) async {
+        do {
+            _ = try await store.addTransaction(submission)
+            await loadAccounts()
+            statusMessage = StatusMessage(title: "Transaction Added", message: submission.name, kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Add Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func updateTransaction(id: Int, submission: TransactionSubmission) async {
+        do {
+            _ = try await store.updateTransaction(id: id, submission: submission)
+            await loadAccounts()
+            statusMessage = StatusMessage(title: "Transaction Updated", message: submission.name, kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Update Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func deleteTransaction(id: Int) async {
+        do {
+            try await store.deleteTransaction(id: id)
+            await loadAccounts()
+            statusMessage = StatusMessage(title: "Transaction Deleted", message: "Removed transaction", kind: .warning)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Transaction Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
     func resetBalances() async {
         do {
             let response = try await store.resetBalances()
@@ -235,11 +288,18 @@ final class AccountsStore: ObservableObject {
         accounts.first { $0.id == id }
     }
 
+    func transaction(for id: Int) -> TransactionRecord? {
+        transactions.first { $0.id == id }
+    }
+
     private func publishAccountsChange() {
         NotificationCenter.default.post(
             name: AccountsStore.accountsDidChangeNotification,
             object: nil,
-            userInfo: ["accounts": accounts]
+            userInfo: [
+                "accounts": accounts,
+                "transactions": transactions
+            ]
         )
     }
 }

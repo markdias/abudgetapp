@@ -114,13 +114,15 @@ public struct Income: Identifiable, Codable, Hashable {
     public let description: String
     public let company: String
     public let date: String
-    
-    public init(id: Int, amount: Double, description: String, company: String, date: String) {
+    public let potName: String?
+
+    public init(id: Int, amount: Double, description: String, company: String, date: String, potName: String? = nil) {
         self.id = id
         self.amount = amount
         self.description = description
         self.company = company
         self.date = date
+        self.potName = potName
     }
     
     public static func == (lhs: Income, rhs: Income) -> Bool {
@@ -137,18 +139,52 @@ public struct Expense: Identifiable, Codable, Hashable {
     public let amount: Double
     public let description: String
     public let date: String
-    
-    public init(id: Int, amount: Double, description: String, date: String) {
+    public let toAccountId: Int?
+    public let toPotName: String?
+
+    public init(id: Int, amount: Double, description: String, date: String, toAccountId: Int? = nil, toPotName: String? = nil) {
         self.id = id
         self.amount = amount
         self.description = description
         self.date = date
+        self.toAccountId = toAccountId
+        self.toPotName = toPotName
     }
     
     public static func == (lhs: Expense, rhs: Expense) -> Bool {
         return lhs.id == rhs.id
     }
     
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+public struct TransactionRecord: Identifiable, Codable, Hashable {
+    public let id: Int
+    public let name: String
+    public let vendor: String
+    public let amount: Double
+    public let date: String
+    public let fromAccountId: Int
+    public let toAccountId: Int
+    public let toPotName: String?
+
+    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int, toAccountId: Int, toPotName: String? = nil) {
+        self.id = id
+        self.name = name
+        self.vendor = vendor
+        self.amount = amount
+        self.date = date
+        self.fromAccountId = fromAccountId
+        self.toAccountId = toAccountId
+        self.toPotName = toPotName
+    }
+
+    public static func == (lhs: TransactionRecord, rhs: TransactionRecord) -> Bool {
+        lhs.id == rhs.id
+    }
+
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
@@ -289,15 +325,19 @@ public struct ExpenseSubmission: Codable {
     public var groupId: String?
     public var groupStatus: String?
     public var isScheduled: Bool?
-    
+    public var toAccountId: Int?
+    public var toPotName: String?
+
     public init(amount: Double, description: String, date: String? = nil, groupId: String? = nil,
-         groupStatus: String? = nil, isScheduled: Bool? = nil) {
+         groupStatus: String? = nil, isScheduled: Bool? = nil, toAccountId: Int? = nil, toPotName: String? = nil) {
         self.amount = amount
         self.description = description
         self.date = date
         self.groupId = groupId
         self.groupStatus = groupStatus
         self.isScheduled = isScheduled
+        self.toAccountId = toAccountId
+        self.toPotName = toPotName
     }
 }
 
@@ -306,12 +346,34 @@ public struct IncomeSubmission: Codable {
     public let description: String
     public let company: String
     public var date: String?
-    
-    public init(amount: Double, description: String, company: String, date: String? = nil) {
+    public var potName: String?
+
+    public init(amount: Double, description: String, company: String, date: String? = nil, potName: String? = nil) {
         self.amount = amount
         self.description = description
         self.company = company
         self.date = date
+        self.potName = potName
+    }
+}
+
+public struct TransactionSubmission: Codable {
+    public let name: String
+    public let vendor: String
+    public let amount: Double
+    public let date: String?
+    public let fromAccountId: Int
+    public let toAccountId: Int
+    public var toPotName: String?
+
+    public init(name: String, vendor: String, amount: Double, date: String? = nil, fromAccountId: Int, toAccountId: Int, toPotName: String? = nil) {
+        self.name = name
+        self.vendor = vendor
+        self.amount = amount
+        self.date = date
+        self.fromAccountId = fromAccountId
+        self.toAccountId = toAccountId
+        self.toPotName = toPotName
     }
 }
 

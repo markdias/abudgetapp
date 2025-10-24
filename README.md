@@ -22,7 +22,7 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 
 ## Key UI Features
 
-* **Dashboard (Home)** – Stacked, swipeable account cards with drag-to-reorder, quick actions, search, add menus, and activity feed with mark mode and detail popovers.
+* **Dashboard (Home)** – Stacked, swipeable account cards with drag-to-reorder, quick actions, search, and an add menu for transactions, expenses, and incomes. Activity rows support inline editing for every entry type, including transfers.
 * **Income Planner** – Board view for managing recurring income schedules with inline execution and status tracking.
 * **Activity Tab** – Full history view with filters that share the same activity source as the dashboard feed.
 * **Budget** – Summaries derived from pots and scheduled payments plus an upcoming payments list.
@@ -36,8 +36,9 @@ Budget data is saved locally on the device. A bundled sample dataset seeds the a
 ## Running the App
 
 1. Launch the app to load the bundled sample dataset (or restore it from Settings if you have existing data).
-2. Use the dashboard add menu to create accounts, pots, incomes, and expenses.
-3. Visit the Settings tab to run diagnostics, reset balances, restore sample data, or start the card reordering flow.
+2. Use the dashboard add menu to create transactions, expenses, incomes, accounts, and pots. Transactions can move money between accounts (and optional pots), expenses can redirect funds to destination accounts, and incomes can land directly in a pot.
+3. Review or edit any item from the home activity feed or the Activity tab. Swipe actions or detail sheets let you update amounts, day-of-month scheduling, destinations, and associated metadata.
+4. Visit the Settings tab to run diagnostics, reset balances, restore sample data, or start the card reordering flow.
 
 > **Note:** The project targets iOS and requires Xcode 15+ with the Swift 6 toolchain for compilation.
 
