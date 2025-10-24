@@ -125,6 +125,7 @@ struct IncomeFormView: View {
     @State private var name = ""
     @State private var company = ""
     @State private var dayOfMonth = ""
+    @State private var selectedPotName: String? = nil
     
 
     var body: some View {
