@@ -1637,6 +1637,7 @@ private struct PotsPanelSection: View {
 
 private struct PotEditorSheet: View {
     @EnvironmentObject private var potsStore: PotsStore
+    @EnvironmentObject private var accountsStore: AccountsStore
     @Environment(\.dismiss) private var dismiss
 
     let context: PotEditContext
@@ -1660,6 +1661,20 @@ private struct PotEditorSheet: View {
                         .onChange(of: excludeFromReset) { _, newValue in
                             Task { await potsStore.toggleExclusion(accountId: context.account.id, potName: context.pot.name) }
                         }
+                }
+                Section("Transactions") {
+                    let records = accountsStore.transactions.filter { $0.toAccountId == context.account.id && ($0.toPotName ?? "") == context.pot.name }
+                    if records.isEmpty {
+                        Text("No transactions for this pot").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(records, id: \.id) { r in
+                            HStack {
+                                Text(r.name.isEmpty ? r.vendor : r.name)
+                                Spacer()
+                                Text("£\(String(format: "%.2f", r.amount))").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
             .navigationTitle("Manage Pot")

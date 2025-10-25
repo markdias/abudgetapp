@@ -715,53 +715,67 @@ actor LocalBudgetStore {
         guard let toIndex = state.accounts.firstIndex(where: { $0.id == schedule.toAccountId }) else {
             throw StoreError.notFound("Account #\(schedule.toAccountId) not found")
         }
+
+        // If moving within the same account, operate on a single mutable copy to avoid overwriting changes.
         if fromIndex == toIndex {
-            // Intra-account: only adjust pot if provided; otherwise invalid
-            if let potName = schedule.toPotName, !potName.isEmpty {
-                var account = state.accounts[fromIndex]
-                // Require sufficient funds in the source account even for intra-account to pot
-                if account.balance < schedule.amount {
-                    throw StoreError.invalidOperation("Insufficient funds in source account")
+            var account = state.accounts[fromIndex]
+            // Debit source (pot or account)
+            if let fromPotName = schedule.fromPotName, !fromPotName.isEmpty {
+                guard var pots = account.pots, let pIdx = pots.firstIndex(where: { $0.name == fromPotName }) else {
+                    throw StoreError.notFound("Pot \(fromPotName) not found")
                 }
-                guard var pots = account.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
-                    throw StoreError.notFound("Pot \(potName) not found")
-                }
-                var pot = pots[potIndex]
-                pot.balance += schedule.amount
-                pots[potIndex] = pot
+                var pot = pots[pIdx]
+                if pot.balance < schedule.amount { throw StoreError.invalidOperation("Insufficient funds in source pot") }
+                pot.balance -= schedule.amount
+                pots[pIdx] = pot
                 account.pots = pots
-                state.accounts[fromIndex] = account
             } else {
-                throw StoreError.invalidOperation("Source and destination are the same. Choose a pot or a different account.")
+                if account.balance < schedule.amount { throw StoreError.invalidOperation("Insufficient funds in source account") }
+                account.balance -= schedule.amount
             }
-            // Record activity transaction (same-account to pot)
-            let record = TransactionRecord(
-                id: state.nextTransactionId,
-                name: schedule.description,
-                vendor: schedule.description,
-                amount: schedule.amount,
-                date: LocalBudgetStore.isoFormatter.string(from: Date()),
-                fromAccountId: schedule.fromAccountId,
-                toAccountId: schedule.toAccountId,
-                toPotName: schedule.toPotName
-            )
-            state.nextTransactionId += 1
-            state.transactions.append(record)
+            // Credit destination (pot or account)
+            if let toPotName = schedule.toPotName, !toPotName.isEmpty {
+                guard var pots = account.pots, let pIdx = pots.firstIndex(where: { $0.name == toPotName }) else {
+                    throw StoreError.notFound("Pot \(toPotName) not found")
+                }
+                var pot = pots[pIdx]
+                pot.balance += schedule.amount
+                pots[pIdx] = pot
+                account.pots = pots
+            } else {
+                account.balance += schedule.amount
+            }
+            state.accounts[fromIndex] = account
             return
         }
 
+        // Cross-account: maintain separate copies
         var fromAccount = state.accounts[fromIndex]
         var toAccount = state.accounts[toIndex]
 
-        fromAccount.balance -= schedule.amount
-        if let potName = schedule.toPotName, !potName.isEmpty {
-            // Deposit into a pot on the destination account
-            guard var pots = toAccount.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
-                throw StoreError.notFound("Pot \(potName) not found")
+        // 1) Debit source (pot or account balance)
+        if let fromPotName = schedule.fromPotName, !fromPotName.isEmpty {
+            guard var pots = fromAccount.pots, let pIdx = pots.firstIndex(where: { $0.name == fromPotName }) else {
+                throw StoreError.notFound("Pot \(fromPotName) not found")
             }
-            var pot = pots[potIndex]
+            var pot = pots[pIdx]
+            if pot.balance < schedule.amount { throw StoreError.invalidOperation("Insufficient funds in source pot") }
+            pot.balance -= schedule.amount
+            pots[pIdx] = pot
+            fromAccount.pots = pots
+        } else {
+            if fromAccount.balance < schedule.amount { throw StoreError.invalidOperation("Insufficient funds in source account") }
+            fromAccount.balance -= schedule.amount
+        }
+
+        // 2) Credit destination (pot or account balance)
+        if let toPotName = schedule.toPotName, !toPotName.isEmpty {
+            guard var pots = toAccount.pots, let pIdx = pots.firstIndex(where: { $0.name == toPotName }) else {
+                throw StoreError.notFound("Pot \(toPotName) not found")
+            }
+            var pot = pots[pIdx]
             pot.balance += schedule.amount
-            pots[potIndex] = pot
+            pots[pIdx] = pot
             toAccount.pots = pots
         } else {
             toAccount.balance += schedule.amount
@@ -769,20 +783,7 @@ actor LocalBudgetStore {
 
         state.accounts[fromIndex] = fromAccount
         state.accounts[toIndex] = toAccount
-
-        // Record activity transaction (cross-account or to account)
-        let record = TransactionRecord(
-            id: state.nextTransactionId,
-            name: schedule.description,
-            vendor: schedule.description,
-            amount: schedule.amount,
-            date: LocalBudgetStore.isoFormatter.string(from: Date()),
-            fromAccountId: schedule.fromAccountId,
-            toAccountId: schedule.toAccountId,
-            toPotName: schedule.toPotName
-        )
-        state.nextTransactionId += 1
-        state.transactions.append(record)
+        // No activity record for executed transfers
     }
 
     private func mutateAccount(id: Int, _ transform: (inout Account) throws -> Void) throws {

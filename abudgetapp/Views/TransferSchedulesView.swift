@@ -56,7 +56,8 @@ private struct ManageButton<Destination: View>: View {
 private struct AddTransferSchedulesScreen: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var transferStore: TransferSchedulesStore
-    @State private var fromAccountId: Int?
+    enum Source: Hashable, Identifiable { case none, account(Int), pot(Int, String); var id: String { switch self { case .none: return "none"; case .account(let id): return "a-\(id)"; case .pot(let id, let p): return "p-\(id)-\(p)" } } }
+    @State private var source: Source = .none
     @State private var expandedCards: Set<String> = []
 
     var body: some View {
@@ -64,12 +65,15 @@ private struct AddTransferSchedulesScreen: View {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Select Source").font(.subheadline).fontWeight(.semibold)
-                    Picker("Select source", selection: Binding(
-                        get: { fromAccountId ?? accountsStore.accounts.first?.id },
-                        set: { fromAccountId = $0 }
-                    )) {
+                    Picker("Select source", selection: $source) {
+                        Text("None").tag(Source.none)
                         ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(Optional(account.id))
+                            Text(account.name).tag(Source.account(account.id))
+                            if let pots = account.pots {
+                                ForEach(pots, id: \.name) { pot in
+                                    Text("\(account.name) • \(pot.name)").tag(Source.pot(account.id, pot.name))
+                                }
+                            }
                         }
                     }
                     .pickerStyle(.menu)
@@ -92,16 +96,15 @@ private struct AddTransferSchedulesScreen: View {
                                         onDelete: {
                                             if let s = existing { Task { await transferStore.delete(schedule: s) } }
                                         }) {
-                            guard let sourceId = fromAccountId ?? accountsStore.accounts.first?.id else { return }
-                            Task {
-                                await transferStore.addSchedule(from: sourceId,
-                                                                 to: dest.accountId,
-                                                                 toPotName: dest.potName,
-                                                                 amount: total,
-                                                                 description: dest.title)
+                            let src: (Int, String?)
+                            switch source {
+                            case .none: return
+                            case .account(let id): src = (id, nil)
+                            case .pot(let id, let pot): src = (id, pot)
                             }
+                            Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: dest.potName, amount: total, description: dest.title) }
                         }
-                        .disabled(fromAccountId == nil || total <= 0)
+                        .disabled(source == .none || total <= 0)
                     }
                 }
 
@@ -121,16 +124,15 @@ private struct AddTransferSchedulesScreen: View {
                                         onDelete: {
                                             if let s = existing { Task { await transferStore.delete(schedule: s) } }
                                         }) {
-                            guard let sourceId = fromAccountId ?? accountsStore.accounts.first?.id else { return }
-                            Task {
-                                await transferStore.addSchedule(from: sourceId,
-                                                                 to: dest.accountId,
-                                                                 toPotName: nil,
-                                                                 amount: total,
-                                                                 description: dest.title)
+                            let src: (Int, String?)
+                            switch source {
+                            case .none: return
+                            case .account(let id): src = (id, nil)
+                            case .pot(let id, let pot): src = (id, pot)
                             }
+                            Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: nil, amount: total, description: dest.title) }
                         }
-                        .disabled(fromAccountId == nil || total <= 0)
+                        .disabled(source == .none || total <= 0)
                     }
                 }
             }
@@ -205,13 +207,20 @@ private struct AddTransferSchedulesScreen: View {
             if isExpanded(id) && !entries.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(entries) { item in
-                        HStack { Text(item.title).font(.caption); Spacer(); Text(formatCurrency(item.amount)).font(.caption).foregroundStyle(.secondary) }
+                        HStack {
+                            Text(item.title)
+                                .font(.caption)
+                            Spacer()
+                            Text(formatCurrency(item.amount))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
             if let _ = existingSchedule {
                 HStack {
-                    Text("SCHEDULED").font(.caption2).padding(.horizontal, 8).padding(.vertical, 4).background(Color.gray.opacity(0.15)).foregroundColor(.secondary).clipShape(Capsule())
+                    scheduledBadge()
                     Spacer()
                     Button("Delete", role: .destructive, action: onDelete).buttonStyle(.borderedProminent).tint(.red)
                 }
@@ -231,6 +240,15 @@ private struct AddTransferSchedulesScreen: View {
     }
 
     private func formatCurrency(_ amount: Double) -> String { "£" + String(format: "%.2f", abs(amount)) }
+    private func scheduledBadge() -> some View {
+        Text("SCHEDULED")
+            .font(.caption2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.gray.opacity(0.15))
+            .foregroundColor(.secondary)
+            .clipShape(Capsule())
+    }
     private func toggleExpanded(_ id: String) { if expandedCards.contains(id) { expandedCards.remove(id) } else { expandedCards.insert(id) } }
     private func isExpanded(_ id: String) -> Bool { expandedCards.contains(id) }
     private func scheduleForDestination(accountId: Int, potName: String?) -> TransferSchedule? {
@@ -351,6 +369,10 @@ private struct ExecuteTransferSchedulesScreen: View {
     }
     private func canExecuteSchedule(_ schedule: TransferSchedule) -> Bool {
         guard let source = accountsStore.accounts.first(where: { $0.id == schedule.fromAccountId }) else { return false }
+        if let fromPot = schedule.fromPotName, !fromPot.isEmpty {
+            guard let pots = source.pots, let pot = pots.first(where: { $0.name == fromPot }) else { return false }
+            return pot.balance >= schedule.amount
+        }
         return source.balance >= schedule.amount
     }
     private func accountName(_ id: Int) -> String {

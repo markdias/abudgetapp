@@ -310,6 +310,7 @@ public struct IncomeSchedule: Identifiable, Codable, Hashable {
 public struct TransferSchedule: Identifiable, Codable, Hashable {
     public let id: Int
     public let fromAccountId: Int
+    public let fromPotName: String?
     public let toAccountId: Int
     public let toPotName: String?
     public let amount: Double
@@ -318,10 +319,11 @@ public struct TransferSchedule: Identifiable, Codable, Hashable {
     public var isCompleted: Bool
     public var lastExecuted: String?
 
-    public init(id: Int, fromAccountId: Int, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String,
+    public init(id: Int, fromAccountId: Int, fromPotName: String? = nil, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String,
                 isActive: Bool, isCompleted: Bool, lastExecuted: String? = nil) {
         self.id = id
         self.fromAccountId = fromAccountId
+        self.fromPotName = fromPotName
         self.toAccountId = toAccountId
         self.toPotName = toPotName
         self.amount = amount
@@ -479,13 +481,15 @@ public struct IncomeScheduleSubmission: Codable {
 
 public struct TransferScheduleSubmission: Codable {
     public let fromAccountId: Int
+    public var fromPotName: String?
     public let toAccountId: Int
     public var toPotName: String?
     public let amount: Double
     public let description: String
 
-    public init(fromAccountId: Int, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String) {
+    public init(fromAccountId: Int, fromPotName: String? = nil, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String) {
         self.fromAccountId = fromAccountId
+        self.fromPotName = fromPotName
         self.toAccountId = toAccountId
         self.toPotName = toPotName
         self.amount = amount
