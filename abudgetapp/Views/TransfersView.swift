@@ -3,7 +3,9 @@ import SwiftUI
 struct TransfersView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var incomeSchedulesStore: IncomeSchedulesStore
+    @EnvironmentObject private var transferSchedulesStore: TransferSchedulesStore
     @State private var showingIncomeSchedules = false
+    @State private var showingTransferSchedules = false
     @State private var isResetting = false
     @State private var showingResetConfirm = false
 
@@ -12,7 +14,7 @@ struct TransfersView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     VStack(spacing: 16) {
-                        LargeActionButton(title: "Manage Transfer Schedules", color: .blue) { }
+                        LargeActionButton(title: "Manage Transfer Schedules", color: .blue) { showingTransferSchedules = true }
                         LargeActionButton(title: "Manage Income Schedules", color: .green) {
                             showingIncomeSchedules = true
                         }
@@ -31,6 +33,9 @@ struct TransfersView: View {
             .sheet(isPresented: $showingIncomeSchedules) {
                 ManageIncomeSchedulesView(isPresented: $showingIncomeSchedules)
             }
+            .sheet(isPresented: $showingTransferSchedules) {
+                ManageTransferSchedulesView(isPresented: $showingTransferSchedules)
+            }
             .alert("Reset Balances?", isPresented: $showingResetConfirm) {
                 Button("Reset", role: .destructive) {
                     Task {
@@ -38,6 +43,7 @@ struct TransfersView: View {
                         isResetting = true
                         await accountsStore.resetBalances()
                         await incomeSchedulesStore.load()
+                        await transferSchedulesStore.load()
                         isResetting = false
                     }
                 }

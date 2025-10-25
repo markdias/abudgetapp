@@ -48,6 +48,10 @@ actor LocalBudgetStore {
         state.incomeSchedules
     }
 
+    func currentTransferSchedules() -> [TransferSchedule] {
+        state.transferSchedules
+    }
+
     func currentTransactions() -> [TransactionRecord] {
         state.transactions
     }
@@ -334,6 +338,79 @@ actor LocalBudgetStore {
         return record
     }
 
+    // MARK: - Transfer Schedules
+
+    func addTransferSchedule(_ submission: TransferScheduleSubmission) throws -> TransferSchedule {
+        guard state.accounts.contains(where: { $0.id == submission.fromAccountId }) else {
+            throw StoreError.notFound("Account #\(submission.fromAccountId) not found")
+        }
+        guard state.accounts.contains(where: { $0.id == submission.toAccountId }) else {
+            throw StoreError.notFound("Account #\(submission.toAccountId) not found")
+        }
+        // Prevent duplicate pending schedules to the same destination
+        let destPot = submission.toPotName ?? ""
+        if state.transferSchedules.contains(where: { $0.isActive && !$0.isCompleted && $0.toAccountId == submission.toAccountId && ($0.toPotName ?? "") == destPot }) {
+            throw StoreError.invalidOperation("A pending schedule already exists for this destination")
+        }
+        let schedule = TransferSchedule(
+            id: state.nextTransferScheduleId,
+            fromAccountId: submission.fromAccountId,
+            toAccountId: submission.toAccountId,
+            toPotName: submission.toPotName,
+            amount: submission.amount,
+            description: submission.description,
+            isActive: true,
+            isCompleted: false,
+            lastExecuted: nil
+        )
+        state.nextTransferScheduleId += 1
+        state.transferSchedules.append(schedule)
+        try persist()
+        return schedule
+    }
+
+    func executeTransferSchedule(id: Int) throws -> MessageResponse {
+        guard let index = state.transferSchedules.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.notFound("Transfer schedule #\(id) not found")
+        }
+        var schedule = state.transferSchedules[index]
+        guard schedule.isActive else { throw StoreError.invalidOperation("Transfer schedule is inactive") }
+        try applyTransfer(schedule: schedule)
+        schedule.isCompleted = true
+        schedule.lastExecuted = LocalBudgetStore.isoFormatter.string(from: Date())
+        state.transferSchedules[index] = schedule
+        try persist()
+        return MessageResponse(message: "Transfer schedule executed")
+    }
+
+    func executeAllTransferSchedules() throws -> IncomeExecutionResponse {
+        var executed = 0
+        for index in state.transferSchedules.indices {
+            if state.transferSchedules[index].isActive && !state.transferSchedules[index].isCompleted {
+                let schedule = state.transferSchedules[index]
+                do {
+                    try applyTransfer(schedule: schedule)
+                    state.transferSchedules[index].isCompleted = true
+                    state.transferSchedules[index].lastExecuted = LocalBudgetStore.isoFormatter.string(from: Date())
+                    executed += 1
+                } catch {
+                    // Skip schedules that cannot be executed (e.g., insufficient funds)
+                    continue
+                }
+            }
+        }
+        try persist()
+        return IncomeExecutionResponse(accounts: state.accounts, executed_count: executed)
+    }
+
+    func deleteTransferSchedule(id: Int) throws {
+        guard let index = state.transferSchedules.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.notFound("Transfer schedule #\(id) not found")
+        }
+        state.transferSchedules.remove(at: index)
+        try persist()
+    }
+
     func updateTransaction(id: Int, submission: TransactionSubmission) throws -> TransactionRecord {
         guard let index = state.transactions.firstIndex(where: { $0.id == id }) else {
             throw StoreError.notFound("Transaction #\(id) not found")
@@ -503,6 +580,11 @@ actor LocalBudgetStore {
             state.incomeSchedules[idx].isCompleted = false
             state.incomeSchedules[idx].lastExecuted = nil
         }
+        // Re-enable all transfer schedules for execution
+        for idx in state.transferSchedules.indices {
+            state.transferSchedules[idx].isCompleted = false
+            state.transferSchedules[idx].lastExecuted = nil
+        }
         // Track last reset timestamp
         state.lastResetAt = LocalBudgetStore.isoFormatter.string(from: Date())
         try persist()
@@ -626,6 +708,83 @@ actor LocalBudgetStore {
         }
     }
 
+    private func applyTransfer(schedule: TransferSchedule) throws {
+        guard let fromIndex = state.accounts.firstIndex(where: { $0.id == schedule.fromAccountId }) else {
+            throw StoreError.notFound("Account #\(schedule.fromAccountId) not found")
+        }
+        guard let toIndex = state.accounts.firstIndex(where: { $0.id == schedule.toAccountId }) else {
+            throw StoreError.notFound("Account #\(schedule.toAccountId) not found")
+        }
+        if fromIndex == toIndex {
+            // Intra-account: only adjust pot if provided; otherwise invalid
+            if let potName = schedule.toPotName, !potName.isEmpty {
+                var account = state.accounts[fromIndex]
+                // Require sufficient funds in the source account even for intra-account to pot
+                if account.balance < schedule.amount {
+                    throw StoreError.invalidOperation("Insufficient funds in source account")
+                }
+                guard var pots = account.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
+                    throw StoreError.notFound("Pot \(potName) not found")
+                }
+                var pot = pots[potIndex]
+                pot.balance += schedule.amount
+                pots[potIndex] = pot
+                account.pots = pots
+                state.accounts[fromIndex] = account
+            } else {
+                throw StoreError.invalidOperation("Source and destination are the same. Choose a pot or a different account.")
+            }
+            // Record activity transaction (same-account to pot)
+            let record = TransactionRecord(
+                id: state.nextTransactionId,
+                name: schedule.description,
+                vendor: schedule.description,
+                amount: schedule.amount,
+                date: LocalBudgetStore.isoFormatter.string(from: Date()),
+                fromAccountId: schedule.fromAccountId,
+                toAccountId: schedule.toAccountId,
+                toPotName: schedule.toPotName
+            )
+            state.nextTransactionId += 1
+            state.transactions.append(record)
+            return
+        }
+
+        var fromAccount = state.accounts[fromIndex]
+        var toAccount = state.accounts[toIndex]
+
+        fromAccount.balance -= schedule.amount
+        if let potName = schedule.toPotName, !potName.isEmpty {
+            // Deposit into a pot on the destination account
+            guard var pots = toAccount.pots, let potIndex = pots.firstIndex(where: { $0.name == potName }) else {
+                throw StoreError.notFound("Pot \(potName) not found")
+            }
+            var pot = pots[potIndex]
+            pot.balance += schedule.amount
+            pots[potIndex] = pot
+            toAccount.pots = pots
+        } else {
+            toAccount.balance += schedule.amount
+        }
+
+        state.accounts[fromIndex] = fromAccount
+        state.accounts[toIndex] = toAccount
+
+        // Record activity transaction (cross-account or to account)
+        let record = TransactionRecord(
+            id: state.nextTransactionId,
+            name: schedule.description,
+            vendor: schedule.description,
+            amount: schedule.amount,
+            date: LocalBudgetStore.isoFormatter.string(from: Date()),
+            fromAccountId: schedule.fromAccountId,
+            toAccountId: schedule.toAccountId,
+            toPotName: schedule.toPotName
+        )
+        state.nextTransactionId += 1
+        state.transactions.append(record)
+    }
+
     private func mutateAccount(id: Int, _ transform: (inout Account) throws -> Void) throws {
         guard let index = state.accounts.firstIndex(where: { $0.id == id }) else {
             throw StoreError.notFound("Account #\(id) not found")
@@ -725,6 +884,7 @@ actor LocalBudgetStore {
 private struct BudgetState: Codable {
     var accounts: [Account]
     var incomeSchedules: [IncomeSchedule]
+    var transferSchedules: [TransferSchedule]
     var transactions: [TransactionRecord]
     var targets: [TargetRecord]
     var lastResetAt: String?
@@ -736,10 +896,12 @@ private struct BudgetState: Codable {
     var nextTargetId: Int
     var nextScheduledPaymentId: Int
     var nextIncomeScheduleId: Int
+    var nextTransferScheduleId: Int
 
     init(
         accounts: [Account],
         incomeSchedules: [IncomeSchedule],
+        transferSchedules: [TransferSchedule],
         transactions: [TransactionRecord],
         targets: [TargetRecord],
         lastResetAt: String? = nil,
@@ -750,10 +912,12 @@ private struct BudgetState: Codable {
         nextTransactionId: Int,
         nextTargetId: Int,
         nextScheduledPaymentId: Int,
-        nextIncomeScheduleId: Int
+        nextIncomeScheduleId: Int,
+        nextTransferScheduleId: Int
     ) {
         self.accounts = accounts
         self.incomeSchedules = incomeSchedules
+        self.transferSchedules = transferSchedules
         self.transactions = transactions
         self.targets = targets
         self.lastResetAt = lastResetAt
@@ -765,6 +929,7 @@ private struct BudgetState: Codable {
         self.nextTargetId = nextTargetId
         self.nextScheduledPaymentId = nextScheduledPaymentId
         self.nextIncomeScheduleId = nextIncomeScheduleId
+        self.nextTransferScheduleId = nextTransferScheduleId
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -781,6 +946,8 @@ private struct BudgetState: Codable {
         case nextTargetId
         case nextScheduledPaymentId
         case nextIncomeScheduleId
+        case transferSchedules = "transfer_schedules"
+        case nextTransferScheduleId
     }
 
     private enum LegacyKeys: String, CodingKey {
@@ -797,12 +964,15 @@ private struct BudgetState: Codable {
         case nextTargetId
         case nextScheduledPaymentId
         case nextIncomeScheduleId
+        case transferSchedules
+        case nextTransferScheduleId
     }
 
     init(from decoder: Decoder) throws {
         if let container = try? decoder.container(keyedBy: CodingKeys.self) {
             accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
             incomeSchedules = try container.decodeIfPresent([IncomeSchedule].self, forKey: .incomeSchedules) ?? []
+            transferSchedules = try container.decodeIfPresent([TransferSchedule].self, forKey: .transferSchedules) ?? []
             transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
             targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
             lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
@@ -814,12 +984,14 @@ private struct BudgetState: Codable {
             nextTargetId = try container.decodeIfPresent(Int.self, forKey: .nextTargetId) ?? 1
             nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
             nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
+            nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
             return
         }
 
         let container = try decoder.container(keyedBy: LegacyKeys.self)
         accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
         incomeSchedules = try container.decodeIfPresent([IncomeSchedule].self, forKey: .incomeSchedules) ?? []
+        transferSchedules = try container.decodeIfPresent([TransferSchedule].self, forKey: .transferSchedules) ?? []
         transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
         targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
         lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
@@ -831,6 +1003,7 @@ private struct BudgetState: Codable {
         nextTargetId = try container.decodeIfPresent(Int.self, forKey: .nextTargetId) ?? 1
         nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
         nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
+        nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
     }
 
     func normalized() -> BudgetState {
@@ -864,6 +1037,9 @@ private struct BudgetState: Codable {
         let incomeScheduleMax = incomeSchedules.map { $0.id }.max() ?? 0
         normalizedState.nextIncomeScheduleId = max(nextIncomeScheduleId, incomeScheduleMax + 1)
 
+        let transferScheduleMax = transferSchedules.map { $0.id }.max() ?? 0
+        normalizedState.nextTransferScheduleId = max(nextTransferScheduleId, transferScheduleMax + 1)
+
         let targetMax = targets.map { $0.id }.max() ?? 0
         normalizedState.nextTargetId = max(nextTargetId, targetMax + 1)
 
@@ -874,6 +1050,7 @@ private struct BudgetState: Codable {
         BudgetState(
             accounts: [],
             incomeSchedules: [],
+            transferSchedules: [],
             transactions: [],
             targets: [],
             lastResetAt: nil,
@@ -884,7 +1061,8 @@ private struct BudgetState: Codable {
             nextTransactionId: 1,
             nextTargetId: 1,
             nextScheduledPaymentId: 1,
-            nextIncomeScheduleId: 1
+            nextIncomeScheduleId: 1,
+            nextTransferScheduleId: 1
         )
     }
 
@@ -992,6 +1170,7 @@ private struct BudgetState: Codable {
         return BudgetState(
             accounts: [personalAccount, householdAccount, savingsAccount],
             incomeSchedules: [incomeSchedule],
+            transferSchedules: [],
             transactions: [],
             targets: [],
             lastResetAt: nil,
@@ -1002,7 +1181,8 @@ private struct BudgetState: Codable {
             nextTransactionId: 1,
             nextTargetId: 1,
             nextScheduledPaymentId: 4,
-            nextIncomeScheduleId: 2
+            nextIncomeScheduleId: 2,
+            nextTransferScheduleId: 1
         )
     }
 }

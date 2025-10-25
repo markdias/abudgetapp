@@ -306,6 +306,35 @@ public struct IncomeSchedule: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - Transfer Schedule Models
+public struct TransferSchedule: Identifiable, Codable, Hashable {
+    public let id: Int
+    public let fromAccountId: Int
+    public let toAccountId: Int
+    public let toPotName: String?
+    public let amount: Double
+    public let description: String
+    public let isActive: Bool
+    public var isCompleted: Bool
+    public var lastExecuted: String?
+
+    public init(id: Int, fromAccountId: Int, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String,
+                isActive: Bool, isCompleted: Bool, lastExecuted: String? = nil) {
+        self.id = id
+        self.fromAccountId = fromAccountId
+        self.toAccountId = toAccountId
+        self.toPotName = toPotName
+        self.amount = amount
+        self.description = description
+        self.isActive = isActive
+        self.isCompleted = isCompleted
+        self.lastExecuted = lastExecuted
+    }
+
+    public static func == (lhs: TransferSchedule, rhs: TransferSchedule) -> Bool { lhs.id == rhs.id }
+    public func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 // MARK: - Submission Types
 public struct AccountSubmission: Codable {
     public let name: String
@@ -445,5 +474,21 @@ public struct IncomeScheduleSubmission: Codable {
         self.amount = amount
         self.description = description
         self.company = company
+    }
+}
+
+public struct TransferScheduleSubmission: Codable {
+    public let fromAccountId: Int
+    public let toAccountId: Int
+    public var toPotName: String?
+    public let amount: Double
+    public let description: String
+
+    public init(fromAccountId: Int, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String) {
+        self.fromAccountId = fromAccountId
+        self.toAccountId = toAccountId
+        self.toPotName = toPotName
+        self.amount = amount
+        self.description = description
     }
 }
