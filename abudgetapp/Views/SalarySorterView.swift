@@ -12,12 +12,11 @@ struct SalarySorterView: View {
     }
     private var incomeTotal: Double { pendingIncomes.reduce(0) { $0 + $1.amount } }
 
-    // Collapsible state
+    // Collapsible state and grouped accounts
     @State private var expandedBudgetAccounts: Set<Int> = []
     @State private var expandedMainAccounts: Set<Int> = []
     @State private var expandedPotKeys: Set<String> = [] // key: "acct-<id>-pot-<name>"
 
-    // Accounts that have any budgets or inbound transactions
     private var destinationAccounts: [Account] {
         accountsStore.accounts.filter { account in
             let hasBudgets = accountsStore.targets.contains { $0.accountId == account.id }
@@ -26,7 +25,6 @@ struct SalarySorterView: View {
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    // Totals across all accounts for remaining calculation
     private var transfersTotal: Double {
         destinationAccounts.reduce(0) { acc, account in
             acc + accountPreviewTotal(account)
@@ -82,18 +80,21 @@ struct SalarySorterView: View {
                     .foregroundColor(.green)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            if pendingIncomes.count == 1, let first = pendingIncomes.first {
-                Text(first.company)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if pendingIncomes.count > 1 {
-                Text("Multiple sources (\(pendingIncomes.count))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if pendingIncomes.isEmpty {
+                Text("No incomes").font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("No pending incomes")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(pendingIncomes, id: \.id) { inc in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(inc.description).font(.caption)
+                                Text(inc.company).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(formatCurrency(inc.amount)).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
         }
         .padding(12)
@@ -102,14 +103,23 @@ struct SalarySorterView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
         .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 2)
     }
-
     private func destinationGroup(for account: Account) -> some View {
         // Build preview for this account
         let budgets = accountsStore.targets.filter { $0.accountId == account.id }
         let txToThis = accountsStore.transactions.filter { $0.toAccountId == account.id }
-        let potMap = Dictionary(grouping: txToThis.filter { !($0.toPotName ?? "").isEmpty }, by: { $0.toPotName ?? "" })
-        let mainTx = txToThis.filter { ($0.toPotName ?? "").isEmpty }
-        let groupTotal = budgets.reduce(0) { $0 + $1.amount } + potMap.values.reduce(0) { $0 + $1.reduce(0) { $0 + $1.amount } } + mainTx.reduce(0) { $0 + $1.amount }
+        // Split external vs internal transfers
+        // Internal = scheduled pot-to-pot (or pot-to-main) within the same account; these are rebalancing and should not be counted.
+        let internalSchedules = transferStore.schedules.filter { s in
+            s.isActive && !s.isCompleted && s.fromAccountId == account.id && s.toAccountId == account.id
+        }
+        let externalTx = txToThis.filter { ($0.fromAccountId ?? -1) != account.id }
+        let potMap = Dictionary(grouping: externalTx.filter { !($0.toPotName ?? "").isEmpty }, by: { $0.toPotName ?? "" })
+        let mainTx = externalTx.filter { ($0.toPotName ?? "").isEmpty }
+        // Totals exclude internal moves to avoid double-counting
+        let groupTotal = budgets.reduce(0) { $0 + $1.amount }
+            + potMap.values.reduce(0) { $0 + $1.reduce(0) { $0 + $1.amount } }
+            + mainTx.reduce(0) { $0 + $1.amount }
+
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(account.name)
@@ -163,7 +173,21 @@ struct SalarySorterView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(items, id: \.id) { r in
                                 let title = r.name.isEmpty ? r.vendor : r.name
-                                HStack { Text(title).font(.caption); Spacer(); Text(formatCurrency(r.amount)).font(.caption).foregroundStyle(.secondary) }
+                                let method = r.paymentType ?? ""
+                                HStack {
+                                    Text(title).font(.caption)
+                                    if !method.isEmpty {
+                                        Text(method == "direct_debit" ? "DD" : "CARD")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(method == "direct_debit" ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
+                                            .foregroundColor(method == "direct_debit" ? .purple : .secondary)
+                                            .clipShape(Capsule())
+                                    }
+                                    Spacer()
+                                    Text(formatCurrency(r.amount)).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -186,6 +210,30 @@ struct SalarySorterView: View {
                             ForEach(mainTx, id: \.id) { r in
                                 let title = r.name.isEmpty ? r.vendor : r.name
                                 HStack { Text(title).font(.caption); Spacer(); Text(formatCurrency(r.amount)).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                    }
+                }
+
+                // Internal transfers (shown but not counted; highlighted)
+                if !internalSchedules.isEmpty {
+                    HStack {
+                        Text("Internal Transfers").font(.caption).fontWeight(.semibold)
+                        Spacer()
+                        Text(formatCurrency(internalSchedules.reduce(0) { $0 + $1.amount }))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .background(Color.yellow.opacity(0.2))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(internalSchedules, id: \.id) { s in
+                            HStack {
+                                let fromPot = s.fromPotName ?? "Account"
+                                let toPot = s.toPotName ?? "Account"
+                                Text("\(fromPot) → \(toPot)").font(.caption)
+                                Spacer()
+                                Text(formatCurrency(s.amount)).font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -228,8 +276,10 @@ struct SalarySorterView: View {
     private func accountPreviewTotal(_ account: Account) -> Double {
         let budgets = accountsStore.targets.filter { $0.accountId == account.id }.reduce(0) { $0 + $1.amount }
         let txToThis = accountsStore.transactions.filter { $0.toAccountId == account.id }
-        let pots = txToThis.filter { !($0.toPotName ?? "").isEmpty }.reduce(0) { $0 + $1.amount }
-        let main = txToThis.filter { ($0.toPotName ?? "").isEmpty }.reduce(0) { $0 + $1.amount }
+        // Exclude internal (from same account) so pot->pot moves are not double-counted
+        let externalTx = txToThis.filter { ($0.fromAccountId ?? -1) != account.id }
+        let pots = externalTx.filter { !($0.toPotName ?? "").isEmpty }.reduce(0) { $0 + $1.amount }
+        let main = externalTx.filter { ($0.toPotName ?? "").isEmpty }.reduce(0) { $0 + $1.amount }
         return budgets + pots + main
     }
 }

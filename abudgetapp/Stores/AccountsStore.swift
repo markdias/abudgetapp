@@ -133,8 +133,9 @@ final class AccountsStore: ObservableObject {
 
     func resetBalances() async {
         do {
-            let response = try await store.resetBalances()
-            accounts = response.accounts
+            _ = try await store.resetBalances()
+            // Reload full state so all dependent views (activities, pots) refresh immediately
+            await loadAccounts()
             statusMessage = StatusMessage(title: "Balances Reset", message: "Accounts have been reset", kind: .warning)
         } catch let error as LocalBudgetStore.StoreError {
             let dataError = error.asBudgetDataError

@@ -169,8 +169,9 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     public let fromAccountId: Int?
     public let toAccountId: Int
     public let toPotName: String?
+    public let paymentType: String? // "direct_debit" or "card"
 
-    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil) {
+    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil, paymentType: String? = nil) {
         self.id = id
         self.name = name
         self.vendor = vendor
@@ -179,6 +180,7 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         self.fromAccountId = fromAccountId
         self.toAccountId = toAccountId
         self.toPotName = toPotName
+        self.paymentType = paymentType
     }
 
     public static func == (lhs: TransactionRecord, rhs: TransactionRecord) -> Bool {
@@ -416,8 +418,9 @@ public struct TransactionSubmission: Codable {
     public let fromAccountId: Int?
     public let toAccountId: Int
     public var toPotName: String?
+    public var paymentType: String?
 
-    public init(name: String, vendor: String, amount: Double, date: String? = nil, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil) {
+    public init(name: String, vendor: String, amount: Double, date: String? = nil, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil, paymentType: String? = nil) {
         self.name = name
         self.vendor = vendor
         self.amount = amount
@@ -425,6 +428,7 @@ public struct TransactionSubmission: Codable {
         self.fromAccountId = fromAccountId
         self.toAccountId = toAccountId
         self.toPotName = toPotName
+        self.paymentType = paymentType
     }
 }
 

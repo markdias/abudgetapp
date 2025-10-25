@@ -85,6 +85,7 @@ struct HomeView: View {
                     PotsPanelSection(
                         accounts: accountsStore.accounts,
                         potsByAccount: potsStore.potsByAccount,
+                        selectedAccountId: selectedAccountId,
                         onTapPot: { account, pot in
                             selectedPotContext = PotEditContext(account: account, pot: pot)
                         },
@@ -399,7 +400,7 @@ struct ActivitiesPanelSection: View {
             list.append(Item(
                 kind: .transaction,
                 title: r.name,
-                company: r.vendor,
+                company: r.paymentType == nil ? r.vendor : (r.paymentType == "direct_debit" ? "Direct Debit" : "Card Payment"),
                 amount: r.amount,
                 dateString: r.date,
                 accountName: acctName,
@@ -1571,12 +1572,17 @@ private struct PotEditContext: Identifiable, Hashable {
 private struct PotsPanelSection: View {
     let accounts: [Account]
     let potsByAccount: [Int: [Pot]]
+    var selectedAccountId: Int? = nil
     var onTapPot: (Account, Pot) -> Void = { _, _ in }
     var onDeletePot: (Account, Pot) -> Void = { _, _ in }
 
     private var allPots: [(account: Account, pot: Pot)] {
         var items: [(account: Account, pot: Pot)] = []
-        for account in accounts {
+        let sourceAccounts: [Account] = {
+            if let id = selectedAccountId, let acct = accounts.first(where: { $0.id == id }) { return [acct] }
+            return accounts
+        }()
+        for account in sourceAccounts {
             let sourcePots = (account.pots ?? potsByAccount[account.id] ?? [])
             for pot in sourcePots {
                 items.append((account: account, pot: pot))

@@ -46,6 +46,8 @@ struct TransfersView: View {
                         guard !isResetting else { return }
                         isResetting = true
                         await accountsStore.resetBalances()
+                        // Reload accounts to ensure all dependent views (e.g., Activities, Pots) refresh immediately
+                        await accountsStore.loadAccounts()
                         await incomeSchedulesStore.load()
                         await transferSchedulesStore.load()
                         isResetting = false

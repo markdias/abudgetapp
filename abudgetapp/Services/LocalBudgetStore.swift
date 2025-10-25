@@ -330,7 +330,8 @@ actor LocalBudgetStore {
             date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
             fromAccountId: submission.fromAccountId,
             toAccountId: submission.toAccountId,
-            toPotName: submission.toPotName
+            toPotName: submission.toPotName,
+            paymentType: submission.paymentType
         )
         state.nextTransactionId += 1
         state.transactions.append(record)
@@ -355,6 +356,7 @@ actor LocalBudgetStore {
         let schedule = TransferSchedule(
             id: state.nextTransferScheduleId,
             fromAccountId: submission.fromAccountId,
+            fromPotName: submission.fromPotName,
             toAccountId: submission.toAccountId,
             toPotName: submission.toPotName,
             amount: submission.amount,
@@ -424,7 +426,8 @@ actor LocalBudgetStore {
             date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
             fromAccountId: submission.fromAccountId,
             toAccountId: submission.toAccountId,
-            toPotName: submission.toPotName
+            toPotName: submission.toPotName,
+            paymentType: submission.paymentType
         )
 
         state.transactions[index] = updated
