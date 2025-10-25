@@ -62,7 +62,7 @@ struct SettingsView: View {
 
                 Section("About") {
                     VStack(alignment: .leading) {
-                        Text("MyBudget")
+                        Text("The Budget App")
                             .font(.headline)
                         Text("Version 1.0")
                             .font(.caption)
