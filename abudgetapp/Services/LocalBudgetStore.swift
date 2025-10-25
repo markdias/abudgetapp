@@ -292,7 +292,7 @@ actor LocalBudgetStore {
         guard var incomes = account.incomes, let incomeIndex = incomes.firstIndex(where: { $0.id == incomeId }) else {
             throw StoreError.notFound("Income #\(incomeId) not found")
         }
-        let income = incomes.remove(at: incomeIndex)
+        _ = incomes.remove(at: incomeIndex)
         account.incomes = incomes
         state.accounts[index] = account
         try persist()

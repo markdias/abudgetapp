@@ -228,7 +228,9 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView()
-        .environmentObject(AccountsStore())
-        .environmentObject(DiagnosticsStore(accountsStore: AccountsStore()))
+    let accounts = AccountsStore()
+    let diagnostics = DiagnosticsStore(accountsStore: accounts)
+    return SettingsView()
+        .environmentObject(accounts)
+        .environmentObject(diagnostics)
 }
