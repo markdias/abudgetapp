@@ -53,28 +53,6 @@ struct SalarySorterView: View {
                     }
                     Spacer(minLength: 8)
                     remainingFooter
-
-                    NavigationLink {
-                        CompletedTransfersScreen()
-                    } label: {
-                        Text("Completed Transfers")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .foregroundStyle(.white)
-                            .background(Color.gray.opacity(hasCompletedTransfers ? 1.0 : 0.4))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .shadow(color: .gray.opacity(0.18), radius: 6, x: 0, y: 3)
-                    }
-                    .disabled(!hasCompletedTransfers)
-
-                    // Debug footer: show source filename for clarity
-                    Text("File: abudgetapp/Views/SalarySorterView.swift")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-
                 }
                 .padding()
                 .frame(maxWidth: 520)
@@ -128,6 +106,7 @@ struct SalarySorterView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
         .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 2)
     }
+    
     private func destinationGroup(for account: Account) -> some View {
         // Build preview from scheduled transfers (pending, not executed)
         // Include both pending and executed (as long as schedule is active)
@@ -162,47 +141,77 @@ struct SalarySorterView: View {
                 ForEach(potNames, id: \.self) { potName in
                     let items = potMap[potName] ?? []
                     let key = "acct-\(account.id)-pot-\(potName)"
-                    HStack {
-                        Text(potName).font(.caption).fontWeight(.semibold)
-                        Spacer()
-                        Text(formatCurrency(items.reduce(0) { $0 + $1.amount })).font(.caption).foregroundStyle(.secondary)
-                        Button { togglePot(key) } label: { Image(systemName: expandedPotKeys.contains(key) ? "chevron.up" : "chevron.down").foregroundStyle(.secondary) }
-                    }
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    if expandedPotKeys.contains(key) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(items, id: \.id) { s in
-                                HStack {
-                                    Text(s.description).font(.caption)
-                                    Spacer()
-                                    Text(formatCurrency(s.amount)).font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(potName).font(.caption).fontWeight(.semibold)
+                            Spacer()
+                            Text(formatCurrency(items.reduce(0) { $0 + $1.amount })).font(.caption).foregroundStyle(.secondary)
+                            Button { togglePot(key) } label: { Image(systemName: expandedPotKeys.contains(key) ? "chevron.up" : "chevron.down").foregroundStyle(.secondary) }
+                        }
+                        
+                        // Show transactions and budgets when expanded
+                        if expandedPotKeys.contains(key) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(entriesForDestination(accountId: account.id, potName: potName), id: \.id) { entry in
+                                    HStack {
+                                        Text(entry.title).font(.caption2)
+                                        if entry.kind == .transaction, let method = entry.method, !method.isEmpty {
+                                            Text(method == "direct_debit" ? "DD" : "CARD")
+                                                .font(.caption2)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 2)
+                                                .background(method == "direct_debit" ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
+                                                .foregroundColor(method == "direct_debit" ? .purple : .secondary)
+                                                .clipShape(Capsule())
+                                        }
+                                        Spacer()
+                                        Text(formatCurrency(entry.amount)).font(.caption2).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
                     }
+                    .padding(10)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
 
                 // Main account transfers (collapsible)
                 if !mainTransfers.isEmpty {
                     let key = account.id
-                    HStack {
-                        Text("Main Account").font(.caption).fontWeight(.semibold)
-                        Spacer()
-                        Text(formatCurrency(mainTransfers.reduce(0) { $0 + $1.amount })).font(.caption).foregroundStyle(.secondary)
-                        Button { toggleMain(key) } label: { Image(systemName: expandedMainAccounts.contains(key) ? "chevron.up" : "chevron.down").foregroundStyle(.secondary) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Main Account").font(.caption).fontWeight(.semibold)
+                            Spacer()
+                            Text(formatCurrency(mainTransfers.reduce(0) { $0 + $1.amount })).font(.caption).foregroundStyle(.secondary)
+                            Button { toggleMain(key) } label: { Image(systemName: expandedMainAccounts.contains(key) ? "chevron.up" : "chevron.down").foregroundStyle(.secondary) }
+                        }
+                        
+                        // Show transactions and budgets when expanded
+                        if expandedMainAccounts.contains(key) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(entriesForDestination(accountId: account.id, potName: nil), id: \.id) { entry in
+                                    HStack {
+                                        Text(entry.title).font(.caption2)
+                                        if entry.kind == .transaction, let method = entry.method, !method.isEmpty {
+                                            Text(method == "direct_debit" ? "DD" : "CARD")
+                                                .font(.caption2)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 2)
+                                                .background(method == "direct_debit" ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
+                                                .foregroundColor(method == "direct_debit" ? .purple : .secondary)
+                                                .clipShape(Capsule())
+                                        }
+                                        Spacer()
+                                        Text(formatCurrency(entry.amount)).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
                     }
                     .padding(10)
                     .background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    if expandedMainAccounts.contains(key) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(mainTransfers, id: \.id) { s in
-                                HStack { Text(s.description).font(.caption); Spacer(); Text(formatCurrency(s.amount)).font(.caption).foregroundStyle(.secondary) }
-                            }
-                        }
-                    }
                 }
 
                 // Internal transfers (shown but not counted; highlighted)
@@ -270,7 +279,24 @@ struct SalarySorterView: View {
         return included.reduce(0.0) { $0 + $1.amount }
     }
 
-    // (Transfer flows moved to CompletedTransfersScreen)
+    // MARK: - Helper types and functions for entries
+    private enum EntryKind { case transaction, budget }
+    private struct DestEntry: Identifiable { let id: String; let title: String; let amount: Double; let kind: EntryKind; let method: String? }
+
+    @MainActor
+    private func entriesForDestination(accountId: Int, potName: String?) -> [DestEntry] {
+        let potKey = potName ?? ""
+        let filteredTx = accountsStore.transactions.filter { $0.toAccountId == accountId && ($0.toPotName ?? "") == potKey }
+        let tx: [DestEntry] = filteredTx.map { r in
+            let title = r.name.isEmpty ? r.vendor : r.name
+            return DestEntry(id: "t-\(r.id)", title: title, amount: r.amount, kind: .transaction, method: r.paymentType)
+        }
+        var budgets: [DestEntry] = []
+        if potName == nil {
+            budgets = accountsStore.targets.filter { $0.accountId == accountId }.map { t in DestEntry(id: "b-\(t.id)", title: t.name, amount: t.amount, kind: .budget, method: nil) }
+        }
+        return tx + budgets
+    }
 }
 
 #Preview {
