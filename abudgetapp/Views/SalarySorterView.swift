@@ -156,12 +156,13 @@ struct SalarySorterView: View {
                                     HStack {
                                         Text(entry.title).font(.caption2)
                                         if entry.kind == .transaction, let method = entry.method, !method.isEmpty {
-                                            Text(method == "direct_debit" ? "DD" : "CARD")
+                                            let isCard = method == "card"
+                                            Text(isCard ? "CARD" : "DD")
                                                 .font(.caption2)
                                                 .padding(.horizontal, 4)
                                                 .padding(.vertical, 2)
-                                                .background(method == "direct_debit" ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
-                                                .foregroundColor(method == "direct_debit" ? .purple : .secondary)
+                                                .background((isCard ? Color.purple : Color.blue).opacity(0.15))
+                                                .foregroundColor(isCard ? .purple : .blue)
                                                 .clipShape(Capsule())
                                         }
                                         Spacer()
@@ -194,12 +195,13 @@ struct SalarySorterView: View {
                                     HStack {
                                         Text(entry.title).font(.caption2)
                                         if entry.kind == .transaction, let method = entry.method, !method.isEmpty {
-                                            Text(method == "direct_debit" ? "DD" : "CARD")
+                                            let isCard = method == "card"
+                                            Text(isCard ? "CARD" : "DD")
                                                 .font(.caption2)
                                                 .padding(.horizontal, 4)
                                                 .padding(.vertical, 2)
-                                                .background(method == "direct_debit" ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
-                                                .foregroundColor(method == "direct_debit" ? .purple : .secondary)
+                                                .background((isCard ? Color.purple : Color.blue).opacity(0.15))
+                                                .foregroundColor(isCard ? .purple : .blue)
                                                 .clipShape(Capsule())
                                         }
                                         Spacer()

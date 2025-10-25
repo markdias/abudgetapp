@@ -327,6 +327,7 @@ struct ActivitiesPanelSection: View {
         let dateString: String
         let accountName: String
         let potName: String?
+        let metadata: [String:String]
         // Identity to support edit/delete actions
         let accountId: Int?
         let incomeId: Int?
@@ -381,6 +382,7 @@ struct ActivitiesPanelSection: View {
                     dateString: income.date,
                     accountName: account.name,
                     potName: income.potName,
+                    metadata: [:],
                     accountId: account.id,
                     incomeId: income.id,
                     transactionId: nil,
@@ -397,14 +399,21 @@ struct ActivitiesPanelSection: View {
         for r in txFilter {
             let acctName = accounts.first(where: { $0.id == r.toAccountId })?.name
                 ?? (r.fromAccountId.flatMap { id in accounts.first(where: { $0.id == id })?.name } ?? "Unknown")
+            let typeSuffix: String? = {
+                guard let pt = r.paymentType else { return nil }
+                return pt == "direct_debit" ? "Direct Debit" : "Card"
+            }()
             list.append(Item(
                 kind: .transaction,
                 title: r.name,
-                company: r.paymentType == nil ? r.vendor : (r.paymentType == "direct_debit" ? "Direct Debit" : "Card Payment"),
+                company: typeSuffix != nil ? "\(r.vendor) · \(typeSuffix!)" : r.vendor,
                 amount: r.amount,
                 dateString: r.date,
                 accountName: acctName,
                 potName: r.toPotName,
+                metadata: [
+                    "paymentType": r.paymentType ?? ""
+                ],
                 accountId: r.toAccountId,
                 incomeId: nil,
                 transactionId: r.id,
@@ -427,6 +436,7 @@ struct ActivitiesPanelSection: View {
                 dateString: t.date,
                 accountName: acctName,
                 potName: nil,
+                metadata: [:],
                 accountId: t.accountId,
                 incomeId: nil,
                 transactionId: nil,
@@ -629,9 +639,15 @@ private struct ActivityListItemRow: View {
     private var isTransaction: Bool { item.kind == .transaction }
     private var color: Color {
         switch item.kind {
-        case .income: return .green.opacity(0.85)
-        case .transaction: return .blue.opacity(0.85)
-        case .target: return .orange.opacity(0.85)
+        case .income:
+            return .green.opacity(0.85)
+        case .transaction:
+            // Card vs Direct Debit coloring: purple for card, blue for DD
+            if let t = item.metadata["paymentType"], t == "card" { return .purple.opacity(0.85) }
+            if let t = item.metadata["paymentType"], t == "direct_debit" { return .blue.opacity(0.85) }
+            return .blue.opacity(0.85)
+        case .target:
+            return .orange.opacity(0.85)
         }
     }
     private var icon: String {
@@ -656,6 +672,7 @@ private struct EditIncomeSheet: View {
     @State private var name: String = ""
     @State private var company: String = ""
     @State private var amount: String = ""
+    @State private var paymentType: String = "direct_debit" // "card" or "direct_debit"
     @State private var dayOfMonth: String = ""
     @State private var selectedPot: String? = nil
 
@@ -745,7 +762,9 @@ private struct EditTransactionSheet: View {
     @State private var name: String = ""
     @State private var vendor: String = ""
     @State private var amount: String = ""
+    @State private var paymentType: String = "direct_debit" // "card" or "direct_debit"
     @State private var dayOfMonth: String = ""
+    @State private var didLoad: Bool = false
 
     private var record: TransactionRecord? { accountsStore.transaction(for: transactionId) }
     private var toAccount: Account? { toAccountId.flatMap { accountsStore.account(for: $0) } }
@@ -776,6 +795,11 @@ private struct EditTransactionSheet: View {
                     }
                 }
                 Section("Details") {
+                    Picker("Payment Type", selection: $paymentType) {
+                        Text("Card").tag("card")
+                        Text("Direct Debit").tag("direct_debit")
+                    }
+                    .pickerStyle(.navigationLink)
                     TextField("Name", text: $name)
                     TextField("Vendor", text: $vendor)
                     TextField("Amount", text: $amount).keyboardType(.decimalPad)
@@ -801,7 +825,7 @@ private struct EditTransactionSheet: View {
                 }
                 .background(.ultraThinMaterial)
             }
-            .onAppear { preload() }
+            .onAppear { if !didLoad { preload(); didLoad = true } }
             .onChange(of: toAccountId) { _, _ in selectedPot = nil }
         }
     }
@@ -813,13 +837,15 @@ private struct EditTransactionSheet: View {
             name = record.name
             vendor = record.vendor
             amount = String(format: "%.2f", record.amount)
+            paymentType = record.paymentType ?? "direct_debit"
+            paymentType = record.paymentType ?? "direct_debit"
             dayOfMonth = record.date
         }
     }
 
     private func save() async {
         guard let toAccountId, let money = Double(amount) else { return }
-        let submission = TransactionSubmission(name: name, vendor: vendor, amount: money, date: dayOfMonth, fromAccountId: nil, toAccountId: toAccountId, toPotName: selectedPot)
+        let submission = TransactionSubmission(name: name, vendor: vendor, amount: money, date: dayOfMonth, fromAccountId: nil, toAccountId: toAccountId, toPotName: selectedPot, paymentType: paymentType)
         await accountsStore.updateTransaction(id: transactionId, submission: submission)
         isPresented = false
     }
@@ -959,6 +985,7 @@ private struct AddTransactionSheet: View {
 
     @State private var toAccountId: Int?
     @State private var potName: String? = nil
+    @State private var paymentType: String = "direct_debit"
     @State private var type: String = ""
     @State private var company: String = ""
     @State private var amount: String = ""
@@ -997,7 +1024,12 @@ private struct AddTransactionSheet: View {
                 }
 
                 Section("Transaction") {
-                    TextField("Type", text: $type)
+                    Picker("Payment Type", selection: $paymentType) {
+                        Text("Card").tag("card")
+                        Text("Direct Debit").tag("direct_debit")
+                    }
+                    .pickerStyle(.navigationLink)
+                    TextField("Name", text: $type)
                     TextField("Company", text: $company)
                     TextField("Value", text: $amount).keyboardType(.decimalPad)
                     TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
@@ -1017,7 +1049,7 @@ private struct AddTransactionSheet: View {
 
     private func save() async {
         guard let toAccountId, let money = Double(amount) else { return }
-        let submission = TransactionSubmission(name: type, vendor: company, amount: abs(money), date: dayOfMonth, fromAccountId: nil, toAccountId: toAccountId, toPotName: potName)
+        let submission = TransactionSubmission(name: type, vendor: company, amount: abs(money), date: dayOfMonth, fromAccountId: nil, toAccountId: toAccountId, toPotName: potName, paymentType: paymentType)
         await accountsStore.addTransaction(submission)
         isPresented = false
     }
@@ -1035,6 +1067,7 @@ private struct AddTargetSheet: View {
     @State private var accountId: Int?
     @State private var name: String = ""
     @State private var amount: String = ""
+    @State private var paymentType: String = "card"
     @State private var dayOfMonth: String = ""
 
     private var canSave: Bool {
@@ -1967,6 +2000,7 @@ private struct TransactionActivityEditorView: View {
     @State private var vendor: String = ""
     @State private var amount: String = ""
     @State private var dayOfMonth: String = ""
+    @State private var didLoad: Bool = false
 
     private var transactionId: Int? {
         if let value = activity.metadata["transactionId"], let id = Int(value) { return id }
@@ -1999,6 +2033,15 @@ private struct TransactionActivityEditorView: View {
                 }
 
                 Section("Details") {
+                    Picker("Payment Type", selection: $paymentType) {
+                        Text("Card").tag("card")
+                        Text("Direct Debit").tag("direct_debit")
+                    }
+                    .pickerStyle(.navigationLink)
+                    // Show current selection as a subtle hint
+                    Text(paymentType == "card" ? "Selected: Card" : "Selected: Direct Debit")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     TextField("Name", text: $name)
                     TextField("Vendor", text: $vendor)
                     TextField("Amount", text: $amount).keyboardType(.decimalPad)
@@ -2013,7 +2056,7 @@ private struct TransactionActivityEditorView: View {
                     Button(role: .destructive) { Task { await deleteItem() } } label: { Text("Delete") }
                 }
             }
-            .onAppear { preload() }
+            .onAppear { if !didLoad { preload(); didLoad = true } }
             .onChange(of: toAccountId) { _, _ in selectedPot = nil }
         }
     }
@@ -2031,6 +2074,7 @@ private struct TransactionActivityEditorView: View {
             name = record.name
             vendor = record.vendor
             amount = String(format: "%.2f", record.amount)
+            paymentType = record.paymentType ?? "card"
             if let day = Int(record.date) {
                 dayOfMonth = String(day)
             } else {
@@ -2041,6 +2085,7 @@ private struct TransactionActivityEditorView: View {
             selectedPot = activity.metadata["potName"].flatMap { $0.isEmpty ? nil : $0 }
             name = activity.title
             vendor = activity.company ?? ""
+            if let company = activity.company, company == "Direct Debit" { paymentType = "direct_debit" } else { paymentType = "direct_debit" }
             amount = String(format: "%.2f", abs(activity.amount))
             dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
         }
@@ -2059,7 +2104,8 @@ private struct TransactionActivityEditorView: View {
             date: dayOfMonth,
             fromAccountId: nil,
             toAccountId: toAccountId,
-            toPotName: selectedPot
+            toPotName: selectedPot,
+            paymentType: paymentType
         )
         await accountsStore.updateTransaction(id: recordId, submission: submission)
         dismiss()
