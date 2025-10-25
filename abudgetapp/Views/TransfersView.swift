@@ -15,8 +15,8 @@ struct TransfersView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     VStack(spacing: 16) {
-                        LargeActionButton(title: "Manage Transfer Schedules", color: .blue) { showingTransferSchedules = true }
-                        LargeActionButton(title: "Manage Income Schedules", color: .green) {
+                        LargeActionButton(title: "Transfer Schedules", color: .blue) { showingTransferSchedules = true }
+                        LargeActionButton(title: "Income Schedules", color: .green) {
                             showingIncomeSchedules = true
                         }
                         LargeActionButton(title: "Salary Sorter", color: .purple) { showingSalarySorter = true }

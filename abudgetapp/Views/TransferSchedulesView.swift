@@ -16,7 +16,7 @@ struct ManageTransferSchedulesView: View {
                 .frame(maxWidth: 420)
                 .padding()
             }
-            .navigationTitle("Manage Transfer Schedules")
+            .navigationTitle("Transfer Schedules")
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } } }
             .task { await transferStore.load() }
             .background(Color(.systemGroupedBackground))
@@ -329,9 +329,7 @@ private struct ExecuteTransferSchedulesScreen: View {
                                     .buttonStyle(.borderedProminent)
                                     .tint(.green)
                                     if let schedule = schedule {
-                                        if !(schedule.isCompleted) && !canExecute {
-                                            Text("Insufficient funds in source account").font(.caption2).foregroundStyle(.red)
-                                        }
+                                        
                                         Button("Delete", role: .destructive) { Task { await transferStore.delete(schedule: schedule) } }
                                             .buttonStyle(.borderedProminent)
                                             .tint(.red)

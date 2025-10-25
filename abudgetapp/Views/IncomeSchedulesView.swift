@@ -30,7 +30,7 @@ struct ManageIncomeSchedulesView: View {
                 .frame(maxWidth: 520)
                 .frame(maxWidth: .infinity)
             }
-            .navigationTitle("Manage Income Schedules")
+            .navigationTitle("Income Schedules")
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } } }
             .task { await incomeStore.load() }
             .background(Color(.systemGroupedBackground))

@@ -25,7 +25,7 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Dashboard (Home)** – Stacked, swipeable account cards with drag-to-reorder, quick actions, search, and an add menu for transactions, expenses, and incomes. Activity rows support inline editing for every entry type, including transactions.
 * **Income Planner** – Board view for managing recurring income schedules with inline execution and status tracking.
 * **Activity Tab** – Full history view with filters that share the same activity source as the dashboard feed.
-* **Transfers** – Dedicated hub for planning transfer schedules, queuing expense-driven account transfers, executing income and transfer runs, resetting balances, and sorting salaries into pots. Manage Transfer Schedules builds a queue of transactions that can be executed later from the Transfers tab.
+* **Transfers** – Dedicated hub for planning transfer schedules, queuing expense-driven account transfers, executing income and transfer runs, resetting balances, and sorting salaries into pots. Transfer Schedules builds a queue of transactions that can be executed later from the Transfers tab.
 * **Budget** – Summaries derived from pots and scheduled payments plus an upcoming payments list.
 * **Settings** – Local storage management (restore sample data, reload, delete-all), card reorder flow, and diagnostics launcher.
 * **Diagnostics** – Developer QA surface that adds/removes sample data, executes income schedules, resets balances, and reports status for each step.
@@ -37,7 +37,7 @@ Budget data is saved locally on the device. A bundled sample dataset seeds the a
 ## Running the App
 
 1. Launch the app to load the bundled sample dataset (or restore it from Settings if you have existing data).
-2. Use the dashboard add menu to create transactions, expenses, incomes, accounts, and pots. Transactions add money to an account (and optional pot) and appear in Manage Transfer Schedules where they can be queued for execution. Expenses redirect funds between accounts (never pots) and always use positive amounts to represent the cash leaving the source account. Incomes can land directly in a pot.
+2. Use the dashboard add menu to create transactions, expenses, incomes, accounts, and pots. Transactions add money to an account (and optional pot) and appear in Transfer Schedules where they can be queued for execution. Expenses redirect funds between accounts (never pots) and always use positive amounts to represent the cash leaving the source account. Incomes can land directly in a pot.
 3. Review or edit any item from the home activity feed or the Activity tab. Swipe actions or detail sheets let you update amounts, day-of-month scheduling, destinations, and associated metadata.
 4. Open the Transfers tab to review or update transfer schedules, execute incomes, reset balances, or run the salary sorter. Use the Settings tab for diagnostics, restoring the sample dataset, and card reordering.
 
