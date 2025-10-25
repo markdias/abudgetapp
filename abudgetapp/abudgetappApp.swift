@@ -6,6 +6,7 @@ struct MyBudgetApp: App {
     @StateObject private var potsStore: PotsStore
     @StateObject private var diagnosticsStore: DiagnosticsStore
     @StateObject private var scheduledPaymentsStore: ScheduledPaymentsStore
+    @StateObject private var incomeSchedulesStore: IncomeSchedulesStore
 
     init() {
         let accounts = AccountsStore()
@@ -13,6 +14,8 @@ struct MyBudgetApp: App {
         _potsStore = StateObject(wrappedValue: PotsStore(accountsStore: accounts))
         _diagnosticsStore = StateObject(wrappedValue: DiagnosticsStore(accountsStore: accounts))
         _scheduledPaymentsStore = StateObject(wrappedValue: ScheduledPaymentsStore(accountsStore: accounts))
+        let incomeStore = IncomeSchedulesStore(accountsStore: accounts)
+        _incomeSchedulesStore = StateObject(wrappedValue: incomeStore)
     }
 
     var body: some Scene {
@@ -22,6 +25,7 @@ struct MyBudgetApp: App {
                 .environmentObject(potsStore)
                 .environmentObject(diagnosticsStore)
                 .environmentObject(scheduledPaymentsStore)
+                .environmentObject(incomeSchedulesStore)
                 .preferredColorScheme(.light)
                 .accentColor(.purple)
                 .task {

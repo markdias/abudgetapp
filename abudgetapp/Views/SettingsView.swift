@@ -77,6 +77,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showingDiagnostics) {
                 DiagnosticsRunnerView(isPresented: $showingDiagnostics)
             }
+            // Removed Manage Income Schedules; now lives under Transfers
             .alert("Delete All Data?", isPresented: $showingDeleteAllConfirm) {
                 Button("Delete", role: .destructive) { Task { await deleteAllData() } }
                 Button("Cancel", role: .cancel) { }
