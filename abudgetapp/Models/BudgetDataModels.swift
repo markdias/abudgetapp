@@ -169,8 +169,9 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     public let fromAccountId: Int?
     public let toAccountId: Int
     public let toPotName: String?
+    public let paymentType: String? // "direct_debit" or "card"
 
-    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil) {
+    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil, paymentType: String? = nil) {
         self.id = id
         self.name = name
         self.vendor = vendor
@@ -179,6 +180,7 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         self.fromAccountId = fromAccountId
         self.toAccountId = toAccountId
         self.toPotName = toPotName
+        self.paymentType = paymentType
     }
 
     public static func == (lhs: TransactionRecord, rhs: TransactionRecord) -> Bool {
@@ -306,6 +308,37 @@ public struct IncomeSchedule: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - Transfer Schedule Models
+public struct TransferSchedule: Identifiable, Codable, Hashable {
+    public let id: Int
+    public let fromAccountId: Int
+    public let fromPotName: String?
+    public let toAccountId: Int
+    public let toPotName: String?
+    public let amount: Double
+    public let description: String
+    public let isActive: Bool
+    public var isCompleted: Bool
+    public var lastExecuted: String?
+
+    public init(id: Int, fromAccountId: Int, fromPotName: String? = nil, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String,
+                isActive: Bool, isCompleted: Bool, lastExecuted: String? = nil) {
+        self.id = id
+        self.fromAccountId = fromAccountId
+        self.fromPotName = fromPotName
+        self.toAccountId = toAccountId
+        self.toPotName = toPotName
+        self.amount = amount
+        self.description = description
+        self.isActive = isActive
+        self.isCompleted = isCompleted
+        self.lastExecuted = lastExecuted
+    }
+
+    public static func == (lhs: TransferSchedule, rhs: TransferSchedule) -> Bool { lhs.id == rhs.id }
+    public func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 // MARK: - Submission Types
 public struct AccountSubmission: Codable {
     public let name: String
@@ -385,8 +418,9 @@ public struct TransactionSubmission: Codable {
     public let fromAccountId: Int?
     public let toAccountId: Int
     public var toPotName: String?
+    public var paymentType: String?
 
-    public init(name: String, vendor: String, amount: Double, date: String? = nil, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil) {
+    public init(name: String, vendor: String, amount: Double, date: String? = nil, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil, paymentType: String? = nil) {
         self.name = name
         self.vendor = vendor
         self.amount = amount
@@ -394,6 +428,7 @@ public struct TransactionSubmission: Codable {
         self.fromAccountId = fromAccountId
         self.toAccountId = toAccountId
         self.toPotName = toPotName
+        self.paymentType = paymentType
     }
 }
 
@@ -445,5 +480,23 @@ public struct IncomeScheduleSubmission: Codable {
         self.amount = amount
         self.description = description
         self.company = company
+    }
+}
+
+public struct TransferScheduleSubmission: Codable {
+    public let fromAccountId: Int
+    public var fromPotName: String?
+    public let toAccountId: Int
+    public var toPotName: String?
+    public let amount: Double
+    public let description: String
+
+    public init(fromAccountId: Int, fromPotName: String? = nil, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String) {
+        self.fromAccountId = fromAccountId
+        self.fromPotName = fromPotName
+        self.toAccountId = toAccountId
+        self.toPotName = toPotName
+        self.amount = amount
+        self.description = description
     }
 }

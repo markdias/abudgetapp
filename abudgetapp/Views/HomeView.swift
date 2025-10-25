@@ -85,6 +85,7 @@ struct HomeView: View {
                     PotsPanelSection(
                         accounts: accountsStore.accounts,
                         potsByAccount: potsStore.potsByAccount,
+                        selectedAccountId: selectedAccountId,
                         onTapPot: { account, pot in
                             selectedPotContext = PotEditContext(account: account, pot: pot)
                         },
@@ -96,7 +97,7 @@ struct HomeView: View {
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
                         onDiagnostics: { showingDiagnostics = true },
-                        onSettings: { selectedTab = 2 }
+                        onSettings: { selectedTab = 3 }
                     )
 
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
@@ -314,6 +315,7 @@ private struct StackedAccountDeck: View {
 // MARK: - Activities Panel (Combined)
 
 struct ActivitiesPanelSection: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
     enum Kind { case income, transaction, target }
 
     struct Item: Identifiable {
@@ -325,6 +327,11 @@ struct ActivitiesPanelSection: View {
         let dateString: String
         let accountName: String
         let potName: String?
+        // Identity to support edit/delete actions
+        let accountId: Int?
+        let incomeId: Int?
+        let transactionId: Int?
+        let targetId: Int?
     }
 
     let accounts: [Account]
@@ -333,10 +340,20 @@ struct ActivitiesPanelSection: View {
     let selectedAccountId: Int?
     // Optional limit override. If nil, uses settings value. If provided, uses this limit.
     var limit: Int? = nil
+    // Optional pot filter (only applied on Activities screen usage)
+    var selectedPotName: String? = nil
     @AppStorage("activitiesMaxItems") private var maxItemsSetting: Int = 6
 
     @State private var filter: Filter = .all
     @AppStorage("activitiesSortOrder") private var sortOrderRaw: String = "day"
+
+    // Edit sheet state
+    @State private var editingIncome: (accountId: Int, incomeId: Int)? = nil
+    @State private var editingTransactionId: Int? = nil
+    @State private var editingTargetId: Int? = nil
+    @State private var showEditIncome = false
+    @State private var showEditTransaction = false
+    @State private var showEditTarget = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -363,7 +380,11 @@ struct ActivitiesPanelSection: View {
                     amount: income.amount,
                     dateString: income.date,
                     accountName: account.name,
-                    potName: income.potName
+                    potName: income.potName,
+                    accountId: account.id,
+                    incomeId: income.id,
+                    transactionId: nil,
+                    targetId: nil
                 ))
             }
         }
@@ -379,11 +400,15 @@ struct ActivitiesPanelSection: View {
             list.append(Item(
                 kind: .transaction,
                 title: r.name,
-                company: r.vendor,
+                company: r.paymentType == nil ? r.vendor : (r.paymentType == "direct_debit" ? "Direct Debit" : "Card Payment"),
                 amount: r.amount,
                 dateString: r.date,
                 accountName: acctName,
-                potName: r.toPotName
+                potName: r.toPotName,
+                accountId: r.toAccountId,
+                incomeId: nil,
+                transactionId: r.id,
+                targetId: nil
             ))
         }
 
@@ -401,18 +426,29 @@ struct ActivitiesPanelSection: View {
                 amount: t.amount,
                 dateString: t.date,
                 accountName: acctName,
-                potName: nil
+                potName: nil,
+                accountId: t.accountId,
+                incomeId: nil,
+                transactionId: nil,
+                targetId: t.id
             ))
         }
 
-        // Apply filter
-        let filtered: [Item] = {
+        // Apply type filter
+        let filteredByType: [Item] = {
             switch filter {
             case .all: return list
             case .income: return list.filter { $0.kind == .income }
             case .transaction: return list.filter { $0.kind == .transaction }
             case .target: return list.filter { $0.kind == .target }
             }
+        }()
+        // Apply pot filter if provided
+        let filtered: [Item] = {
+            if let selectedPotName, !selectedPotName.isEmpty {
+                return filteredByType.filter { $0.potName == selectedPotName }
+            }
+            return filteredByType
         }()
 
         // Apply sort from settings
@@ -469,6 +505,26 @@ struct ActivitiesPanelSection: View {
                 VStack(spacing: 10) {
                     ForEach(itemsToShow) { item in
                         ActivityListItemRow(item: item)
+                            .contextMenu {
+                                Button {
+                                    handleEdit(item)
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) {
+                                    handleDelete(item)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) { handleDelete(item) } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                Button { handleEdit(item) } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }.tint(.blue)
+                            }
                     }
                 }
             }
@@ -477,6 +533,22 @@ struct ActivitiesPanelSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Edit sheets
+        .sheet(isPresented: $showEditIncome) {
+            if let ctx = editingIncome {
+                EditIncomeSheet(accountId: ctx.accountId, incomeId: ctx.incomeId, isPresented: $showEditIncome)
+            }
+        }
+        .sheet(isPresented: $showEditTransaction) {
+            if let id = editingTransactionId {
+                EditTransactionSheet(transactionId: id, isPresented: $showEditTransaction)
+            }
+        }
+        .sheet(isPresented: $showEditTarget) {
+            if let id = editingTargetId {
+                EditTargetSheet(targetId: id, isPresented: $showEditTarget)
+            }
+        }
     }
 }
 
@@ -486,8 +558,26 @@ private struct ActivityListItemRow: View {
     private var formattedAmount: String { "£" + String(format: "%.2f", item.amount) }
 
     private var dayOfMonthText: String {
-        if let d = Int(item.dateString), (1...31).contains(d) { return String(d) }
-        if let date = ISO8601DateFormatter().date(from: item.dateString) { return String(Calendar.current.component(.day, from: date)) }
+        func ordinal(_ d: Int) -> String {
+            let teens = 11...13
+            let suffix: String
+            if teens.contains(d % 100) {
+                suffix = "th"
+            } else {
+                switch d % 10 {
+                case 1: suffix = "st"
+                case 2: suffix = "nd"
+                case 3: suffix = "rd"
+                default: suffix = "th"
+                }
+            }
+            return "\(d)\(suffix)"
+        }
+        if let d = Int(item.dateString), (1...31).contains(d) { return ordinal(d) }
+        if let date = ISO8601DateFormatter().date(from: item.dateString) {
+            let d = Calendar.current.component(.day, from: date)
+            return ordinal(d)
+        }
         return "—"
     }
 
@@ -549,6 +639,308 @@ private struct ActivityListItemRow: View {
         case .income: return "arrow.down.circle.fill"
         case .transaction: return "arrow.left.arrow.right.circle.fill"
         case .target: return "target"
+        }
+    }
+}
+
+// MARK: - Edit Sheets for Activities
+
+private struct EditIncomeSheet: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let accountId: Int
+    let incomeId: Int
+    @Binding var isPresented: Bool
+
+    @State private var name: String = ""
+    @State private var company: String = ""
+    @State private var amount: String = ""
+    @State private var dayOfMonth: String = ""
+    @State private var selectedPot: String? = nil
+
+    private var account: Account? { accountsStore.account(for: accountId) }
+    private var income: Income? { account?.incomes?.first(where: { $0.id == incomeId }) }
+
+    private var canSave: Bool {
+        guard let money = Double(amount), money > 0 else { return false }
+        guard !name.isEmpty, let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let account { HStack { Text("Account"); Spacer(); Text(account.name).foregroundStyle(.secondary) } }
+                Section("Income") {
+                    TextField("Name", text: $name)
+                    TextField("Company", text: $company)
+                    TextField("Value", text: $amount).keyboardType(.decimalPad)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                    if let pots = account?.pots, !pots.isEmpty {
+                        Picker("Pot", selection: $selectedPot) {
+                            Text("None").tag(nil as String?)
+                            ForEach(pots, id: \.name) { pot in
+                                Text(pot.name).tag(pot.name as String?)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit Income")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack {
+                    Button(role: .destructive) { Task { await deleteItem() } } label: {
+                        Text("Delete Income")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding()
+                }
+                .background(.ultraThinMaterial)
+            }
+            .onAppear { preload() }
+        }
+    }
+
+    private func preload() {
+        if let income {
+            name = income.description
+            company = income.company
+            amount = String(format: "%.2f", income.amount)
+            dayOfMonth = income.date
+            selectedPot = income.potName
+        }
+    }
+
+    private func save() async {
+        guard let money = Double(amount) else { return }
+        let submission = IncomeSubmission(amount: abs(money), description: name, company: company, date: dayOfMonth, potName: selectedPot)
+        await accountsStore.updateIncome(accountId: accountId, incomeId: incomeId, submission: submission)
+        isPresented = false
+    }
+
+    private func deleteItem() async {
+        await accountsStore.deleteIncome(accountId: accountId, incomeId: incomeId)
+        isPresented = false
+    }
+}
+
+private struct EditTransactionSheet: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let transactionId: Int
+    @Binding var isPresented: Bool
+
+    @State private var toAccountId: Int?
+    @State private var selectedPot: String?
+    @State private var name: String = ""
+    @State private var vendor: String = ""
+    @State private var amount: String = ""
+    @State private var dayOfMonth: String = ""
+
+    private var record: TransactionRecord? { accountsStore.transaction(for: transactionId) }
+    private var toAccount: Account? { toAccountId.flatMap { accountsStore.account(for: $0) } }
+
+    private var canSave: Bool {
+        guard let _ = toAccountId, let money = Double(amount), money > 0 else { return false }
+        guard !name.isEmpty, !vendor.isEmpty, let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("To") {
+                    Picker("Account", selection: $toAccountId) {
+                        Text("Select Account").tag(nil as Int?)
+                        ForEach(accountsStore.accounts) { account in
+                            Text(account.name).tag(account.id as Int?)
+                        }
+                    }
+                    if let pots = toAccount?.pots, !pots.isEmpty {
+                        Picker("Pot", selection: $selectedPot) {
+                            Text("None").tag(nil as String?)
+                            ForEach(pots, id: \.name) { pot in
+                                Text(pot.name).tag(pot.name as String?)
+                            }
+                        }
+                    }
+                }
+                Section("Details") {
+                    TextField("Name", text: $name)
+                    TextField("Vendor", text: $vendor)
+                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Edit Transaction")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack {
+                    Button(role: .destructive) { Task { await deleteItem() } } label: {
+                        Text("Delete Transaction")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding()
+                }
+                .background(.ultraThinMaterial)
+            }
+            .onAppear { preload() }
+            .onChange(of: toAccountId) { _, _ in selectedPot = nil }
+        }
+    }
+
+    private func preload() {
+        if let record {
+            toAccountId = record.toAccountId
+            selectedPot = record.toPotName
+            name = record.name
+            vendor = record.vendor
+            amount = String(format: "%.2f", record.amount)
+            dayOfMonth = record.date
+        }
+    }
+
+    private func save() async {
+        guard let toAccountId, let money = Double(amount) else { return }
+        let submission = TransactionSubmission(name: name, vendor: vendor, amount: money, date: dayOfMonth, fromAccountId: nil, toAccountId: toAccountId, toPotName: selectedPot)
+        await accountsStore.updateTransaction(id: transactionId, submission: submission)
+        isPresented = false
+    }
+
+    private func deleteItem() async {
+        await accountsStore.deleteTransaction(id: transactionId)
+        isPresented = false
+    }
+}
+
+private struct EditTargetSheet: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.dismiss) private var dismiss
+
+    let targetId: Int
+    @Binding var isPresented: Bool
+
+    @State private var accountName: String = ""
+    @State private var name: String = ""
+    @State private var amount: String = ""
+    @State private var dayOfMonth: String = ""
+
+    private var record: TargetRecord? { accountsStore.targets.first { $0.id == targetId } }
+
+    private var canSave: Bool {
+        guard !name.isEmpty, let money = Double(amount), money > 0 else { return false }
+        guard let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if !accountName.isEmpty {
+                    HStack { Text("Account"); Spacer(); Text(accountName).foregroundStyle(.secondary) }
+                }
+                Section("Budget") {
+                    TextField("Name", text: $name)
+                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
+                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Edit Budget")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack {
+                    Button(role: .destructive) { Task { await deleteItem() } } label: {
+                        Text("Delete Budget")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding()
+                }
+                .background(.ultraThinMaterial)
+            }
+            .onAppear { preload() }
+        }
+    }
+
+    private func preload() {
+        if let record {
+            accountName = accountsStore.accounts.first(where: { $0.id == record.accountId })?.name ?? ""
+            name = record.name
+            amount = String(format: "%.2f", record.amount)
+            dayOfMonth = record.date
+        }
+    }
+
+    private func save() async {
+        guard let record else { return }
+        guard let money = Double(amount) else { return }
+        let submission = TargetSubmission(name: name, amount: abs(money), date: dayOfMonth, accountId: record.accountId)
+        await accountsStore.updateTarget(id: targetId, submission: submission)
+        isPresented = false
+    }
+
+    private func deleteItem() async {
+        await accountsStore.deleteTarget(id: targetId)
+        isPresented = false
+    }
+}
+
+// MARK: - Private helpers
+private extension ActivitiesPanelSection {
+    func handleEdit(_ item: Item) {
+        switch item.kind {
+        case .income:
+            if let accountId = item.accountId, let incomeId = item.incomeId {
+                editingIncome = (accountId, incomeId)
+                showEditIncome = true
+            }
+        case .transaction:
+            if let id = item.transactionId { editingTransactionId = id; showEditTransaction = true }
+        case .target:
+            if let id = item.targetId { editingTargetId = id; showEditTarget = true }
+        }
+    }
+
+    func handleDelete(_ item: Item) {
+        // Fire-and-forget deletes to keep UI simple
+        Task {
+            switch item.kind {
+            case .income:
+                if let accountId = item.accountId, let incomeId = item.incomeId {
+                    await accountsStore.deleteIncome(accountId: accountId, incomeId: incomeId)
+                }
+            case .transaction:
+                if let id = item.transactionId {
+                    await accountsStore.deleteTransaction(id: id)
+                }
+            case .target:
+                if let id = item.targetId {
+                    await accountsStore.deleteTarget(id: id)
+                }
+            }
         }
     }
 }
@@ -1180,12 +1572,17 @@ private struct PotEditContext: Identifiable, Hashable {
 private struct PotsPanelSection: View {
     let accounts: [Account]
     let potsByAccount: [Int: [Pot]]
+    var selectedAccountId: Int? = nil
     var onTapPot: (Account, Pot) -> Void = { _, _ in }
     var onDeletePot: (Account, Pot) -> Void = { _, _ in }
 
     private var allPots: [(account: Account, pot: Pot)] {
         var items: [(account: Account, pot: Pot)] = []
-        for account in accounts {
+        let sourceAccounts: [Account] = {
+            if let id = selectedAccountId, let acct = accounts.first(where: { $0.id == id }) { return [acct] }
+            return accounts
+        }()
+        for account in sourceAccounts {
             let sourcePots = (account.pots ?? potsByAccount[account.id] ?? [])
             for pot in sourcePots {
                 items.append((account: account, pot: pot))
@@ -1246,6 +1643,7 @@ private struct PotsPanelSection: View {
 
 private struct PotEditorSheet: View {
     @EnvironmentObject private var potsStore: PotsStore
+    @EnvironmentObject private var accountsStore: AccountsStore
     @Environment(\.dismiss) private var dismiss
 
     let context: PotEditContext
@@ -1269,6 +1667,20 @@ private struct PotEditorSheet: View {
                         .onChange(of: excludeFromReset) { _, newValue in
                             Task { await potsStore.toggleExclusion(accountId: context.account.id, potName: context.pot.name) }
                         }
+                }
+                Section("Transactions") {
+                    let records = accountsStore.transactions.filter { $0.toAccountId == context.account.id && ($0.toPotName ?? "") == context.pot.name }
+                    if records.isEmpty {
+                        Text("No transactions for this pot").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(records, id: \.id) { r in
+                            HStack {
+                                Text(r.name.isEmpty ? r.vendor : r.name)
+                                Spacer()
+                                Text("£\(String(format: "%.2f", r.amount))").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
             .navigationTitle("Manage Pot")
