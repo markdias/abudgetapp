@@ -96,7 +96,7 @@ struct HomeView: View {
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
                         onDiagnostics: { showingDiagnostics = true },
-                        onSettings: { selectedTab = 2 }
+                        onSettings: { selectedTab = 3 }
                     )
 
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
