@@ -399,7 +399,7 @@ private struct ExecuteTransferSchedulesScreen: View {
 }
 
 // MARK: - Completed Screen
-private struct CompletedTransfersScreen: View {
+struct CompletedTransfersScreen: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var transferStore: TransferSchedulesStore
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
@@ -420,28 +420,10 @@ private struct CompletedTransfersScreen: View {
 
     private var incomeTotal: Double { executedIncomes.reduce(0) { $0 + $1.amount } }
 
-    private struct Event: Identifiable { let id = UUID(); let title: String; let subtitle: String?; let amount: Double; let date: Date }
-
-    private var breakdownEvents: [Event] {
-        var events: [Event] = []
-        // 1) Incomes (what actually moved in)
-        for inc in executedIncomes {
-            let acct = accountsStore.account(for: inc.accountId)?.name ?? "Account #\(inc.accountId)"
-            let stamp = inc.lastExecuted.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date.distantPast
-            events.append(Event(title: inc.description, subtitle: inc.company + " → " + acct, amount: inc.amount, date: stamp))
-        }
-        // 2) Executed transfer schedules (what actually moved out)
-        for s in completed {
-            let srcAccount = accountsStore.account(for: s.fromAccountId)?.name ?? "Account #\(s.fromAccountId)"
-            let dstAccount = accountsStore.account(for: s.toAccountId)?.name ?? "Account #\(s.toAccountId)"
-            let src = (s.fromPotName?.isEmpty == false) ? "\(srcAccount) • \(s.fromPotName!)" : srcAccount
-            let dst = (s.toPotName?.isEmpty == false) ? "\(dstAccount) • \(s.toPotName!)" : dstAccount
-            let stamp = s.lastExecuted.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date.distantPast
-            let amt = (s.fromAccountId == s.toAccountId) ? 0 : -s.amount
-            events.append(Event(title: dst, subtitle: "from " + src + (amt == 0 ? " (internal)" : ""), amount: amt, date: stamp))
-        }
-        // Sort by execution time
-        return events.sorted { $0.date < $1.date }
+    private struct DestKey: Hashable { let toAccountId: Int; let toPotName: String }
+    private func destDisplayName(_ key: DestKey) -> String {
+        let accountName = accountsStore.accounts.first(where: { $0.id == key.toAccountId })?.name ?? "Account #\(key.toAccountId)"
+        return key.toPotName.isEmpty ? accountName : "\(accountName) • \(key.toPotName)"
     }
 
     var body: some View {
@@ -450,59 +432,98 @@ private struct CompletedTransfersScreen: View {
                 if completed.isEmpty && executedIncomes.isEmpty {
                     ContentUnavailableView("No Completed Transfers", systemImage: "checkmark.seal", description: Text("Run executions to see history here."))
                 } else {
-                    // Event breakdown with running remaining pool
-                    let events = breakdownEvents
-                    // Start from zero, add incomes (positive) and subtract outgoings (negative)
+                    // 1) Incomes at the top
                     var running: Double = 0
-                    VStack(spacing: 10) {
-                        ForEach(events) { ev in
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(ev.title)
-                                        .font(.subheadline).fontWeight(.semibold)
-                                    if let sub = ev.subtitle, !sub.isEmpty {
-                                        Text(sub).font(.caption).foregroundStyle(.secondary)
-                                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Executed Incomes").font(.headline)
+                        ForEach(executedIncomes, id: \.id) { inc in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(inc.description).font(.subheadline)
+                                    Text(inc.company).font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Group {
-                                    if ev.amount > 0 {
-                                        Text("+\(formatCurrency(ev.amount))")
-                                            .foregroundColor(.green)
-                                            .padding(.horizontal, 8).padding(.vertical, 6)
-                                            .background(Color.green.opacity(0.15))
-                                    } else if ev.amount < 0 {
-                                        Text("-\(formatCurrency(abs(ev.amount)))")
-                                            .foregroundColor(.red)
-                                            .padding(.horizontal, 8).padding(.vertical, 6)
-                                            .background(Color.red.opacity(0.15))
-                                    } else {
-                                        Text(formatCurrency(0))
-                                            .foregroundColor(.orange)
-                                            .padding(.horizontal, 8).padding(.vertical, 6)
-                                            .background(Color.orange.opacity(0.2))
+                                Text("+\(formatCurrency(inc.amount))")
+                                    .font(.caption)
+                                    .padding(.horizontal, 8).padding(.vertical, 6)
+                                    .background(Color.green.opacity(0.15))
+                                    .foregroundColor(.green)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            let _ = { running += inc.amount }()
+                            HStack {
+                                Text("Remaining")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formatCurrency(max(running, 0)))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
+
+                    // 2) Individual transfers grouped by destination; show remaining after each item
+                    let groups = Dictionary(grouping: completed) { DestKey(toAccountId: $0.toAccountId, toPotName: $0.toPotName ?? "") }
+                    // Sort by account name, then pot name (empty pot after named pots)
+                    let sortedKeys = groups.keys.sorted { a, b in
+                        let aName = accountsStore.accounts.first(where: { $0.id == a.toAccountId })?.name ?? "Account #\(a.toAccountId)"
+                        let bName = accountsStore.accounts.first(where: { $0.id == b.toAccountId })?.name ?? "Account #\(b.toAccountId)"
+                        if aName == bName {
+                            let ap = a.toPotName
+                            let bp = b.toPotName
+                            if ap.isEmpty && bp.isEmpty { return false }
+                            if ap.isEmpty { return false } // empty after named
+                            if bp.isEmpty { return true }
+                            return ap.localizedCaseInsensitiveCompare(bp) == .orderedAscending
+                        }
+                        return aName.localizedCaseInsensitiveCompare(bName) == .orderedAscending
+                    }
+                    VStack(spacing: 12) {
+                        ForEach(sortedKeys, id: \.self) { key in
+                            let items = (groups[key] ?? []).sorted { ($0.lastExecuted ?? "") < ($1.lastExecuted ?? "") }
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(destDisplayName(key)).font(.subheadline).fontWeight(.semibold)
+                                ForEach(items, id: \.id) { s in
+                                    let srcAccount = accountsStore.account(for: s.fromAccountId)?.name ?? "Account #\(s.fromAccountId)"
+                                    let srcLabel = (s.fromPotName?.isEmpty == false) ? "\(srcAccount) • \(s.fromPotName!)" : srcAccount
+                                    let isInternal = s.fromAccountId == s.toAccountId
+                                    let delta = isInternal ? 0 : -s.amount
+                                    HStack {
+                                        Text("from \(srcLabel)").font(.caption)
+                                        Spacer()
+                                        Group {
+                                            if delta < 0 {
+                                                Text("-\(formatCurrency(abs(delta)))")
+                                                    .foregroundColor(.red)
+                                                    .padding(.horizontal, 8).padding(.vertical, 6)
+                                                    .background(Color.red.opacity(0.15))
+                                            } else {
+                                                Text(formatCurrency(0))
+                                                    .foregroundColor(.orange)
+                                                    .padding(.horizontal, 8).padding(.vertical, 6)
+                                                    .background(Color.orange.opacity(0.2))
+                                            }
+                                        }
+                                        .font(.caption)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    }
+                                    let _ = { running += delta }()
+                                    HStack {
+                                        Text("Remaining")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                        Spacer()
+                                        Text(formatCurrency(max(running, 0)))
+                                            .font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
-                                .font(.caption)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .padding(12)
                             .background(Color(.systemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-                            .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-
-                            // Running total line
-                            let _ = { running += ev.amount }()
-                            HStack {
-                                Text("Remaining")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(formatCurrency(max(running, 0)))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
                         }
                     }
                 }
