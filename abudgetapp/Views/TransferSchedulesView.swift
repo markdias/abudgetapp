@@ -404,146 +404,207 @@ struct CompletedTransfersScreen: View {
     @EnvironmentObject private var transferStore: TransferSchedulesStore
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
 
-    private var completed: [TransferSchedule] {
-        transferStore.schedules.filter { $0.isActive && $0.isCompleted }
-            .sorted { (lhs, rhs) in
-                let l = lhs.lastExecuted ?? ""
-                let r = rhs.lastExecuted ?? ""
-                return l > r
-            }
+    // All completed transfers, sorted by execution time
+    private var completedTransfers: [TransferSchedule] {
+        transferStore.schedules
+            .filter { $0.isActive && $0.isCompleted }
+            .filter { $0.lastExecuted != nil }
+            .sorted { ($0.lastExecuted ?? "") < ($1.lastExecuted ?? "") }
     }
 
-    private var executedIncomes: [IncomeSchedule] {
-        incomeStore.schedules.filter { $0.isActive && $0.isCompleted }
-            .sorted { ($0.lastExecuted ?? "") > ($1.lastExecuted ?? "") }
+    // The source account is the account money left from.
+    // We take the first completed transfer's fromAccountId as the "salary source".
+    private var sourceAccountId: Int? {
+        completedTransfers.first?.fromAccountId
     }
 
-    private var incomeTotal: Double { executedIncomes.reduce(0) { $0 + $1.amount } }
-
-    private struct DestKey: Hashable { let toAccountId: Int; let toPotName: String }
-    private func destDisplayName(_ key: DestKey) -> String {
-        let accountName = accountsStore.accounts.first(where: { $0.id == key.toAccountId })?.name ?? "Account #\(key.toAccountId)"
-        return key.toPotName.isEmpty ? accountName : "\(accountName) • \(key.toPotName)"
-    }
-
-    var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 12) {
-                if completed.isEmpty && executedIncomes.isEmpty {
-                    ContentUnavailableView("No Completed Transfers", systemImage: "checkmark.seal", description: Text("Run executions to see history here."))
-                } else {
-                    // 1) Incomes at the top
-                    var running: Double = 0
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Executed Incomes").font(.headline)
-                        ForEach(executedIncomes, id: \.id) { inc in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(inc.description).font(.subheadline)
-                                    Text(inc.company).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text("+\(formatCurrency(inc.amount))")
-                                    .font(.caption)
-                                    .padding(.horizontal, 8).padding(.vertical, 6)
-                                    .background(Color.green.opacity(0.15))
-                                    .foregroundColor(.green)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            }
-                            let _ = { running += inc.amount }()
-                            HStack {
-                                Text("Remaining")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Text(formatCurrency(max(running, 0)))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(12)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-
-                    // 2) Individual transfers grouped by destination; show remaining after each item
-                    let groups = Dictionary(grouping: completed) { DestKey(toAccountId: $0.toAccountId, toPotName: $0.toPotName ?? "") }
-                    // Sort by account name, then pot name (empty pot after named pots)
-                    let sortedKeys = groups.keys.sorted { a, b in
-                        let aName = accountsStore.accounts.first(where: { $0.id == a.toAccountId })?.name ?? "Account #\(a.toAccountId)"
-                        let bName = accountsStore.accounts.first(where: { $0.id == b.toAccountId })?.name ?? "Account #\(b.toAccountId)"
-                        if aName == bName {
-                            let ap = a.toPotName
-                            let bp = b.toPotName
-                            if ap.isEmpty && bp.isEmpty { return false }
-                            if ap.isEmpty { return false } // empty after named
-                            if bp.isEmpty { return true }
-                            return ap.localizedCaseInsensitiveCompare(bp) == .orderedAscending
-                        }
-                        return aName.localizedCaseInsensitiveCompare(bName) == .orderedAscending
-                    }
-                    VStack(spacing: 12) {
-                        ForEach(sortedKeys, id: \.self) { key in
-                            let items = (groups[key] ?? []).sorted { ($0.lastExecuted ?? "") < ($1.lastExecuted ?? "") }
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(destDisplayName(key)).font(.subheadline).fontWeight(.semibold)
-                                ForEach(items, id: \.id) { s in
-                                    let srcAccount = accountsStore.account(for: s.fromAccountId)?.name ?? "Account #\(s.fromAccountId)"
-                                    let srcLabel = (s.fromPotName?.isEmpty == false) ? "\(srcAccount) • \(s.fromPotName!)" : srcAccount
-                                    let isInternal = s.fromAccountId == s.toAccountId
-                                    let delta = isInternal ? 0 : -s.amount
-                                    HStack {
-                                        Text("from \(srcLabel)").font(.caption)
-                                        Spacer()
-                                        Group {
-                                            if delta < 0 {
-                                                Text("-\(formatCurrency(abs(delta)))")
-                                                    .foregroundColor(.red)
-                                                    .padding(.horizontal, 8).padding(.vertical, 6)
-                                                    .background(Color.red.opacity(0.15))
-                                            } else {
-                                                Text(formatCurrency(0))
-                                                    .foregroundColor(.orange)
-                                                    .padding(.horizontal, 8).padding(.vertical, 6)
-                                                    .background(Color.orange.opacity(0.2))
-                                            }
-                                        }
-                                        .font(.caption)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                    }
-                                    let _ = { running += delta }()
-                                    HStack {
-                                        Text("Remaining")
-                                            .font(.caption).foregroundStyle(.secondary)
-                                        Spacer()
-                                        Text(formatCurrency(max(running, 0)))
-                                            .font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            .padding(12)
-                            .background(Color(.systemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-                        }
-                    }
-                }
-            }
-            .padding()
+    private var sourceAccount: Account? {
+        if let id = sourceAccountId {
+            return accountsStore.account(for: id)
         }
-        .navigationTitle("Completed Transfers")
-        .background(Color(.systemGroupedBackground))
+        return nil
     }
 
-    private func flowLine(_ item: TransferSchedule) -> String {
-        let srcAccount = accountsStore.account(for: item.fromAccountId)?.name ?? "Account #\(item.fromAccountId)"
-        let dstAccount = accountsStore.account(for: item.toAccountId)?.name ?? "Account #\(item.toAccountId)"
-        let src = (item.fromPotName?.isEmpty == false) ? "\(srcAccount) -> \(item.fromPotName!)" : srcAccount
-        let dst = (item.toPotName?.isEmpty == false) ? "\(dstAccount) -> \(item.toPotName!)" : dstAccount
-        // Example format: personal -> mortgage -> joint bills
-        return "\(src) -> \(dst)"
+    private var sourceAccountName: String {
+        sourceAccount?.name ?? "Account"
     }
 
-    private func formatted(_ iso: String) -> String {
+    // All executed incomes paid into that same source account
+    private var executedIncomes: [IncomeSchedule] {
+        incomeStore.schedules
+            .filter { $0.isActive && $0.isCompleted }
+            .filter { $0.accountId == sourceAccountId }
+            .sorted { ($0.lastExecuted ?? "") < ($1.lastExecuted ?? "") }
+    }
+
+    // Total income that actually landed in that source account
+    private var sourceIncomeTotal: Double {
+        executedIncomes.reduce(0) { $0 + $1.amount }
+    }
+
+    // MARK: Supporting models for breakdown
+
+    private enum EntryKind { case transaction, budget }
+
+    // Represents an individual transaction or budget item that fed into a transfer schedule
+    private struct DestEntry {
+        let id: String
+        let title: String
+        let amount: Double
+        let kind: EntryKind
+        let method: String?
+    }
+
+    // Represents a flattened "flow step": source account -> destination (account / pot) -> specific item
+    private struct FlowStep: Identifiable {
+        let id: String
+        let path: String
+        let date: String
+        let amount: Double
+        let methodTag: String?
+        var formattedDate: String { date }
+    }
+
+    // Build the list of individual items (transactions and budgets) for a given destination account / pot.
+    // This mirrors entriesForDestination from AddTransferSchedulesScreen.
+    @MainActor
+    private func entriesForDestination(accountId: Int, potName: String?) -> [DestEntry] {
+        let potKey = potName ?? ""
+        let filteredTx = accountsStore.transactions.filter {
+            $0.toAccountId == accountId && ($0.toPotName ?? "") == potKey
+        }
+        let tx: [DestEntry] = filteredTx.map { r in
+            let title = r.name.isEmpty ? r.vendor : r.name
+            return DestEntry(
+                id: "t-\(r.id)",
+                title: title,
+                amount: r.amount,
+                kind: .transaction,
+                method: r.paymentType
+            )
+        }
+
+        var budgets: [DestEntry] = []
+        if potName == nil {
+            budgets = accountsStore.targets
+                .filter { $0.accountId == accountId }
+                .map { t in
+                    DestEntry(
+                        id: "b-\(t.id)",
+                        title: t.name,
+                        amount: t.amount,
+                        kind: .budget,
+                        method: nil
+                    )
+                }
+        }
+
+        return tx + budgets
+    }
+
+    // Flatten all completed transfers from the source account into flow steps,
+    // where each step is a single transaction or budget item.
+    private var flowSteps: [FlowStep] {
+        guard let sourceId = sourceAccountId else { return [] }
+
+        // We only care about transfers that left the source account
+        let schedulesFromSource = completedTransfers
+            .filter { $0.fromAccountId == sourceId }
+            .sorted {
+                // order by execution date, then destination account name, then pot name
+                let lDate = $0.lastExecuted ?? ""
+                let rDate = $1.lastExecuted ?? ""
+                if lDate != rDate { return lDate < rDate }
+                let lAcc = accountsStore.account(for: $0.toAccountId)?.name ?? ""
+                let rAcc = accountsStore.account(for: $1.toAccountId)?.name ?? ""
+                if lAcc != rAcc { return lAcc < rAcc }
+                let lPot = $0.toPotName ?? ""
+                let rPot = $1.toPotName ?? ""
+                return lPot < rPot
+            }
+
+        let srcName = sourceAccountName
+
+        var steps: [FlowStep] = []
+
+        for sched in schedulesFromSource {
+            let destAccountName = accountsStore.account(for: sched.toAccountId)?.name ?? "Account #\(sched.toAccountId)"
+            let destLabel: String = {
+                if let pot = sched.toPotName, !pot.isEmpty {
+                    return pot
+                } else {
+                    return destAccountName
+                }
+            }()
+
+            // pull the underlying transaction / budget entries that this transfer schedule represented
+            let entries = entriesForDestination(accountId: sched.toAccountId, potName: sched.toPotName)
+
+            for entry in entries {
+                // choose a tag for the chip (DD, CARD, BUDGET)
+                let tag: String? = {
+                    switch entry.kind {
+                    case .transaction:
+                        if let m = entry.method, !m.isEmpty {
+                            if m == "direct_debit" { return "DD" }
+                            if m.contains("card") { return "CARD" }
+                            return m.uppercased()
+                        }
+                        return nil
+                    case .budget:
+                        return "BUDGET"
+                    }
+                }()
+
+                let chain = "\(srcName) → \(destLabel) → \(entry.title)"
+                steps.append(
+                    FlowStep(
+                        id: "sched-\(sched.id)-\(entry.id)",
+                        path: chain,
+                        date: sched.lastExecuted ?? "",
+                        amount: entry.amount,
+                        methodTag: tag
+                    )
+                )
+            }
+        }
+
+        return steps
+    }
+
+    // A flow step plus the remaining balance after applying it
+    private struct AnnotatedStep: Identifiable {
+        let step: FlowStep
+        let remainingAfter: Double
+        var id: String { step.id }
+    }
+
+    // Build a list where each row knows the remaining balance after that transaction/budget item.
+    private var annotatedSteps: [AnnotatedStep] {
+        var running = incomeTotalForDisplay
+        return flowSteps.map { step in
+            running -= step.amount
+            return AnnotatedStep(step: step, remainingAfter: max(running, 0))
+        }
+    }
+
+    // Convenience for the final balance after all allocations
+    private var finalRemaining: Double {
+        annotatedSteps.last?.remainingAfter ?? incomeTotalForDisplay
+    }
+
+    // For annotatedSteps, use the same as sourceIncomeTotal for the starting value
+    private var incomeTotalForDisplay: Double {
+        sourceIncomeTotal
+    }
+
+    // MARK: Formatting helpers
+
+    private func formatCurrency(_ amount: Double) -> String {
+        "£" + String(format: "%.2f", abs(amount))
+    }
+
+    private func formattedDate(_ iso: String) -> String {
         if let date = ISO8601DateFormatter().date(from: iso) {
             let f = DateFormatter()
             f.dateStyle = .medium
@@ -553,7 +614,138 @@ struct CompletedTransfersScreen: View {
         return iso
     }
 
-    private func formatCurrency(_ amount: Double) -> String { "£" + String(format: "%.2f", abs(amount)) }
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 12) {
+                if sourceAccount == nil || (executedIncomes.isEmpty && flowSteps.isEmpty) {
+                    ContentUnavailableView(
+                        "No Completed Transfers",
+                        systemImage: "checkmark.seal",
+                        description: Text("Run executions to see history here.")
+                    )
+                } else {
+                    // 1. Income into source account
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Income into \(sourceAccountName)")
+                            .font(.headline)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sourceAccountName)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                Text("Total Executed Income")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("+\(formatCurrency(sourceIncomeTotal))")
+                                .font(.title3)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color.green.opacity(0.17))
+                                .foregroundColor(.green)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.black.opacity(0.06))
+                    )
+
+                    // 2. Allocation Flow, item by item
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Allocation Flow")
+                            .font(.headline)
+                            .padding(.bottom, 8)
+
+                        ForEach(annotatedSteps) { row in
+                            let step = row.step
+
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                        Text(step.path)
+                                            .font(.subheadline)
+                                        if let tag = step.methodTag, !tag.isEmpty {
+                                            Text(tag)
+                                                .font(.caption2)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(
+                                                    tag == "BUDGET"
+                                                    ? Color.gray.opacity(0.15)
+                                                    : Color.purple.opacity(0.15)
+                                                )
+                                                .foregroundColor(
+                                                    tag == "BUDGET"
+                                                    ? .secondary
+                                                    : .purple
+                                                )
+                                                .clipShape(Capsule())
+                                        }
+                                    }
+
+                                    if !step.date.isEmpty {
+                                        Text(formattedDate(step.date))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Spacer()
+
+                                Text("-\(formatCurrency(step.amount))")
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                                    .background(Color.purple.opacity(0.15))
+                                    .foregroundColor(.purple)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+
+                            HStack {
+                                Text("Remaining in \(sourceAccountName)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formatCurrency(row.remainingAfter))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Divider()
+                                .padding(.vertical, 2)
+                        }
+
+                        // Final row
+                        HStack {
+                            Text("Final Balance in \(sourceAccountName)")
+                                .font(.headline)
+                            Spacer()
+                            Text(formatCurrency(finalRemaining))
+                                .font(.headline)
+                                .foregroundColor(.blue)
+                        }
+                        .padding(.top, 10)
+                    }
+                    .padding(12)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.black.opacity(0.06))
+                    )
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Completed Transfers")
+        .background(Color(.systemGroupedBackground))
+    }
 }
 
 #Preview {
