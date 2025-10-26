@@ -6,6 +6,7 @@ struct TransfersView: View {
     @EnvironmentObject private var transferSchedulesStore: TransferSchedulesStore
     @State private var showingIncomeSchedules = false
     @State private var showingTransferSchedules = false
+    @State private var showingProcessedTransactions = false
     @State private var isResetting = false
     @State private var showingResetConfirm = false
     @State private var showingSalarySorter = false
@@ -18,6 +19,9 @@ struct TransfersView: View {
                         LargeActionButton(title: "Transfer Schedules", color: .blue) { showingTransferSchedules = true }
                         LargeActionButton(title: "Income Schedules", color: .green) {
                             showingIncomeSchedules = true
+                        }
+                        LargeActionButton(title: "Processed Transactions", color: .teal) {
+                            showingProcessedTransactions = true
                         }
                         LargeActionButton(title: "Salary Sorter", color: .purple) { showingSalarySorter = true }
                         LargeActionButton(title: "Reset Balance", color: .red) {
@@ -39,6 +43,9 @@ struct TransfersView: View {
             }
             .sheet(isPresented: $showingSalarySorter) {
                 SalarySorterView(isPresented: $showingSalarySorter)
+            }
+            .sheet(isPresented: $showingProcessedTransactions) {
+                ProcessedTransactionsView()
             }
             .alert("Reset Balances?", isPresented: $showingResetConfirm) {
                 Button("Reset", role: .destructive) {
