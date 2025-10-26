@@ -21,6 +21,32 @@ final class DiagnosticsStore: ObservableObject {
 
     private let store: LocalBudgetStore
     private weak var accountsStore: AccountsStore?
+    private static let stepNames: [String] = [
+        "Fetch Accounts",
+        "Add Account",
+        "Update Account",
+        "Add Pot",
+        "Update Pot",
+        "Toggle Pot Exclusion",
+        "Add Income",
+        "Schedule Income",
+        "Execute Income Schedule",
+        "Add Target",
+        "Add Transaction",
+        "Add Scheduled Payment",
+        "Add Transfer Schedule",
+        "Execute Transfer Schedule",
+        "Delete Transfer Schedule",
+        "Delete Scheduled Payment",
+        "Delete Transaction",
+        "Delete Target",
+        "Delete Income Schedule",
+        "Delete Income",
+        "Delete Pot",
+        "Delete Account",
+        "Reset Balances",
+        "Reload Accounts"
+    ]
 
     init(store: LocalBudgetStore = .shared, accountsStore: AccountsStore? = nil) {
         self.store = store
@@ -40,37 +66,281 @@ final class DiagnosticsStore: ObservableObject {
         var updatedSteps = DiagnosticsStore.defaultSteps()
         steps = updatedSteps
 
-        var createdAccountId: Int?
-        var createdAccountName: String?
+        var diagnosticsAccount: Account?
+        var diagnosticsPot: Pot?
+        var diagnosticsIncome: Income?
+        var diagnosticsTransaction: TransactionRecord?
+        var diagnosticsTarget: TargetRecord?
+        var diagnosticsTransferSchedule: TransferSchedule?
+        var diagnosticsIncomeSchedule: IncomeSchedule?
+        var diagnosticsScheduledPayment: ScheduledPayment?
+
+        let diagnosticsAccountName = "Diagnostics \(UUID().uuidString.prefix(4))"
+        let diagnosticsPotName = "Diagnostics Pot"
+        let incomeDescription = "Diagnostics Income"
+        let targetName = "Diagnostics Target"
+        let transactionName = "Diagnostics Transaction"
+        let scheduledPaymentName = "Diagnostics Payment"
+        let transferDescription = "Diagnostics Transfer"
+        let today = Date()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoTimestamp = isoFormatter.string(from: today)
+        let dayOfMonth = String(Calendar.current.component(.day, from: today))
 
         let operations: [(String, () async throws -> String?)] = [
-            ("Fetch Accounts", { _ = await self.store.currentAccounts(); return nil }),
+            ("Fetch Accounts", {
+                let accounts = await self.store.currentAccounts()
+                return "Found \(accounts.count) accounts"
+            }),
             ("Add Account", {
-                let submission = AccountSubmission(name: "Diagnostics \(UUID().uuidString.prefix(4))", balance: 500, type: "current", accountType: "personal")
+                let submission = AccountSubmission(
+                    name: diagnosticsAccountName,
+                    balance: 500,
+                    type: "current",
+                    accountType: "personal"
+                )
                 let account = try await self.store.addAccount(submission)
-                createdAccountId = account.id
-                createdAccountName = account.name
+                diagnosticsAccount = account
                 return "Created account #\(account.id)"
             }),
+            ("Update Account", {
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for update")
+                }
+                let updated = try await self.store.updateAccount(
+                    id: account.id,
+                    submission: AccountSubmission(
+                        name: "\(diagnosticsAccountName) Updated",
+                        balance: account.balance + 25,
+                        type: account.type,
+                        accountType: account.accountType ?? "personal",
+                        credit_limit: account.credit_limit,
+                        excludeFromReset: account.excludeFromReset
+                    )
+                )
+                diagnosticsAccount = updated
+                return "Updated account balance to £\(String(format: "%.2f", updated.balance))"
+            }),
             ("Add Pot", {
-                guard let accountId = createdAccountId else { throw BudgetDataError.invalidOperation("Missing account for pot") }
-                let pot = try await self.store.addPot(accountId: accountId, submission: PotSubmission(name: "Diagnostics Pot", balance: 120))
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for pot")
+                }
+                let pot = try await self.store.addPot(
+                    accountId: account.id,
+                    submission: PotSubmission(name: diagnosticsPotName, balance: 120)
+                )
+                diagnosticsPot = pot
                 return "Added pot \(pot.name)"
             }),
+            ("Update Pot", {
+                guard let account = diagnosticsAccount, let pot = diagnosticsPot else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics pot for update")
+                }
+                let updated = try await self.store.updatePot(
+                    accountId: account.id,
+                    potId: pot.id,
+                    submission: PotSubmission(name: pot.name, balance: 200, excludeFromReset: true)
+                )
+                diagnosticsPot = updated
+                return "Updated pot balance to £\(String(format: "%.2f", updated.balance))"
+            }),
+            ("Toggle Pot Exclusion", {
+                guard let account = diagnosticsAccount, let pot = diagnosticsPot else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics pot for exclusion toggle")
+                }
+                let excluded = try await self.store.togglePotExclusion(accountId: account.id, potName: pot.name)
+                diagnosticsPot?.excludeFromReset = excluded
+                return excluded ? "Pot excluded from resets" : "Pot included in resets"
+            }),
+            ("Add Income", {
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for income")
+                }
+                let submission = IncomeSubmission(
+                    amount: 250,
+                    description: incomeDescription,
+                    company: "Diagnostics Ltd",
+                    date: dayOfMonth,
+                    potName: diagnosticsPot?.name
+                )
+                let income = try await self.store.addIncome(accountId: account.id, submission: submission)
+                diagnosticsIncome = income
+                return "Recorded income \(income.description)"
+            }),
+            ("Schedule Income", {
+                guard let account = diagnosticsAccount, let income = diagnosticsIncome else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics income for schedule")
+                }
+                let schedule = try await self.store.addIncomeSchedule(
+                    IncomeScheduleSubmission(
+                        accountId: account.id,
+                        incomeId: income.id,
+                        amount: income.amount,
+                        description: income.description,
+                        company: income.company
+                    )
+                )
+                diagnosticsIncomeSchedule = schedule
+                return "Scheduled income \(income.description)"
+            }),
+            ("Execute Income Schedule", {
+                guard let schedule = diagnosticsIncomeSchedule else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics income schedule for execution")
+                }
+                let response = try await self.store.executeIncomeSchedule(id: schedule.id)
+                return response.message
+            }),
+            ("Add Target", {
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for target")
+                }
+                let target = try await self.store.addTarget(
+                    TargetSubmission(name: targetName, amount: 75, date: dayOfMonth, accountId: account.id)
+                )
+                diagnosticsTarget = target
+                return "Created target \(target.name)"
+            }),
+            ("Add Transaction", {
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for transaction")
+                }
+                let transaction = try await self.store.addTransaction(
+                    TransactionSubmission(
+                        name: transactionName,
+                        vendor: "Diagnostics Vendor",
+                        amount: 42,
+                        date: isoTimestamp,
+                        fromAccountId: nil,
+                        toAccountId: account.id,
+                        toPotName: diagnosticsPot?.name,
+                        paymentType: "card"
+                    )
+                )
+                diagnosticsTransaction = transaction
+                return "Logged transaction \(transaction.name)"
+            }),
+            ("Add Scheduled Payment", {
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for scheduled payment")
+                }
+                let submission = ScheduledPaymentSubmission(
+                    name: scheduledPaymentName,
+                    amount: 30,
+                    date: isoTimestamp,
+                    company: "Diagnostics Utilities",
+                    type: "direct_debit"
+                )
+                let payment = try await self.store.addScheduledPayment(
+                    accountId: account.id,
+                    potName: diagnosticsPot?.name,
+                    submission: submission
+                )
+                diagnosticsScheduledPayment = payment
+                return "Added scheduled payment \(payment.name)"
+            }),
+            ("Add Transfer Schedule", {
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for transfer schedule")
+                }
+                let schedule = try await self.store.addTransferSchedule(
+                    TransferScheduleSubmission(
+                        fromAccountId: account.id,
+                        fromPotName: nil,
+                        toAccountId: account.id,
+                        toPotName: diagnosticsPot?.name,
+                        amount: 20,
+                        description: transferDescription
+                    )
+                )
+                diagnosticsTransferSchedule = schedule
+                return "Queued transfer schedule"
+            }),
+            ("Execute Transfer Schedule", {
+                guard let schedule = diagnosticsTransferSchedule else {
+                    throw BudgetDataError.invalidOperation("Missing transfer schedule for execution")
+                }
+                let response = try await self.store.executeTransferSchedule(id: schedule.id)
+                diagnosticsTransferSchedule = await self.store.currentTransferSchedules().first(where: { $0.id == schedule.id })
+                return response.message
+            }),
+            ("Delete Transfer Schedule", {
+                guard let schedule = diagnosticsTransferSchedule else {
+                    throw BudgetDataError.invalidOperation("Missing transfer schedule for deletion")
+                }
+                try await self.store.deleteTransferSchedule(id: schedule.id)
+                diagnosticsTransferSchedule = nil
+                return "Removed transfer schedule"
+            }),
+            ("Delete Scheduled Payment", {
+                guard let account = diagnosticsAccount, let payment = diagnosticsScheduledPayment else {
+                    throw BudgetDataError.invalidOperation("Missing scheduled payment for deletion")
+                }
+                try await self.store.deleteScheduledPayment(
+                    accountId: account.id,
+                    paymentName: payment.name,
+                    paymentDate: payment.date,
+                    potName: diagnosticsPot?.name
+                )
+                diagnosticsScheduledPayment = nil
+                return "Deleted scheduled payment"
+            }),
+            ("Delete Transaction", {
+                guard let transaction = diagnosticsTransaction else {
+                    throw BudgetDataError.invalidOperation("Missing transaction for deletion")
+                }
+                try await self.store.deleteTransaction(id: transaction.id)
+                diagnosticsTransaction = nil
+                return "Deleted transaction"
+            }),
+            ("Delete Target", {
+                guard let target = diagnosticsTarget else {
+                    throw BudgetDataError.invalidOperation("Missing target for deletion")
+                }
+                try await self.store.deleteTarget(id: target.id)
+                diagnosticsTarget = nil
+                return "Deleted target"
+            }),
+            ("Delete Income Schedule", {
+                guard let schedule = diagnosticsIncomeSchedule else {
+                    throw BudgetDataError.invalidOperation("Missing income schedule for deletion")
+                }
+                try await self.store.deleteIncomeSchedule(id: schedule.id)
+                diagnosticsIncomeSchedule = nil
+                return "Deleted income schedule"
+            }),
+            ("Delete Income", {
+                guard let account = diagnosticsAccount, let income = diagnosticsIncome else {
+                    throw BudgetDataError.invalidOperation("Missing income for deletion")
+                }
+                try await self.store.deleteIncome(accountId: account.id, incomeId: income.id)
+                diagnosticsIncome = nil
+                return "Deleted income record"
+            }),
             ("Delete Pot", {
-                guard let accountName = createdAccountName else { throw BudgetDataError.invalidOperation("Missing account for delete pot") }
-                try await self.store.deletePot(accountName: accountName, potName: "Diagnostics Pot")
-                return "Deleted diagnostics pot"
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for pot removal")
+                }
+                try await self.store.deletePot(accountName: account.name, potName: diagnosticsPotName)
+                diagnosticsPot = nil
+                return "Removed diagnostics pot"
             }),
             ("Delete Account", {
-                guard let accountId = createdAccountId else { throw BudgetDataError.invalidOperation("Missing account for delete") }
-                try await self.store.deleteAccount(id: accountId)
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for deletion")
+                }
+                try await self.store.deleteAccount(id: account.id)
+                diagnosticsAccount = nil
                 return "Deleted diagnostics account"
             }),
             ("Reset Balances", {
                 let reset = try await self.store.resetBalances()
                 self.accountsStore?.applyAccounts(reset.accounts)
                 return "Reset \(reset.accounts.count) accounts"
+            }),
+            ("Reload Accounts", {
+                await self.accountsStore?.loadAccounts()
+                return "Accounts refreshed"
             })
         ]
 
@@ -96,18 +366,9 @@ final class DiagnosticsStore: ObservableObject {
             }
             steps = updatedSteps
         }
-
-        await accountsStore?.loadAccounts()
     }
 
     private static func defaultSteps() -> [DiagnosticStep] {
-        [
-            DiagnosticStep(name: "Fetch Accounts"),
-            DiagnosticStep(name: "Add Account"),
-            DiagnosticStep(name: "Add Pot"),
-            DiagnosticStep(name: "Delete Pot"),
-            DiagnosticStep(name: "Delete Account"),
-            DiagnosticStep(name: "Reset Balances")
-        ]
+        stepNames.map { DiagnosticStep(name: $0) }
     }
 }

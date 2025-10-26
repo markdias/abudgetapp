@@ -1697,22 +1697,37 @@ private struct PotsPanelSection: View {
     var onTapPot: (Account, Pot) -> Void = { _, _ in }
     var onDeletePot: (Account, Pot) -> Void = { _, _ in }
 
-    private var allPots: [(account: Account, pot: Pot)] {
-        var items: [(account: Account, pot: Pot)] = []
+    @State private var collapsedAccountIds: Set<Int> = []
+
+    private var groupedPots: [(account: Account, pots: [Pot])] {
         let sourceAccounts: [Account] = {
-            if let id = selectedAccountId, let acct = accounts.first(where: { $0.id == id }) { return [acct] }
+            if let id = selectedAccountId,
+               let acct = accounts.first(where: { $0.id == id }) {
+                return [acct]
+            }
             return accounts
         }()
-        for account in sourceAccounts {
-            let sourcePots = (account.pots ?? potsByAccount[account.id] ?? [])
-            for pot in sourcePots {
-                items.append((account: account, pot: pot))
+        var collection: [(Account, [Pot])] = []
+        for account in sourceAccounts.sorted(by: { $0.name < $1.name }) {
+            let pots = (account.pots ?? potsByAccount[account.id] ?? []).sorted { $0.name < $1.name }
+            if !pots.isEmpty {
+                collection.append((account, pots))
             }
         }
-        // Sort by account then pot name
-        return items.sorted { lhs, rhs in
-            if lhs.account.name == rhs.account.name { return lhs.pot.name < rhs.pot.name }
-            return lhs.account.name < rhs.account.name
+        return collection
+    }
+
+    private func isCollapsed(_ accountId: Int) -> Bool {
+        collapsedAccountIds.contains(accountId)
+    }
+
+    private func toggleAccount(_ accountId: Int) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            if collapsedAccountIds.contains(accountId) {
+                collapsedAccountIds.remove(accountId)
+            } else {
+                collapsedAccountIds.insert(accountId)
+            }
         }
     }
 
@@ -1724,7 +1739,7 @@ private struct PotsPanelSection: View {
                 Spacer()
             }
 
-            if allPots.isEmpty {
+            if groupedPots.isEmpty {
                 ContentUnavailableView(
                     "No Pots",
                     systemImage: "tray",
@@ -1732,23 +1747,58 @@ private struct PotsPanelSection: View {
                 )
             } else {
                 VStack(spacing: 10) {
-                    ForEach(Array(allPots.enumerated()), id: \.offset) { _, item in
-                        PotRow(pot: item.pot, accountName: item.account.name)
-                            .onTapGesture { onTapPot(item.account, item.pot) }
-                            .contextMenu {
-                                Button("Manage") { onTapPot(item.account, item.pot) }
-                                Button(role: .destructive) { onDeletePot(item.account, item.pot) } label: {
-                                    Label("Delete", systemImage: "trash")
+                    ForEach(groupedPots, id: \.account.id) { entry in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Button {
+                                toggleAccount(entry.account.id)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.account.name)
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                        Text("\(entry.pots.count) pot\(entry.pots.count == 1 ? "" : "s")")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: isCollapsed(entry.account.id) ? "chevron.right" : "chevron.down")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.secondary)
                                 }
+                                .padding(.vertical, 4)
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) { onDeletePot(item.account, item.pot) } label: {
-                                    Label("Delete", systemImage: "trash")
+                            .buttonStyle(.plain)
+
+                            if !isCollapsed(entry.account.id) {
+                                VStack(spacing: 10) {
+                                    ForEach(entry.pots, id: \.id) { pot in
+                                        PotRow(pot: pot, accountName: entry.account.name)
+                                            .onTapGesture { onTapPot(entry.account, pot) }
+                                            .contextMenu {
+                                                Button("Manage") { onTapPot(entry.account, pot) }
+                                                Button(role: .destructive) { onDeletePot(entry.account, pot) } label: {
+                                                    Label("Delete", systemImage: "trash")
+                                                }
+                                            }
+                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                Button(role: .destructive) { onDeletePot(entry.account, pot) } label: {
+                                                    Label("Delete", systemImage: "trash")
+                                                }
+                                                Button { onTapPot(entry.account, pot) } label: {
+                                                    Label("Edit", systemImage: "pencil")
+                                                }.tint(.blue)
+                                            }
+                                    }
                                 }
-                                Button { onTapPot(item.account, item.pot) } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }.tint(.blue)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                             }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
                     }
                 }
             }
@@ -1785,8 +1835,14 @@ private struct PotEditorSheet: View {
                     TextField("Name", text: $name)
                     TextField("Balance", text: $balance).keyboardType(.decimalPad)
                     Toggle("Exclude from Reset", isOn: $excludeFromReset)
-                        .onChange(of: excludeFromReset) { _, newValue in
-                            Task { await potsStore.toggleExclusion(accountId: context.account.id, potName: context.pot.name) }
+                        .onChange(of: excludeFromReset) { _, _ in
+                            let currentBalance = balance
+                            Task {
+                                await potsStore.toggleExclusion(accountId: context.account.id, potName: context.pot.name)
+                                await MainActor.run {
+                                    balance = currentBalance
+                                }
+                            }
                         }
                 }
                 Section("Transactions") {

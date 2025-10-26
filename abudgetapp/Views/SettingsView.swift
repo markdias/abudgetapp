@@ -64,9 +64,9 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Tools") {
-                    Button("Reorder Cards") { showingCardReorder = true }
+                Section("Diagnostics") {
                     Button("Run Diagnostics") { showingDiagnostics = true }
+                    Button("Reorder Cards") { showingCardReorder = true }
                 }
 
                 Section("About") {
