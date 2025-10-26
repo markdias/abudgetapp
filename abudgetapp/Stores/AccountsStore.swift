@@ -244,8 +244,8 @@ final class AccountsStore: ObservableObject {
     }
 
     @discardableResult
-    func processScheduledTransactionsIfNeeded(upTo date: Date) async -> Int {
-        guard UserDefaults.standard.bool(forKey: "processTransactionsEnabled") else { return 0 }
+    func processScheduledTransactionsIfNeeded(upTo date: Date, bypassToggle: Bool = false) async -> Int {
+        guard bypassToggle || UserDefaults.standard.bool(forKey: "processTransactionsEnabled") else { return 0 }
         do {
             let processed = try await store.processScheduledTransactions(upTo: date)
             guard !processed.isEmpty else { return 0 }

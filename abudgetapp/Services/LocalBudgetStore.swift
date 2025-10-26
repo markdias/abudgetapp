@@ -436,8 +436,7 @@ actor LocalBudgetStore {
     }
 
     func processScheduledTransactions(upTo throughDate: Date) throws -> [TransactionRecord] {
-        guard let transferRaw = state.lastTransferExecutionAt,
-              let transferDate = LocalBudgetStore.isoFormatter.date(from: transferRaw) else {
+        guard let transferDate = mostRecentTransferExecutionDate() else {
             return []
         }
         if throughDate < transferDate {
@@ -933,6 +932,24 @@ actor LocalBudgetStore {
             return simple
         }
         return nil
+    }
+
+    private func mostRecentTransferExecutionDate() -> Date? {
+        if let raw = state.lastTransferExecutionAt,
+           let parsed = LocalBudgetStore.isoFormatter.date(from: raw) {
+            return parsed
+        }
+
+        let fallback = state.transferSchedules.compactMap { schedule -> Date? in
+            guard let raw = schedule.lastExecuted else { return nil }
+            return parseDate(from: raw)
+        }.max()
+
+        if let fallback, state.lastTransferExecutionAt == nil {
+            state.lastTransferExecutionAt = LocalBudgetStore.isoFormatter.string(from: fallback)
+        }
+
+        return fallback
     }
 
     private func applyScheduledPayment(context: ScheduledPaymentProcessContext) throws -> TransactionRecord {

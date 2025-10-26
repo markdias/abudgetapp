@@ -10,6 +10,8 @@ struct TransfersView: View {
     @State private var showingResetConfirm = false
     @State private var showingSalarySorter = false
     @State private var showingProcessedTransactions = false
+    @State private var isProcessingTransactions = false
+    @State private var processTransactionsFeedback: String?
 
     var body: some View {
         NavigationStack {
@@ -24,8 +26,39 @@ struct TransfersView: View {
                         LargeActionButton(title: "Processed Transactions", color: .indigo) {
                             showingProcessedTransactions = true
                         }
+                        LargeActionButton(title: "Process Transactions Now", color: .orange) {
+                            guard !isProcessingTransactions else { return }
+                            isProcessingTransactions = true
+                            processTransactionsFeedback = nil
+                            Task {
+                                let processedCount = await accountsStore.processScheduledTransactionsIfNeeded(upTo: Date(), bypassToggle: true)
+                                await MainActor.run {
+                                    if processedCount > 0 {
+                                        let suffix = processedCount == 1 ? "scheduled payment" : "scheduled payments"
+                                        processTransactionsFeedback = "Processed \(processedCount) \(suffix)."
+                                    } else {
+                                        processTransactionsFeedback = "No scheduled payments were pending."
+                                    }
+                                    isProcessingTransactions = false
+                                }
+                            }
+                        }
+                        .disabled(isProcessingTransactions)
+                        .overlay {
+                            if isProcessingTransactions {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .tint(.white)
+                            }
+                        }
                         LargeActionButton(title: "Reset Balance", color: .red) {
                             showingResetConfirm = true
+                        }
+                        if let feedback = processTransactionsFeedback {
+                            Text(feedback)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .frame(maxWidth: 420)
