@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
+    @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     @State private var storageStatus: String?
     @State private var storageStatusIsSuccess = false
@@ -17,6 +18,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Appearance") {
+                    Picker("Appearance", selection: $appAppearanceRaw) {
+                        Text("Always Light").tag(AppAppearance.light.rawValue)
+                        Text("Always Dark").tag(AppAppearance.dark.rawValue)
+                        Text("System Settings").tag(AppAppearance.system.rawValue)
+                    }
+                }
                 Section("Activities") {
                     Picker("Sort By", selection: activitiesSortBinding) {
                         Text("Name").tag("name")
@@ -234,4 +242,10 @@ struct SettingsView: View {
     return SettingsView()
         .environmentObject(accounts)
         .environmentObject(diagnostics)
+}
+// MARK: - Appearance Preference
+enum AppAppearance: String, CaseIterable {
+    case system
+    case light
+    case dark
 }

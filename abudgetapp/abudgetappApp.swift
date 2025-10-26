@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct MyBudgetApp: App {
+    @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @StateObject private var accountsStore: AccountsStore
     @StateObject private var potsStore: PotsStore
     @StateObject private var diagnosticsStore: DiagnosticsStore
@@ -30,7 +31,7 @@ struct MyBudgetApp: App {
                 .environmentObject(scheduledPaymentsStore)
                 .environmentObject(incomeSchedulesStore)
                 .environmentObject(transferSchedulesStore)
-                .preferredColorScheme(.light)
+                .preferredColorScheme(mappedColorScheme)
                 .accentColor(.purple)
                 .task {
                     await bootstrap()
@@ -41,6 +42,18 @@ struct MyBudgetApp: App {
     private func bootstrap() async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await accountsStore.loadAccounts() }
+        }
+    }
+}
+
+// MARK: - Appearance mapping used by App
+private extension MyBudgetApp {
+    var mappedColorScheme: ColorScheme? {
+        guard let pref = AppAppearance(rawValue: appAppearanceRaw) else { return nil }
+        switch pref {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
         }
     }
 }
