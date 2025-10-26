@@ -7,7 +7,6 @@ struct SettingsView: View {
 
     @State private var storageStatus: String?
     @State private var storageStatusIsSuccess = false
-    @State private var isRestoringSample = false
     @State private var showingCardReorder = false
     @State private var showingDiagnostics = false
     @State private var showingDeleteAllConfirm = false
@@ -30,6 +29,7 @@ struct SettingsView: View {
                         Text("Name").tag("name")
                         Text("Day").tag("day")
                         Text("Type").tag("type")
+                        Text("Value").tag("value")
                     }
                     Stepper(value: activitiesMaxItemsBinding, in: 1...50) {
                         HStack {
@@ -45,8 +45,6 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .font(.footnote)
                         .padding(.vertical, 4)
-                    Button("Restore Sample Dataset", role: .destructive) { restoreSampleData() }
-                        .disabled(isRestoringSample)
                     if let status = storageStatus {
                         Label(status, systemImage: storageStatusIsSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                             .foregroundColor(storageStatusIsSuccess ? .green : .orange)
@@ -55,12 +53,15 @@ struct SettingsView: View {
                 }
 
                 Section("Data Management") {
-                    Button("Reload Data") { refreshAll() }
-                    Button("Import Data (JSON)") { showingImporter = true }
-                    Button("Export Data (JSON)") { Task { await exportAllData() } }
-                    Button("Delete All Data", role: .destructive) { showingDeleteAllConfirm = true }
-                        .tint(.red)
-                        .disabled(accountsStore.accounts.isEmpty)
+                    Menu {
+                        Button("Reload Data") { refreshAll() }
+                        Button("Import Data (JSON)") { showingImporter = true }
+                        Button("Export Data (JSON)") { Task { await exportAllData() } }
+                        Button("Delete All Data", role: .destructive) { showingDeleteAllConfirm = true }
+                            .disabled(accountsStore.accounts.isEmpty)
+                    } label: {
+                        Label("Manage Data", systemImage: "gearshape.2")
+                    }
                 }
 
                 Section("Tools") {
@@ -156,37 +157,6 @@ struct SettingsView: View {
     private func refreshAll() {
         Task {
             await accountsStore.loadAccounts()
-        }
-    }
-
-    private func restoreSampleData() {
-        if isRestoringSample { return }
-        storageStatus = nil
-        isRestoringSample = true
-        Task {
-            do {
-                let snapshot = try await LocalBudgetStore.shared.restoreSample()
-                await MainActor.run {
-                    accountsStore.applyAccounts(snapshot.accounts)
-                    storageStatus = "Sample data restored"
-                    storageStatusIsSuccess = true
-                }
-            } catch let error as LocalBudgetStore.StoreError {
-                let dataError = error.asBudgetDataError
-                await MainActor.run {
-                    storageStatus = dataError.localizedDescription
-                    storageStatusIsSuccess = false
-                }
-            } catch {
-                let apiError = BudgetDataError.unknown(error)
-                await MainActor.run {
-                    storageStatus = apiError.localizedDescription
-                    storageStatusIsSuccess = false
-                }
-            }
-            await MainActor.run {
-                isRestoringSample = false
-            }
         }
     }
 

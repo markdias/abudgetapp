@@ -507,6 +507,15 @@ struct ActivitiesPanelSection: View {
         switch sortOrderRaw.lowercased() {
         case "name":
             sorted = filteredBySearch.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case "value":
+            sorted = filteredBySearch.sorted {
+                let lhs = abs($0.amount)
+                let rhs = abs($1.amount)
+                if lhs == rhs {
+                    return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                return lhs > rhs
+            }
         case "type":
             sorted = filteredBySearch.sorted {
                 // income, transaction, target; then by title
