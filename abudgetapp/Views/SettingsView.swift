@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("autoProcessTransactionsEnabled") private var autoProcessTransactionsEnabled = false
+    @AppStorage("autoReduceBalancesEnabled") private var autoReduceBalancesEnabled = false
 
     @State private var storageStatus: String?
     @State private var storageStatusIsSuccess = false
@@ -44,6 +45,10 @@ struct SettingsView: View {
                 Section("Automation") {
                     Toggle("Process Transactions Automatically", isOn: $autoProcessTransactionsEnabled)
                     Text("When enabled, scheduled transactions are processed whenever the app launches.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Toggle("Reduce Balances Automatically", isOn: $autoReduceBalancesEnabled)
+                    Text("When enabled, account balances reduce in line with the month whenever the app becomes active.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

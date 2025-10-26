@@ -47,6 +47,8 @@ public struct Account: Identifiable, Codable, Hashable {
     public var scheduled_payments: [ScheduledPayment]?
     public var incomes: [Income]?
     public var expenses: [Expense]?
+    public var monthlyBaselineBalance: Double?
+    public var monthlyBaselineMonth: String?
     
     public var formattedBalance: String {
         return "£\(String(format: "%.2f", abs(balance)))"
@@ -68,6 +70,8 @@ public struct Account: Identifiable, Codable, Hashable {
         hasher.combine(scheduled_payments)
         hasher.combine(incomes)
         hasher.combine(expenses)
+        hasher.combine(monthlyBaselineBalance)
+        hasher.combine(monthlyBaselineMonth)
     }
     
     public static func == (lhs: Account, rhs: Account) -> Bool {
@@ -81,12 +85,15 @@ public struct Account: Identifiable, Codable, Hashable {
             lhs.pots == rhs.pots &&
             lhs.scheduled_payments == rhs.scheduled_payments &&
             lhs.incomes == rhs.incomes &&
-            lhs.expenses == rhs.expenses
+            lhs.expenses == rhs.expenses &&
+            lhs.monthlyBaselineBalance == rhs.monthlyBaselineBalance &&
+            lhs.monthlyBaselineMonth == rhs.monthlyBaselineMonth
     }
     
     public init(id: Int, name: String, balance: Double, type: String, accountType: String? = nil,
          credit_limit: Double? = nil, excludeFromReset: Bool? = nil, pots: [Pot]? = nil,
-         scheduled_payments: [ScheduledPayment]? = nil, incomes: [Income]? = nil, expenses: [Expense]? = nil) {
+         scheduled_payments: [ScheduledPayment]? = nil, incomes: [Income]? = nil, expenses: [Expense]? = nil,
+         monthlyBaselineBalance: Double? = nil, monthlyBaselineMonth: String? = nil) {
         self.id = id
         self.name = name
         self.balance = balance
@@ -98,6 +105,8 @@ public struct Account: Identifiable, Codable, Hashable {
         self.scheduled_payments = scheduled_payments
         self.incomes = incomes
         self.expenses = expenses
+        self.monthlyBaselineBalance = monthlyBaselineBalance
+        self.monthlyBaselineMonth = monthlyBaselineMonth
     }
 }
 
@@ -320,6 +329,40 @@ public struct ProcessTransactionsResult: Codable {
         self.effectiveDay = effectiveDay
         self.transferExecutedAt = transferExecutedAt
         self.blockedReason = blockedReason
+    }
+}
+
+public struct BalanceReductionLog: Identifiable, Codable, Hashable {
+    public let id: Int
+    public let timestamp: String
+    public let monthKey: String
+    public let dayOfMonth: Int
+    public let accountId: Int
+    public let accountName: String
+    public let baselineBalance: Double
+    public let resultingBalance: Double
+    public let reductionAmount: Double
+
+    public init(
+        id: Int,
+        timestamp: String,
+        monthKey: String,
+        dayOfMonth: Int,
+        accountId: Int,
+        accountName: String,
+        baselineBalance: Double,
+        resultingBalance: Double,
+        reductionAmount: Double
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.monthKey = monthKey
+        self.dayOfMonth = dayOfMonth
+        self.accountId = accountId
+        self.accountName = accountName
+        self.baselineBalance = baselineBalance
+        self.resultingBalance = resultingBalance
+        self.reductionAmount = reductionAmount
     }
 }
 
