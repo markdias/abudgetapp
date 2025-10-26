@@ -6,6 +6,8 @@ struct HomeView: View {
     @EnvironmentObject private var potsStore: PotsStore
     @EnvironmentObject private var scheduledPaymentsStore: ScheduledPaymentsStore
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
+    @EnvironmentObject private var incomeSchedulesStore: IncomeSchedulesStore
+    @EnvironmentObject private var transferSchedulesStore: TransferSchedulesStore
 
     @Binding var selectedTab: Int
 
@@ -20,6 +22,11 @@ struct HomeView: View {
     // Removed savings and income schedules
     // Reorder moved to Settings
     @State private var showingDiagnostics = false
+    @State private var showingTransferSchedules = false
+    @State private var showingIncomeSchedules = false
+    @State private var showingSalarySorter = false
+    @State private var showingResetConfirm = false
+    @State private var isResettingBalances = false
     @State private var selectedAccountId: Int? = nil
     @State private var addIncomeTargetAccountId: Int? = nil
     @State private var addTransactionTargetAccountId: Int? = nil
@@ -32,10 +39,7 @@ struct HomeView: View {
 
     private let cardSpacing: CGFloat = 72
 
-    private var filteredAccounts: [Account] {
-        guard !searchText.isEmpty else { return accountsStore.accounts }
-        return accountsStore.accounts.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-    }
+    private var filteredAccounts: [Account] { accountsStore.accounts }
 
     private var reorderableAccounts: [Account] {
         // Show all accounts including savings/investments in the card stack
@@ -65,7 +69,6 @@ struct HomeView: View {
                         StackedAccountDeck(
                             accounts: reorderableAccounts,
                             selectedAccountId: $selectedAccountId,
-                            searchText: searchText,
                             spacing: cardSpacing,
                             onReorder: handleReorder,
                             onAddPot: { _ in showingAddPot = true },
@@ -79,7 +82,8 @@ struct HomeView: View {
                         accounts: accountsStore.accounts,
                         transactions: accountsStore.transactions,
                         targets: accountsStore.targets,
-                        selectedAccountId: selectedAccountId
+                        selectedAccountId: selectedAccountId,
+                        searchText: searchText
                     )
 
                     PotsPanelSection(
@@ -96,8 +100,11 @@ struct HomeView: View {
 
                     QuickActionsView(
                         onManagePots: { showingPotsManager = true },
-                        onDiagnostics: { showingDiagnostics = true },
-                        onSettings: { selectedTab = 3 }
+                        onTransferSchedules: { showingTransferSchedules = true },
+                        onIncomeSchedules: { showingIncomeSchedules = true },
+                        onSalarySorter: { showingSalarySorter = true },
+                        onResetBalances: { showingResetConfirm = true },
+                        onDiagnostics: { showingDiagnostics = true }
                     )
 
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
@@ -172,12 +179,30 @@ struct HomeView: View {
             .sheet(isPresented: $showingPotsManager) {
                 PotsManagementView(isPresented: $showingPotsManager)
             }
+            .sheet(isPresented: $showingTransferSchedules) {
+                ManageTransferSchedulesView(isPresented: $showingTransferSchedules)
+            }
+            .sheet(isPresented: $showingIncomeSchedules) {
+                ManageIncomeSchedulesView(isPresented: $showingIncomeSchedules)
+            }
+            .sheet(isPresented: $showingSalarySorter) {
+                SalarySorterView(isPresented: $showingSalarySorter)
+            }
             // Reorder moved to Settings
             .sheet(isPresented: $showingDiagnostics) {
                 DiagnosticsRunnerView(isPresented: $showingDiagnostics)
             }
             .sheet(item: $selectedPotContext) { context in
                 PotEditorSheet(context: context)
+            }
+            .alert("Reset Balances?", isPresented: $showingResetConfirm) {
+                Button("Reset", role: .destructive) {
+                    Task { await resetBalances() }
+                }
+                .disabled(isResettingBalances)
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will set all non-excluded card and pot balances to 0 and re-enable all scheduled incomes for execution.")
             }
             // Activity editor removed
         }
@@ -194,6 +219,17 @@ struct HomeView: View {
         Task {
             await accountsStore.reorderAccounts(fromOffsets: IndexSet(integer: sourceIndex), toOffset: max(target, 0))
         }
+    }
+
+    @MainActor
+    private func resetBalances() async {
+        guard !isResettingBalances else { return }
+        isResettingBalances = true
+        defer { isResettingBalances = false }
+        await accountsStore.resetBalances()
+        await accountsStore.loadAccounts()
+        await incomeSchedulesStore.load()
+        await transferSchedulesStore.load()
     }
 }
 
@@ -237,7 +273,6 @@ private struct BalanceSummaryCard: View {
 private struct StackedAccountDeck: View {
     let accounts: [Account]
     @Binding var selectedAccountId: Int?
-    let searchText: String
     let spacing: CGFloat
     let onReorder: (Int, Int) -> Void
     let onAddPot: (Account) -> Void
@@ -343,6 +378,7 @@ struct ActivitiesPanelSection: View {
     var limit: Int? = nil
     // Optional pot filter (only applied on Activities screen usage)
     var selectedPotName: String? = nil
+    var searchText: String = ""
     @AppStorage("activitiesMaxItems") private var maxItemsSetting: Int = 6
 
     @State private var filter: Filter = .all
@@ -460,14 +496,19 @@ struct ActivitiesPanelSection: View {
             }
             return filteredByType
         }()
+        let filteredBySearch: [Item] = {
+            let term = normalizedSearch
+            guard !term.isEmpty else { return filtered }
+            return filtered.filter { matchesSearch($0, term: term) }
+        }()
 
         // Apply sort from settings
         let sorted: [Item]
         switch sortOrderRaw.lowercased() {
         case "name":
-            sorted = filtered.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            sorted = filteredBySearch.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         case "type":
-            sorted = filtered.sorted {
+            sorted = filteredBySearch.sorted {
                 // income, transaction, target; then by title
                 func priority(_ k: Kind) -> Int { k == .income ? 0 : (k == .transaction ? 1 : 2) }
                 let lp = priority($0.kind), rp = priority($1.kind)
@@ -475,12 +516,16 @@ struct ActivitiesPanelSection: View {
                 return lp < rp
             }
         default: // "day"
-            sorted = filtered.sorted {
+            sorted = filteredBySearch.sorted {
                 if let ld = Int($0.dateString), let rd = Int($1.dateString) { return ld > rd }
                 return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
         }
         return sorted
+    }
+
+    private var normalizedSearch: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -499,7 +544,14 @@ struct ActivitiesPanelSection: View {
                 .pickerStyle(.segmented)
             }
 
+            if !normalizedSearch.isEmpty {
+                Text("Results for “\(normalizedSearch)”")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             let itemsToShow: [Item] = {
+                if !normalizedSearch.isEmpty { return combinedItems }
                 if let limit { return Array(combinedItems.prefix(limit)) }
                 if maxItemsSetting > 0 { return Array(combinedItems.prefix(maxItemsSetting)) }
                 return combinedItems
@@ -507,9 +559,9 @@ struct ActivitiesPanelSection: View {
 
             if itemsToShow.isEmpty {
                 ContentUnavailableView(
-                    selectedAccountId != nil ? "No Activities for Card" : "No Activities",
+                    !normalizedSearch.isEmpty ? "No Results" : (selectedAccountId != nil ? "No Activities for Card" : "No Activities"),
                     systemImage: "tray",
-                    description: Text("Add incomes or transactions to see them here.")
+                    description: noResultsMessage
                 )
             } else {
                 VStack(spacing: 10) {
@@ -559,6 +611,24 @@ struct ActivitiesPanelSection: View {
                 EditTargetSheet(targetId: id, isPresented: $showEditTarget)
             }
         }
+    }
+
+    private func matchesSearch(_ item: Item, term: String) -> Bool {
+        if item.title.localizedCaseInsensitiveContains(term) { return true }
+        if let company = item.company, company.localizedCaseInsensitiveContains(term) { return true }
+        if item.accountName.localizedCaseInsensitiveContains(term) { return true }
+        if let pot = item.potName, pot.localizedCaseInsensitiveContains(term) { return true }
+        let sanitizedTerm = term.replacingOccurrences(of: "£", with: "")
+        let amountString = String(format: "%.2f", item.amount)
+        if amountString.localizedCaseInsensitiveContains(sanitizedTerm) { return true }
+        return false
+    }
+
+    private var noResultsMessage: Text {
+        if !normalizedSearch.isEmpty {
+            return Text("Try a different search term or clear the search to see recent activity.")
+        }
+        return Text("Add incomes or transactions to see them here.")
     }
 }
 
@@ -1268,19 +1338,27 @@ private struct AccountCardView: View {
 
 private struct QuickActionsView: View {
     let onManagePots: () -> Void
+    let onTransferSchedules: () -> Void
+    let onIncomeSchedules: () -> Void
+    let onSalarySorter: () -> Void
+    let onResetBalances: () -> Void
     let onDiagnostics: () -> Void
-    let onSettings: () -> Void
+
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 16), count: 3)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Shortcuts")
                 .font(.headline)
-            HStack(spacing: 16) {
-                QuickActionButton(icon: "tray.and.arrow.down", title: "Pots", action: onManagePots)
-                QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", action: onDiagnostics)
-            }
-            HStack(spacing: 16) {
-                QuickActionButton(icon: "gearshape", title: "Settings", action: onSettings)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                QuickActionButton(icon: "tray.and.arrow.down", title: "Manage Pots", tint: .indigo, action: onManagePots)
+                QuickActionButton(icon: "arrow.left.arrow.right", title: "Transfer Schedules", tint: .blue, action: onTransferSchedules)
+                QuickActionButton(icon: "calendar.badge.clock", title: "Income Schedules", tint: .green, action: onIncomeSchedules)
+                QuickActionButton(icon: "chart.pie.fill", title: "Salary Sorter", tint: .purple, action: onSalarySorter)
+                QuickActionButton(icon: "arrow.counterclockwise", title: "Reset Balances", tint: .red, action: onResetBalances)
+                QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", tint: .orange, action: onDiagnostics)
             }
         }
         .padding()
@@ -1293,6 +1371,7 @@ private struct QuickActionsView: View {
 private struct QuickActionButton: View {
     let icon: String
     let title: String
+    let tint: Color
     let action: () -> Void
 
     var body: some View {
@@ -1302,7 +1381,7 @@ private struct QuickActionButton: View {
                     .font(.title2)
                     .foregroundColor(.white)
                     .frame(width: 50, height: 50)
-                    .background(Color.purple)
+                    .background(tint)
                     .clipShape(Circle())
                 Text(title)
                     .font(.caption)
