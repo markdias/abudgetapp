@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct MyBudgetApp: App {
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage("autoProcessTransactionsEnabled") private var autoProcessTransactionsEnabled = false
     @StateObject private var accountsStore: AccountsStore
     @StateObject private var potsStore: PotsStore
     @StateObject private var diagnosticsStore: DiagnosticsStore
@@ -42,6 +43,9 @@ struct MyBudgetApp: App {
     private func bootstrap() async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await accountsStore.loadAccounts() }
+        }
+        if autoProcessTransactionsEnabled {
+            await accountsStore.processScheduledTransactions()
         }
     }
 }

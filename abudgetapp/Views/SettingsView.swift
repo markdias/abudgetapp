@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage("autoProcessTransactionsEnabled") private var autoProcessTransactionsEnabled = false
 
     @State private var storageStatus: String?
     @State private var storageStatusIsSuccess = false
@@ -39,6 +40,12 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                }
+                Section("Automation") {
+                    Toggle("Process Transactions Automatically", isOn: $autoProcessTransactionsEnabled)
+                    Text("When enabled, scheduled transactions are processed whenever the app launches.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Local Storage") {
                     Label("Data is stored securely on this device and synced between views automatically.", systemImage: "internaldrive")

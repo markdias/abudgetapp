@@ -8,6 +8,9 @@
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("autoProcessTransactionsEnabled") private var autoProcessingEnabled = false
     @State private var selectedTab = 0
 
     var body: some View {
@@ -37,9 +40,20 @@ struct ContentView: View {
                 .tag(3)
         }
         .tint(.purple)
+        .onChange(of: scenePhase) { _, newPhase in
+            guard autoProcessingEnabled, newPhase == .active else { return }
+            Task { await accountsStore.processScheduledTransactions() }
+        }
     }
 }
 
 #Preview {
-    ContentView()
+    let accounts = AccountsStore()
+    return ContentView()
+        .environmentObject(accounts)
+        .environmentObject(PotsStore(accountsStore: accounts))
+        .environmentObject(DiagnosticsStore(accountsStore: accounts))
+        .environmentObject(ScheduledPaymentsStore(accountsStore: accounts))
+        .environmentObject(IncomeSchedulesStore(accountsStore: accounts))
+        .environmentObject(TransferSchedulesStore(accountsStore: accounts))
 }

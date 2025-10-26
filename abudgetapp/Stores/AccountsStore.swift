@@ -9,6 +9,7 @@ final class AccountsStore: ObservableObject {
     }
     // Removed transactions tracking
     @Published private(set) var transactions: [TransactionRecord] = []
+    @Published private(set) var processedTransactionLogs: [ProcessedTransactionLog] = []
     @Published private(set) var targets: [TargetRecord] = []
     @Published var isLoading = false
     @Published var statusMessage: StatusMessage?
@@ -28,6 +29,7 @@ final class AccountsStore: ObservableObject {
         let fetchedAccounts = await store.currentAccounts()
         accounts = fetchedAccounts
         transactions = await store.currentTransactions()
+        processedTransactionLogs = await store.currentProcessedTransactions()
         targets = await store.currentTargets()
         // Removed transfer queue; no pruning needed
     }
@@ -241,6 +243,42 @@ final class AccountsStore: ObservableObject {
 
     func transaction(for id: Int) -> TransactionRecord? {
         transactions.first { $0.id == id }
+    }
+
+    @discardableResult
+    func processScheduledTransactions(forceManual: Bool = false) async -> ProcessTransactionsResult? {
+        do {
+            let result = try await store.processScheduledTransactions(forceManual: forceManual)
+            applyAccounts(result.accounts)
+            transactions = result.transactions
+            processedTransactionLogs = await store.currentProcessedTransactions()
+
+            if let reason = result.blockedReason {
+                statusMessage = StatusMessage(title: "Transfers Pending", message: reason, kind: .warning)
+            } else if !result.processed.isEmpty {
+                statusMessage = StatusMessage(
+                    title: "Transactions Processed",
+                    message: "Processed \(result.processed.count) scheduled transaction(s).",
+                    kind: .success
+                )
+            } else if forceManual {
+                statusMessage = StatusMessage(
+                    title: "No Transactions",
+                    message: "No scheduled transactions needed processing.",
+                    kind: .info
+                )
+            }
+            return result
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Processing Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Processing Failed", message: dataError.localizedDescription, kind: .error)
+        }
+        return nil
     }
 
     // MARK: - Targets

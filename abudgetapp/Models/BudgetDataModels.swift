@@ -220,6 +220,109 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     }
 }
 
+public struct ProcessedTransactionLog: Identifiable, Codable, Hashable {
+    public let id: Int
+    public let paymentId: Int
+    public let accountId: Int
+    public let potName: String?
+    public let amount: Double
+    public let day: Int
+    public let name: String
+    public let company: String
+    public let paymentType: String?
+    public let processedAt: String
+    public let period: String
+    public let wasManual: Bool
+
+    public init(
+        id: Int,
+        paymentId: Int,
+        accountId: Int,
+        potName: String?,
+        amount: Double,
+        day: Int,
+        name: String,
+        company: String,
+        paymentType: String?,
+        processedAt: String,
+        period: String,
+        wasManual: Bool
+    ) {
+        self.id = id
+        self.paymentId = paymentId
+        self.accountId = accountId
+        self.potName = potName
+        self.amount = amount
+        self.day = day
+        self.name = name
+        self.company = company
+        self.paymentType = paymentType
+        self.processedAt = processedAt
+        self.period = period
+        self.wasManual = wasManual
+    }
+
+    public static func == (lhs: ProcessedTransactionLog, rhs: ProcessedTransactionLog) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+public struct ProcessedTransactionSkip: Identifiable, Codable, Hashable {
+    public let id: String
+    public let paymentId: Int
+    public let accountId: Int
+    public let potName: String?
+    public let reason: String
+
+    public init(paymentId: Int, accountId: Int, potName: String?, reason: String) {
+        self.id = UUID().uuidString
+        self.paymentId = paymentId
+        self.accountId = accountId
+        self.potName = potName
+        self.reason = reason
+    }
+
+    public static func == (lhs: ProcessedTransactionSkip, rhs: ProcessedTransactionSkip) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+public struct ProcessTransactionsResult: Codable {
+    public let processed: [ProcessedTransactionLog]
+    public let skipped: [ProcessedTransactionSkip]
+    public let accounts: [Account]
+    public let transactions: [TransactionRecord]
+    public let effectiveDay: Int
+    public let transferExecutedAt: String?
+    public let blockedReason: String?
+
+    public init(
+        processed: [ProcessedTransactionLog],
+        skipped: [ProcessedTransactionSkip],
+        accounts: [Account],
+        transactions: [TransactionRecord],
+        effectiveDay: Int,
+        transferExecutedAt: String?,
+        blockedReason: String? = nil
+    ) {
+        self.processed = processed
+        self.skipped = skipped
+        self.accounts = accounts
+        self.transactions = transactions
+        self.effectiveDay = effectiveDay
+        self.transferExecutedAt = transferExecutedAt
+        self.blockedReason = blockedReason
+    }
+}
+
 // MARK: - Target Models
 public struct TargetRecord: Identifiable, Codable, Hashable {
     public let id: Int

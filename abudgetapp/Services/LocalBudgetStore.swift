@@ -19,6 +19,13 @@ actor LocalBudgetStore {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+    private static let yearMonthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM"
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
 
     private init() {
         self.encoder = JSONEncoder()
@@ -54,6 +61,10 @@ actor LocalBudgetStore {
 
     func currentTransactions() -> [TransactionRecord] {
         state.transactions
+    }
+
+    func currentProcessedTransactions() -> [ProcessedTransactionLog] {
+        state.processedTransactionLogs
     }
 
     func currentTargets() -> [TargetRecord] {
@@ -378,28 +389,36 @@ actor LocalBudgetStore {
         var schedule = state.transferSchedules[index]
         guard schedule.isActive else { throw StoreError.invalidOperation("Transfer schedule is inactive") }
         try applyTransfer(schedule: schedule)
+        let now = Date()
+        let stamp = LocalBudgetStore.isoFormatter.string(from: now)
         schedule.isCompleted = true
-        schedule.lastExecuted = LocalBudgetStore.isoFormatter.string(from: Date())
+        schedule.lastExecuted = stamp
         state.transferSchedules[index] = schedule
+        state.lastTransfersExecutedAt = stamp
         try persist()
         return MessageResponse(message: "Transfer schedule executed")
     }
 
     func executeAllTransferSchedules() throws -> IncomeExecutionResponse {
         var executed = 0
+        let now = Date()
+        let stamp = LocalBudgetStore.isoFormatter.string(from: now)
         for index in state.transferSchedules.indices {
             if state.transferSchedules[index].isActive && !state.transferSchedules[index].isCompleted {
                 let schedule = state.transferSchedules[index]
                 do {
                     try applyTransfer(schedule: schedule)
                     state.transferSchedules[index].isCompleted = true
-                    state.transferSchedules[index].lastExecuted = LocalBudgetStore.isoFormatter.string(from: Date())
+                    state.transferSchedules[index].lastExecuted = stamp
                     executed += 1
                 } catch {
                     // Skip schedules that cannot be executed (e.g., insufficient funds)
                     continue
                 }
             }
+        }
+        if executed > 0 {
+            state.lastTransfersExecutedAt = stamp
         }
         try persist()
         return IncomeExecutionResponse(accounts: state.accounts, executed_count: executed)
@@ -441,6 +460,162 @@ actor LocalBudgetStore {
         }
         _ = state.transactions.remove(at: index)
         try persist()
+    }
+
+    // MARK: - Scheduled Transaction Processing
+
+    func processScheduledTransactions(forceManual: Bool = false, asOf date: Date = Date()) throws -> ProcessTransactionsResult {
+        let now = date
+        let calendar = Calendar.current
+        let currentDay = calendar.component(.day, from: now)
+        var effectiveDay = currentDay
+        let period = LocalBudgetStore.periodString(for: now)
+        let isoNow = LocalBudgetStore.isoFormatter.string(from: now)
+
+        let hasActiveTransfers = state.transferSchedules.contains { $0.isActive }
+        var transferExecutedAtDate: Date?
+        if let stamp = state.lastTransfersExecutedAt {
+            transferExecutedAtDate = LocalBudgetStore.isoFormatter.date(from: stamp)
+        }
+        let transfersExecutedThisMonth: Bool = {
+            guard let exec = transferExecutedAtDate else { return false }
+            return calendar.isDate(exec, equalTo: now, toGranularity: .month)
+        }()
+        if let execDate = transferExecutedAtDate, transfersExecutedThisMonth {
+            let transferDay = calendar.component(.day, from: execDate)
+            effectiveDay = max(effectiveDay, transferDay)
+        }
+
+        if hasActiveTransfers && !transfersExecutedThisMonth {
+            return ProcessTransactionsResult(
+                processed: [],
+                skipped: [],
+                accounts: state.accounts,
+                transactions: state.transactions,
+                effectiveDay: effectiveDay,
+                transferExecutedAt: state.lastTransfersExecutedAt,
+                blockedReason: "Transfers have not been executed for the current month."
+            )
+        }
+
+        var processedLogs: [ProcessedTransactionLog] = []
+        var skipped: [ProcessedTransactionSkip] = []
+        var didMutate = false
+
+        let logsThisPeriod = state.processedTransactionLogs.filter { $0.period == period }
+        var processedIds = Set(logsThisPeriod.map { $0.paymentId })
+
+        struct PotKey: Hashable {
+            let accountId: Int
+            let potName: String
+        }
+
+        var remainingPerPot: [PotKey: Double] = [:]
+
+        for transaction in state.transactions {
+            guard LocalBudgetStore.isDayString(transaction.date),
+                  let scheduledDay = LocalBudgetStore.scheduledDay(from: transaction.date) else {
+                continue
+            }
+
+            if processedIds.contains(transaction.id) { continue }
+            if scheduledDay > effectiveDay { continue }
+
+            guard let accountIndex = state.accounts.firstIndex(where: { $0.id == transaction.toAccountId }) else {
+                skipped.append(ProcessedTransactionSkip(paymentId: transaction.id, accountId: transaction.toAccountId, potName: transaction.toPotName, reason: "Account not found"))
+                continue
+            }
+
+            var account = state.accounts[accountIndex]
+            var pots = account.pots ?? []
+            var didTouchPot = false
+
+            if let potName = transaction.toPotName, !potName.isEmpty {
+                if let potIndex = pots.firstIndex(where: { $0.name.caseInsensitiveCompare(potName) == .orderedSame }) {
+                    var pot = pots[potIndex]
+                    pot.balance -= transaction.amount
+                    pots[potIndex] = pot
+                    didTouchPot = true
+                } else {
+                    skipped.append(ProcessedTransactionSkip(paymentId: transaction.id, accountId: account.id, potName: transaction.toPotName, reason: "Pot not found"))
+                    continue
+                }
+            } else {
+                account.balance -= transaction.amount
+            }
+
+            if didTouchPot {
+                account.pots = pots
+            }
+            state.accounts[accountIndex] = account
+
+            let logId = state.nextProcessedTransactionLogId
+            state.nextProcessedTransactionLogId += 1
+            let log = ProcessedTransactionLog(
+                id: logId,
+                paymentId: transaction.id,
+                accountId: account.id,
+                potName: transaction.toPotName,
+                amount: transaction.amount,
+                day: scheduledDay,
+                name: transaction.name,
+                company: transaction.vendor,
+                paymentType: transaction.paymentType,
+                processedAt: isoNow,
+                period: period,
+                wasManual: forceManual
+            )
+            state.processedTransactionLogs.append(log)
+            processedLogs.append(log)
+            processedIds.insert(transaction.id)
+            didMutate = true
+        }
+
+        // Reconcile remaining pot balances with future-dated transactions to ensure parity.
+        for transaction in state.transactions {
+            guard LocalBudgetStore.isDayString(transaction.date),
+                  let scheduledDay = LocalBudgetStore.scheduledDay(from: transaction.date),
+                  scheduledDay > effectiveDay,
+                  let potName = transaction.toPotName,
+                  !potName.isEmpty else {
+                continue
+            }
+            let key = PotKey(accountId: transaction.toAccountId, potName: potName.lowercased())
+            remainingPerPot[key, default: 0] += transaction.amount
+        }
+
+        for index in state.accounts.indices {
+            var account = state.accounts[index]
+            guard var pots = account.pots, !pots.isEmpty else { continue }
+            var updated = false
+            for potIndex in pots.indices {
+                let key = PotKey(accountId: account.id, potName: pots[potIndex].name.lowercased())
+                let targetBalance = remainingPerPot[key] ?? 0
+                if abs(pots[potIndex].balance - targetBalance) > 0.0001 {
+                    pots[potIndex].balance = targetBalance
+                    updated = true
+                }
+            }
+            if updated {
+                account.pots = pots
+                state.accounts[index] = account
+                didMutate = true
+            }
+        }
+
+        if didMutate {
+            try persist()
+        }
+
+        return ProcessTransactionsResult(
+            processed: processedLogs,
+            skipped: skipped,
+            accounts: state.accounts,
+            transactions: state.transactions,
+            effectiveDay: effectiveDay,
+            transferExecutedAt: state.lastTransfersExecutedAt,
+            blockedReason: nil
+        )
     }
 
     // MARK: - Targets (Account-only, balance neutral)
@@ -588,6 +763,9 @@ actor LocalBudgetStore {
             state.transferSchedules[idx].isCompleted = false
             state.transferSchedules[idx].lastExecuted = nil
         }
+        state.lastTransfersExecutedAt = nil
+        state.processedTransactionLogs = []
+        state.nextProcessedTransactionLogId = 1
         // Track last reset timestamp
         state.lastResetAt = LocalBudgetStore.isoFormatter.string(from: Date())
         try persist()
@@ -703,6 +881,25 @@ actor LocalBudgetStore {
         pots[potIndex].scheduled_payments = payments
         account.pots = pots
         state.accounts[accountIndex] = account
+    }
+
+    private static func scheduledDay(from raw: String) -> Int? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let numeric = Int(trimmed) { return numeric }
+        if let date = isoFormatter.date(from: trimmed) {
+            return Calendar.current.component(.day, from: date)
+        }
+        return nil
+    }
+
+    private static func isDayString(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Int(trimmed), (1...31).contains(value) else { return false }
+        return trimmed.rangeOfCharacter(from: CharacterSet.decimalDigits.inverted) == nil
+    }
+
+    private static func periodString(for date: Date) -> String {
+        yearMonthFormatter.string(from: date)
     }
 
     private func applyIncome(schedule: IncomeSchedule) throws {
@@ -891,7 +1088,9 @@ private struct BudgetState: Codable {
     var transferSchedules: [TransferSchedule]
     var transactions: [TransactionRecord]
     var targets: [TargetRecord]
+    var processedTransactionLogs: [ProcessedTransactionLog]
     var lastResetAt: String?
+    var lastTransfersExecutedAt: String?
     var nextAccountId: Int
     var nextPotId: Int
     var nextIncomeId: Int
@@ -901,6 +1100,7 @@ private struct BudgetState: Codable {
     var nextScheduledPaymentId: Int
     var nextIncomeScheduleId: Int
     var nextTransferScheduleId: Int
+    var nextProcessedTransactionLogId: Int
 
     init(
         accounts: [Account],
@@ -909,6 +1109,8 @@ private struct BudgetState: Codable {
         transactions: [TransactionRecord],
         targets: [TargetRecord],
         lastResetAt: String? = nil,
+        processedTransactionLogs: [ProcessedTransactionLog],
+        lastTransfersExecutedAt: String?,
         nextAccountId: Int,
         nextPotId: Int,
         nextIncomeId: Int,
@@ -917,14 +1119,17 @@ private struct BudgetState: Codable {
         nextTargetId: Int,
         nextScheduledPaymentId: Int,
         nextIncomeScheduleId: Int,
-        nextTransferScheduleId: Int
+        nextTransferScheduleId: Int,
+        nextProcessedTransactionLogId: Int
     ) {
         self.accounts = accounts
         self.incomeSchedules = incomeSchedules
         self.transferSchedules = transferSchedules
         self.transactions = transactions
         self.targets = targets
+        self.processedTransactionLogs = processedTransactionLogs
         self.lastResetAt = lastResetAt
+        self.lastTransfersExecutedAt = lastTransfersExecutedAt
         self.nextAccountId = nextAccountId
         self.nextPotId = nextPotId
         self.nextIncomeId = nextIncomeId
@@ -934,6 +1139,7 @@ private struct BudgetState: Codable {
         self.nextScheduledPaymentId = nextScheduledPaymentId
         self.nextIncomeScheduleId = nextIncomeScheduleId
         self.nextTransferScheduleId = nextTransferScheduleId
+        self.nextProcessedTransactionLogId = nextProcessedTransactionLogId
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -941,7 +1147,9 @@ private struct BudgetState: Codable {
         case incomeSchedules = "income_schedules"
         case transactions
         case targets
+        case processedTransactionLogs = "processed_transactions"
         case lastResetAt = "last_reset_at"
+        case lastTransfersExecutedAt = "last_transfers_executed_at"
         case nextAccountId
         case nextPotId
         case nextIncomeId
@@ -952,6 +1160,7 @@ private struct BudgetState: Codable {
         case nextIncomeScheduleId
         case transferSchedules = "transfer_schedules"
         case nextTransferScheduleId
+        case nextProcessedTransactionLogId
     }
 
     private enum LegacyKeys: String, CodingKey {
@@ -959,7 +1168,9 @@ private struct BudgetState: Codable {
         case incomeSchedules
         case transactions
         case targets
+        case processedTransactionLogs
         case lastResetAt
+        case lastTransfersExecutedAt
         case nextAccountId
         case nextPotId
         case nextIncomeId
@@ -970,6 +1181,7 @@ private struct BudgetState: Codable {
         case nextIncomeScheduleId
         case transferSchedules
         case nextTransferScheduleId
+        case nextProcessedTransactionLogId
     }
 
     init(from decoder: Decoder) throws {
@@ -979,7 +1191,9 @@ private struct BudgetState: Codable {
             transferSchedules = try container.decodeIfPresent([TransferSchedule].self, forKey: .transferSchedules) ?? []
             transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
             targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
+            processedTransactionLogs = try container.decodeIfPresent([ProcessedTransactionLog].self, forKey: .processedTransactionLogs) ?? []
             lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
+            lastTransfersExecutedAt = try container.decodeIfPresent(String.self, forKey: .lastTransfersExecutedAt)
             nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
             nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
             nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
@@ -989,6 +1203,7 @@ private struct BudgetState: Codable {
             nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
             nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
             nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
+            nextProcessedTransactionLogId = try container.decodeIfPresent(Int.self, forKey: .nextProcessedTransactionLogId) ?? 1
             return
         }
 
@@ -998,7 +1213,9 @@ private struct BudgetState: Codable {
         transferSchedules = try container.decodeIfPresent([TransferSchedule].self, forKey: .transferSchedules) ?? []
         transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
         targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
+        processedTransactionLogs = try container.decodeIfPresent([ProcessedTransactionLog].self, forKey: .processedTransactionLogs) ?? []
         lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
+        lastTransfersExecutedAt = try container.decodeIfPresent(String.self, forKey: .lastTransfersExecutedAt)
         nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
         nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
         nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
@@ -1008,6 +1225,7 @@ private struct BudgetState: Codable {
         nextScheduledPaymentId = try container.decodeIfPresent(Int.self, forKey: .nextScheduledPaymentId) ?? 1
         nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
         nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
+        nextProcessedTransactionLogId = try container.decodeIfPresent(Int.self, forKey: .nextProcessedTransactionLogId) ?? 1
     }
 
     func normalized() -> BudgetState {
@@ -1047,6 +1265,9 @@ private struct BudgetState: Codable {
         let targetMax = targets.map { $0.id }.max() ?? 0
         normalizedState.nextTargetId = max(nextTargetId, targetMax + 1)
 
+        let processedLogMax = processedTransactionLogs.map { $0.id }.max() ?? 0
+        normalizedState.nextProcessedTransactionLogId = max(nextProcessedTransactionLogId, processedLogMax + 1)
+
         return normalizedState
     }
 
@@ -1058,6 +1279,8 @@ private struct BudgetState: Codable {
             transactions: [],
             targets: [],
             lastResetAt: nil,
+            processedTransactionLogs: [],
+            lastTransfersExecutedAt: nil,
             nextAccountId: 1,
             nextPotId: 1,
             nextIncomeId: 1,
@@ -1066,7 +1289,8 @@ private struct BudgetState: Codable {
             nextTargetId: 1,
             nextScheduledPaymentId: 1,
             nextIncomeScheduleId: 1,
-            nextTransferScheduleId: 1
+            nextTransferScheduleId: 1,
+            nextProcessedTransactionLogId: 1
         )
     }
 
@@ -1178,6 +1402,8 @@ private struct BudgetState: Codable {
             transactions: [],
             targets: [],
             lastResetAt: nil,
+            processedTransactionLogs: [],
+            lastTransfersExecutedAt: nil,
             nextAccountId: 4,
             nextPotId: 5,
             nextIncomeId: 3,
@@ -1186,7 +1412,8 @@ private struct BudgetState: Codable {
             nextTargetId: 1,
             nextScheduledPaymentId: 4,
             nextIncomeScheduleId: 2,
-            nextTransferScheduleId: 1
+            nextTransferScheduleId: 1,
+            nextProcessedTransactionLogId: 1
         )
     }
 }
