@@ -78,6 +78,7 @@ final class TransferSchedulesStore: ObservableObject {
             _ = try await store.executeTransferSchedule(id: schedule.id)
             schedules = await store.currentTransferSchedules()
             await accountsStore?.loadAccounts()
+            _ = await accountsStore?.processScheduledTransactionsIfNeeded(upTo: Date())
             statusMessage = StatusMessage(title: "Transfer Executed", message: "Funds moved", kind: .success)
         } catch let error as LocalBudgetStore.StoreError {
             let dataError = error.asBudgetDataError
@@ -92,9 +93,12 @@ final class TransferSchedulesStore: ObservableObject {
 
     func executeAll() async {
         do {
-            _ = try await store.executeAllTransferSchedules()
+            let response = try await store.executeAllTransferSchedules()
             schedules = await store.currentTransferSchedules()
             await accountsStore?.loadAccounts()
+            if response.executed_count > 0 {
+                _ = await accountsStore?.processScheduledTransactionsIfNeeded(upTo: Date())
+            }
             statusMessage = StatusMessage(title: "Executed All", message: "Applied all active transfers", kind: .success)
         } catch let error as LocalBudgetStore.StoreError {
             let dataError = error.asBudgetDataError

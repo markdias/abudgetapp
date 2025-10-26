@@ -43,6 +43,7 @@ struct MyBudgetApp: App {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await accountsStore.loadAccounts() }
         }
+        _ = await accountsStore.processScheduledTransactionsIfNeeded(upTo: Date())
     }
 }
 

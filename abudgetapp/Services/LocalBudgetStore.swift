@@ -20,6 +20,20 @@ actor LocalBudgetStore {
         return formatter
     }()
 
+    private static let simpleDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
+    private struct ScheduledPaymentProcessContext {
+        let accountIndex: Int
+        let potName: String?
+        let payment: ScheduledPayment
+        let dueDate: Date
+    }
+
     private init() {
         self.encoder = JSONEncoder()
         self.encoder.dateEncodingStrategy = .iso8601
@@ -378,28 +392,36 @@ actor LocalBudgetStore {
         var schedule = state.transferSchedules[index]
         guard schedule.isActive else { throw StoreError.invalidOperation("Transfer schedule is inactive") }
         try applyTransfer(schedule: schedule)
+        let executionDate = Date()
         schedule.isCompleted = true
-        schedule.lastExecuted = LocalBudgetStore.isoFormatter.string(from: Date())
+        schedule.lastExecuted = LocalBudgetStore.isoFormatter.string(from: executionDate)
         state.transferSchedules[index] = schedule
+        recordTransferExecution(at: executionDate)
         try persist()
         return MessageResponse(message: "Transfer schedule executed")
     }
 
     func executeAllTransferSchedules() throws -> IncomeExecutionResponse {
         var executed = 0
+        var lastExecutionDate: Date?
         for index in state.transferSchedules.indices {
             if state.transferSchedules[index].isActive && !state.transferSchedules[index].isCompleted {
                 let schedule = state.transferSchedules[index]
                 do {
                     try applyTransfer(schedule: schedule)
+                    let executionDate = Date()
                     state.transferSchedules[index].isCompleted = true
-                    state.transferSchedules[index].lastExecuted = LocalBudgetStore.isoFormatter.string(from: Date())
+                    state.transferSchedules[index].lastExecuted = LocalBudgetStore.isoFormatter.string(from: executionDate)
+                    lastExecutionDate = executionDate
                     executed += 1
                 } catch {
                     // Skip schedules that cannot be executed (e.g., insufficient funds)
                     continue
                 }
             }
+        }
+        if let date = lastExecutionDate {
+            recordTransferExecution(at: date)
         }
         try persist()
         return IncomeExecutionResponse(accounts: state.accounts, executed_count: executed)
@@ -413,11 +435,45 @@ actor LocalBudgetStore {
         try persist()
     }
 
+    func processScheduledTransactions(upTo throughDate: Date) throws -> [TransactionRecord] {
+        guard let transferRaw = state.lastTransferExecutionAt,
+              let transferDate = LocalBudgetStore.isoFormatter.date(from: transferRaw) else {
+            return []
+        }
+        if throughDate < transferDate {
+            return []
+        }
+        let calendar = Calendar.current
+        guard calendar.isDate(transferDate, equalTo: throughDate, toGranularity: .month) else {
+            return []
+        }
+
+        let contexts = collectScheduledPaymentContexts(upTo: throughDate, calendar: calendar)
+        if contexts.isEmpty {
+            return []
+        }
+
+        var processed: [TransactionRecord] = []
+        for context in contexts.sorted(by: { $0.dueDate < $1.dueDate }) {
+            let record = try applyScheduledPayment(context: context)
+            processed.append(record)
+            try markScheduledPaymentProcessed(context: context, processedDateString: record.date)
+        }
+
+        if processed.isEmpty {
+            return []
+        }
+
+        try persist()
+        return processed
+    }
+
     func updateTransaction(id: Int, submission: TransactionSubmission) throws -> TransactionRecord {
         guard let index = state.transactions.firstIndex(where: { $0.id == id }) else {
             throw StoreError.notFound("Transaction #\(id) not found")
         }
 
+        let existing = state.transactions[index]
         let updated = TransactionRecord(
             id: id,
             name: submission.name,
@@ -427,7 +483,8 @@ actor LocalBudgetStore {
             fromAccountId: submission.fromAccountId,
             toAccountId: submission.toAccountId,
             toPotName: submission.toPotName,
-            paymentType: submission.paymentType
+            paymentType: submission.paymentType,
+            scheduledPaymentId: existing.scheduledPaymentId
         )
 
         state.transactions[index] = updated
@@ -789,6 +846,156 @@ actor LocalBudgetStore {
         // No activity record for executed transfers
     }
 
+    private func collectScheduledPaymentContexts(upTo throughDate: Date, calendar: Calendar) -> [ScheduledPaymentProcessContext] {
+        var contexts: [ScheduledPaymentProcessContext] = []
+        for (accountIndex, account) in state.accounts.enumerated() {
+            if let payments = account.scheduled_payments {
+                for payment in payments {
+                    guard let dueDate = dueDate(for: payment, throughDate: throughDate, calendar: calendar) else { continue }
+                    if shouldProcess(payment: payment, dueDate: dueDate, calendar: calendar) {
+                        contexts.append(ScheduledPaymentProcessContext(accountIndex: accountIndex, potName: nil, payment: payment, dueDate: dueDate))
+                    }
+                }
+            }
+            if let pots = account.pots {
+                for pot in pots {
+                    if let payments = pot.scheduled_payments {
+                        for payment in payments {
+                            guard let dueDate = dueDate(for: payment, throughDate: throughDate, calendar: calendar) else { continue }
+                            if shouldProcess(payment: payment, dueDate: dueDate, calendar: calendar) {
+                                contexts.append(ScheduledPaymentProcessContext(accountIndex: accountIndex, potName: pot.name, payment: payment, dueDate: dueDate))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return contexts
+    }
+
+    private func dueDate(for payment: ScheduledPayment, throughDate: Date, calendar: Calendar) -> Date? {
+        guard let day = dayOfMonth(from: payment.date, calendar: calendar) else { return nil }
+        var components = calendar.dateComponents([.year, .month], from: throughDate)
+        let daysInMonth = calendar.range(of: .day, in: .month, for: throughDate)?.count ?? 31
+        let clampedDay = min(max(day, 1), daysInMonth)
+        components.day = clampedDay
+        guard let dueDate = calendar.date(from: components) else { return nil }
+        if dueDate > throughDate {
+            return nil
+        }
+        return dueDate
+    }
+
+    private func shouldProcess(payment: ScheduledPayment, dueDate: Date, calendar: Calendar) -> Bool {
+        guard payment.amount > 0 else { return false }
+        if let last = payment.lastExecuted,
+           let lastDate = parseDate(from: last),
+           calendar.isDate(lastDate, equalTo: dueDate, toGranularity: .month) {
+            return false
+        }
+        if hasProcessedTransaction(for: payment, dueDate: dueDate, calendar: calendar) {
+            return false
+        }
+        return true
+    }
+
+    private func hasProcessedTransaction(for payment: ScheduledPayment, dueDate: Date, calendar: Calendar) -> Bool {
+        state.transactions.contains { record in
+            guard record.scheduledPaymentId == payment.id else { return false }
+            return isSameMonth(dateString: record.date, as: dueDate, calendar: calendar)
+        }
+    }
+
+    private func isSameMonth(dateString: String, as date: Date, calendar: Calendar) -> Bool {
+        guard let parsed = parseDate(from: dateString) else { return false }
+        return calendar.isDate(parsed, equalTo: date, toGranularity: .month)
+    }
+
+    private func dayOfMonth(from raw: String, calendar: Calendar) -> Int? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let numeric = Int(trimmed) {
+            return numeric
+        }
+        if let isoDate = LocalBudgetStore.isoFormatter.date(from: trimmed) {
+            return calendar.component(.day, from: isoDate)
+        }
+        if let simpleDate = LocalBudgetStore.simpleDateFormatter.date(from: trimmed) {
+            return calendar.component(.day, from: simpleDate)
+        }
+        return nil
+    }
+
+    private func parseDate(from raw: String) -> Date? {
+        if let iso = LocalBudgetStore.isoFormatter.date(from: raw) {
+            return iso
+        }
+        if let simple = LocalBudgetStore.simpleDateFormatter.date(from: raw) {
+            return simple
+        }
+        return nil
+    }
+
+    private func applyScheduledPayment(context: ScheduledPaymentProcessContext) throws -> TransactionRecord {
+        let record = TransactionRecord(
+            id: state.nextTransactionId,
+            name: context.payment.name,
+            vendor: context.payment.company,
+            amount: context.payment.amount,
+            date: LocalBudgetStore.isoFormatter.string(from: context.dueDate),
+            fromAccountId: nil,
+            toAccountId: state.accounts[context.accountIndex].id,
+            toPotName: context.potName,
+            paymentType: context.payment.type,
+            scheduledPaymentId: context.payment.id
+        )
+        state.nextTransactionId += 1
+        state.transactions.append(record)
+        try adjustTransactionBalances(for: record, multiplier: -1)
+        return record
+    }
+
+    private func markScheduledPaymentProcessed(context: ScheduledPaymentProcessContext, processedDateString: String) throws {
+        if let potName = context.potName {
+            try updatePotScheduledPayment(accountIndex: context.accountIndex, potName: potName) { payments in
+                if let idx = payments.firstIndex(where: { $0.id == context.payment.id }) {
+                    payments[idx].lastExecuted = processedDateString
+                    payments[idx].isCompleted = true
+                }
+            }
+        } else {
+            var account = state.accounts[context.accountIndex]
+            guard var payments = account.scheduled_payments,
+                  let idx = payments.firstIndex(where: { $0.id == context.payment.id }) else { return }
+            payments[idx].lastExecuted = processedDateString
+            payments[idx].isCompleted = true
+            account.scheduled_payments = payments
+            state.accounts[context.accountIndex] = account
+        }
+    }
+
+    private func recordTransferExecution(at date: Date) {
+        state.lastTransferExecutionAt = LocalBudgetStore.isoFormatter.string(from: date)
+        for index in state.accounts.indices {
+            if var payments = state.accounts[index].scheduled_payments {
+                for idx in payments.indices {
+                    payments[idx].isCompleted = false
+                }
+                state.accounts[index].scheduled_payments = payments
+            }
+            if var pots = state.accounts[index].pots {
+                for potIndex in pots.indices {
+                    if var payments = pots[potIndex].scheduled_payments {
+                        for idx in payments.indices {
+                            payments[idx].isCompleted = false
+                        }
+                        pots[potIndex].scheduled_payments = payments
+                    }
+                }
+                state.accounts[index].pots = pots
+            }
+        }
+    }
+
     private func mutateAccount(id: Int, _ transform: (inout Account) throws -> Void) throws {
         guard let index = state.accounts.firstIndex(where: { $0.id == id }) else {
             throw StoreError.notFound("Account #\(id) not found")
@@ -892,6 +1099,7 @@ private struct BudgetState: Codable {
     var transactions: [TransactionRecord]
     var targets: [TargetRecord]
     var lastResetAt: String?
+    var lastTransferExecutionAt: String?
     var nextAccountId: Int
     var nextPotId: Int
     var nextIncomeId: Int
@@ -909,6 +1117,7 @@ private struct BudgetState: Codable {
         transactions: [TransactionRecord],
         targets: [TargetRecord],
         lastResetAt: String? = nil,
+        lastTransferExecutionAt: String? = nil,
         nextAccountId: Int,
         nextPotId: Int,
         nextIncomeId: Int,
@@ -925,6 +1134,7 @@ private struct BudgetState: Codable {
         self.transactions = transactions
         self.targets = targets
         self.lastResetAt = lastResetAt
+        self.lastTransferExecutionAt = lastTransferExecutionAt
         self.nextAccountId = nextAccountId
         self.nextPotId = nextPotId
         self.nextIncomeId = nextIncomeId
@@ -942,6 +1152,7 @@ private struct BudgetState: Codable {
         case transactions
         case targets
         case lastResetAt = "last_reset_at"
+        case lastTransferExecutionAt = "last_transfer_execution_at"
         case nextAccountId
         case nextPotId
         case nextIncomeId
@@ -960,6 +1171,7 @@ private struct BudgetState: Codable {
         case transactions
         case targets
         case lastResetAt
+        case lastTransferExecutionAt
         case nextAccountId
         case nextPotId
         case nextIncomeId
@@ -980,6 +1192,7 @@ private struct BudgetState: Codable {
             transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
             targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
             lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
+            lastTransferExecutionAt = try container.decodeIfPresent(String.self, forKey: .lastTransferExecutionAt)
             nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
             nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
             nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
@@ -999,6 +1212,7 @@ private struct BudgetState: Codable {
         transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
         targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
         lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
+        lastTransferExecutionAt = try container.decodeIfPresent(String.self, forKey: .lastTransferExecutionAt)
         nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
         nextPotId = try container.decodeIfPresent(Int.self, forKey: .nextPotId) ?? 1
         nextIncomeId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeId) ?? 1
@@ -1058,6 +1272,7 @@ private struct BudgetState: Codable {
             transactions: [],
             targets: [],
             lastResetAt: nil,
+            lastTransferExecutionAt: nil,
             nextAccountId: 1,
             nextPotId: 1,
             nextIncomeId: 1,
@@ -1178,6 +1393,7 @@ private struct BudgetState: Codable {
             transactions: [],
             targets: [],
             lastResetAt: nil,
+            lastTransferExecutionAt: nil,
             nextAccountId: 4,
             nextPotId: 5,
             nextIncomeId: 3,

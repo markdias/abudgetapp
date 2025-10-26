@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage("processTransactionsEnabled") private var processTransactionsEnabled: Bool = false
 
     @State private var storageStatus: String?
     @State private var storageStatusIsSuccess = false
@@ -39,6 +40,12 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                }
+                Section("Automation") {
+                    Toggle("Process Transactions Automatically", isOn: $processTransactionsEnabled)
+                    Text("When enabled, scheduled payments due for the month are processed after transfers run and on the scheduled day.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Local Storage") {
                     Label("Data is stored securely on this device and synced between views automatically.", systemImage: "internaldrive")
@@ -135,6 +142,10 @@ struct SettingsView: View {
                 storageStatus = "Exported budget to file"
                 storageStatusIsSuccess = true
             }
+        }
+        .onChange(of: processTransactionsEnabled) { newValue in
+            guard newValue else { return }
+            Task { await accountsStore.processScheduledTransactionsIfNeeded(upTo: Date()) }
         }
     }
 

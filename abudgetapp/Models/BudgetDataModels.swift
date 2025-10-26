@@ -170,8 +170,9 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     public let toAccountId: Int
     public let toPotName: String?
     public let paymentType: String? // "direct_debit" or "card"
+    public let scheduledPaymentId: Int?
 
-    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil, paymentType: String? = nil) {
+    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil, paymentType: String? = nil, scheduledPaymentId: Int? = nil) {
         self.id = id
         self.name = name
         self.vendor = vendor
@@ -181,6 +182,7 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         self.toAccountId = toAccountId
         self.toPotName = toPotName
         self.paymentType = paymentType
+        self.scheduledPaymentId = scheduledPaymentId
     }
 
     public static func == (lhs: TransactionRecord, rhs: TransactionRecord) -> Bool {

@@ -243,6 +243,42 @@ final class AccountsStore: ObservableObject {
         transactions.first { $0.id == id }
     }
 
+    @discardableResult
+    func processScheduledTransactionsIfNeeded(upTo date: Date) async -> Int {
+        guard UserDefaults.standard.bool(forKey: "processTransactionsEnabled") else { return 0 }
+        do {
+            let processed = try await store.processScheduledTransactions(upTo: date)
+            guard !processed.isEmpty else { return 0 }
+            await loadAccounts()
+            let count = processed.count
+            let suffix = count == 1 ? "scheduled payment" : "scheduled payments"
+            statusMessage = StatusMessage(
+                title: "Transactions Processed",
+                message: "Processed \(count) \(suffix).",
+                kind: .success
+            )
+            return count
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(
+                title: "Process Transactions Failed",
+                message: dataError.localizedDescription,
+                kind: .error
+            )
+            return 0
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(
+                title: "Process Transactions Failed",
+                message: dataError.localizedDescription,
+                kind: .error
+            )
+            return 0
+        }
+    }
+
     // MARK: - Targets
     func addTarget(_ submission: TargetSubmission) async {
         do {
