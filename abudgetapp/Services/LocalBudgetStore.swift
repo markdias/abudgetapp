@@ -451,23 +451,21 @@ actor LocalBudgetStore {
 
     func processScheduledTransactions(upTo throughDate: Date, requireTransferExecution: Bool = true) throws -> [TransactionRecord] {
         let calendar = Calendar.current
+        let normalizedThroughDate = calendar.startOfDay(for: throughDate)
 
         if requireTransferExecution {
             guard let transferDate = mostRecentTransferExecutionDate() else {
                 return []
             }
-            if throughDate < transferDate {
+            if normalizedThroughDate < transferDate {
                 return []
             }
-            guard calendar.isDate(transferDate, equalTo: throughDate, toGranularity: .month) else {
+            guard calendar.isDate(transferDate, equalTo: normalizedThroughDate, toGranularity: .month) else {
                 return []
             }
-            return try processScheduledPayments(upTo: throughDate, calendar: calendar)
+            return try processScheduledPayments(upTo: normalizedThroughDate, calendar: calendar)
         } else {
-            if let transferDate = mostRecentTransferExecutionDate(), throughDate < transferDate {
-                return []
-            }
-            return try processScheduledPayments(upTo: throughDate, calendar: calendar)
+            return try processScheduledPayments(upTo: normalizedThroughDate, calendar: calendar)
         }
     }
 
@@ -904,12 +902,13 @@ actor LocalBudgetStore {
 
     private func dueDate(for payment: ScheduledPayment, throughDate: Date, calendar: Calendar) -> Date? {
         guard let day = dayOfMonth(from: payment.date, calendar: calendar) else { return nil }
-        var components = calendar.dateComponents([.year, .month], from: throughDate)
+        let referenceDate = calendar.startOfDay(for: throughDate)
+        var components = calendar.dateComponents([.year, .month], from: referenceDate)
         let daysInMonth = calendar.range(of: .day, in: .month, for: throughDate)?.count ?? 31
         let clampedDay = min(max(day, 1), daysInMonth)
         components.day = clampedDay
         guard let dueDate = calendar.date(from: components) else { return nil }
-        if dueDate > throughDate {
+        if dueDate > referenceDate {
             return nil
         }
         return dueDate
@@ -966,6 +965,11 @@ actor LocalBudgetStore {
         }
         if let dayMonthNoYear = LocalBudgetStore.dayMonthNoYearFormatter.date(from: trimmed) {
             return calendar.component(.day, from: dayMonthNoYear)
+        }
+
+        let scanner = Scanner(string: trimmed)
+        if let value = scanner.scanInt(), (1...31).contains(value) {
+            return value
         }
         return nil
     }

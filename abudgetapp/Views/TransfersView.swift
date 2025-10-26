@@ -31,7 +31,10 @@ struct TransfersView: View {
                             isProcessingTransactions = true
                             processTransactionsFeedback = nil
                             Task {
-                                let result = await accountsStore.processScheduledTransactionsIfNeeded(upTo: Date(), bypassToggle: true)
+                                let calendar = Calendar.current
+                                let today = Date()
+                                let cutoff = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: today)) ?? today
+                                let result = await accountsStore.processScheduledTransactionsIfNeeded(upTo: cutoff, bypassToggle: true)
                                 await MainActor.run {
                                     if result.processedCount > 0 {
                                         let suffix = result.processedCount == 1 ? "scheduled payment" : "scheduled payments"
