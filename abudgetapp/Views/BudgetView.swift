@@ -9,7 +9,7 @@ struct BudgetView: View {
         for account in accountsStore.accounts {
             guard let pots = account.pots else { continue }
             for pot in pots {
-                let allocated = pot.scheduled_payments?.reduce(0) { $0 + $1.amount } ?? 0
+                let allocated = pot.scheduled_payments?.reduce(0) { $0 + $1.debitAmount } ?? 0
                 items.append(
                     BudgetItem(
                         category: determineCategory(from: pot.name),
@@ -53,7 +53,7 @@ struct BudgetView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Text("£\(String(format: "%.2f", context.payment.amount))")
+                                Text("-\(context.payment.formattedDebitAmount)")
                                     .foregroundColor(.red)
                             }
                             .padding(.vertical, 4)

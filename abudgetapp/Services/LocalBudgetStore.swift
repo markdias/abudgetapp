@@ -46,6 +46,7 @@ actor LocalBudgetStore {
         let potName: String?
         let payment: ScheduledPayment
         let dueDate: Date
+        let debitAmount: Double
     }
 
     private init() {
@@ -858,8 +859,9 @@ actor LocalBudgetStore {
             if let payments = account.scheduled_payments {
                 for payment in payments {
                     guard let dueDate = dueDate(for: payment, throughDate: throughDate, calendar: calendar) else { continue }
-                    if shouldProcess(payment: payment, dueDate: dueDate, calendar: calendar) {
-                        contexts.append(ScheduledPaymentProcessContext(accountIndex: accountIndex, potName: nil, payment: payment, dueDate: dueDate))
+                    let debitAmount = abs(payment.amount)
+                    if shouldProcess(payment: payment, debitAmount: debitAmount, dueDate: dueDate, calendar: calendar) {
+                        contexts.append(ScheduledPaymentProcessContext(accountIndex: accountIndex, potName: nil, payment: payment, dueDate: dueDate, debitAmount: debitAmount))
                     }
                 }
             }
@@ -868,8 +870,9 @@ actor LocalBudgetStore {
                     if let payments = pot.scheduled_payments {
                         for payment in payments {
                             guard let dueDate = dueDate(for: payment, throughDate: throughDate, calendar: calendar) else { continue }
-                            if shouldProcess(payment: payment, dueDate: dueDate, calendar: calendar) {
-                                contexts.append(ScheduledPaymentProcessContext(accountIndex: accountIndex, potName: pot.name, payment: payment, dueDate: dueDate))
+                            let debitAmount = abs(payment.amount)
+                            if shouldProcess(payment: payment, debitAmount: debitAmount, dueDate: dueDate, calendar: calendar) {
+                                contexts.append(ScheduledPaymentProcessContext(accountIndex: accountIndex, potName: pot.name, payment: payment, dueDate: dueDate, debitAmount: debitAmount))
                             }
                         }
                     }
@@ -914,8 +917,8 @@ actor LocalBudgetStore {
         return dueDate
     }
 
-    private func shouldProcess(payment: ScheduledPayment, dueDate: Date, calendar: Calendar) -> Bool {
-        guard payment.amount > 0 else { return false }
+    private func shouldProcess(payment: ScheduledPayment, debitAmount: Double, dueDate: Date, calendar: Calendar) -> Bool {
+        guard debitAmount > 0 else { return false }
         if let last = payment.lastExecuted,
            let lastDate = parseDate(from: last),
            calendar.isDate(lastDate, equalTo: dueDate, toGranularity: .month) {
@@ -1007,7 +1010,7 @@ actor LocalBudgetStore {
             id: state.nextTransactionId,
             name: context.payment.name,
             vendor: context.payment.company,
-            amount: context.payment.amount,
+            amount: context.debitAmount,
             date: LocalBudgetStore.isoFormatter.string(from: context.dueDate),
             fromAccountId: nil,
             toAccountId: state.accounts[context.accountIndex].id,

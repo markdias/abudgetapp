@@ -226,6 +226,17 @@ public extension TransactionRecord {
     }()
 }
 
+public extension ScheduledPayment {
+    var debitAmount: Double {
+        abs(amount)
+    }
+
+    var formattedDebitAmount: String {
+        let currencyCode = Locale.current.currency?.identifier ?? "GBP"
+        return debitAmount.formatted(.currency(code: currencyCode))
+    }
+}
+
 // MARK: - Target Models
 public struct TargetRecord: Identifiable, Codable, Hashable {
     public let id: Int
