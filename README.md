@@ -26,6 +26,7 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Income Planner** – Board view for managing recurring income schedules with inline execution and status tracking.
 * **Activity Tab** – Full history view with filters that share the same activity source as the dashboard feed.
 * **Transfers** – Dedicated hub for planning transfer schedules, queuing expense-driven account transfers, executing income and transfer runs, resetting balances, and sorting salaries into pots. Transfer Schedules builds a queue of transactions that can be executed later from the Transfers tab.
+* **Processed Transactions Log** – Available from the Transfers tab to review every transaction in the data store with clear indicators for items that were processed automatically from scheduled payments.
 * **Budget** – Summaries derived from pots and scheduled payments plus an upcoming payments list.
 * **Settings** – Local storage management (restore sample data, reload, delete-all), card reorder flow, and diagnostics launcher.
 * **Process Transactions Automation** – Optional toggle in Settings that automatically deducts scheduled payments from their pots once transfers run and on each payment's scheduled day.
@@ -40,7 +41,7 @@ Budget data is saved locally on the device. A bundled sample dataset seeds the a
 1. Launch the app to load the bundled sample dataset (or restore it from Settings if you have existing data).
 2. Use the dashboard add menu to create transactions, expenses, incomes, accounts, and pots. Transactions add money to an account (and optional pot) and appear in Transfer Schedules where they can be queued for execution. Expenses redirect funds between accounts (never pots) and always use positive amounts to represent the cash leaving the source account. Incomes can land directly in a pot.
 3. Review or edit any item from the home activity feed or the Activity tab. Swipe actions or detail sheets let you update amounts, day-of-month scheduling, destinations, and associated metadata.
-4. Open the Transfers tab to review or update transfer schedules, execute incomes, reset balances, or run the salary sorter. Use the Settings tab for diagnostics, restoring the sample dataset, and card reordering.
+4. Open the Transfers tab to review or update transfer schedules, execute incomes, view processed transactions, reset balances, or run the salary sorter. Use the Settings tab for diagnostics, restoring the sample dataset, and card reordering.
 5. Enable **Process Transactions Automatically** from Settings → Automation to have scheduled payments post against pots on their due dates after transfers have been executed for the month.
 
 > **Note:** The project targets iOS and requires Xcode 15+ with the Swift 6 toolchain for compilation.

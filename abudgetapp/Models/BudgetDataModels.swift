@@ -194,6 +194,38 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     }
 }
 
+public extension TransactionRecord {
+    var isProcessedScheduledPayment: Bool {
+        scheduledPaymentId != nil
+    }
+
+    var formattedAmount: String {
+        let currencyCode = Locale.current.currency?.identifier ?? "GBP"
+        return amount.formatted(.currency(code: currencyCode))
+    }
+
+    var formattedDate: String {
+        guard let parsed = TransactionRecord.isoDateFormatter.date(from: date) else { return date }
+        return TransactionRecord.displayDateFormatter.string(from: parsed)
+    }
+
+    var processedDate: Date? {
+        TransactionRecord.isoDateFormatter.date(from: date)
+    }
+
+    private static let isoDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let displayDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter
+    }()
+}
+
 // MARK: - Target Models
 public struct TargetRecord: Identifiable, Codable, Hashable {
     public let id: Int
