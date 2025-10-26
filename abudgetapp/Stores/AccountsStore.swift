@@ -259,8 +259,14 @@ final class AccountsStore: ObservableObject {
                 upTo: date,
                 requireTransferExecution: requireTransferExecution
             )
-            guard !processed.isEmpty else {
-                let awaitingTransfer = requireTransferExecution && !(await store.hasTransferExecution(forMonthContaining: date))
+            if processed.isEmpty {
+                let awaitingTransfer: Bool
+                if requireTransferExecution {
+                    let hasTransferExecution = await store.hasTransferExecution(forMonthContaining: date)
+                    awaitingTransfer = !hasTransferExecution
+                } else {
+                    awaitingTransfer = false
+                }
                 return ProcessScheduledTransactionsResult(processedCount: 0, awaitingTransferExecution: awaitingTransfer)
             }
             await loadAccounts()
