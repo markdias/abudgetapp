@@ -27,6 +27,7 @@ struct HomeView: View {
     @State private var showingSalarySorter = false
     @State private var showingResetConfirm = false
     @State private var isResettingBalances = false
+    @State private var showingBalanceHistory = false
     @State private var selectedAccountId: Int? = nil
     @State private var addIncomeTargetAccountId: Int? = nil
     @State private var addTransactionTargetAccountId: Int? = nil
@@ -95,14 +96,15 @@ struct HomeView: View {
                         },
                         onDeletePot: { account, pot in
                             Task { await potsStore.deletePot(accountId: account.id, potName: pot.name) }
-                        }
+                        },
+                        onManagePots: { showingPotsManager = true }
                     )
 
                     QuickActionsView(
-                        onManagePots: { showingPotsManager = true },
                         onTransferSchedules: { showingTransferSchedules = true },
                         onIncomeSchedules: { showingIncomeSchedules = true },
                         onSalarySorter: { showingSalarySorter = true },
+                        onShowBalanceHistory: { showingBalanceHistory = true },
                         onResetBalances: { showingResetConfirm = true },
                         onDiagnostics: { showingDiagnostics = true }
                     )
@@ -187,6 +189,9 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showingSalarySorter) {
                 SalarySorterView(isPresented: $showingSalarySorter)
+            }
+            .sheet(isPresented: $showingBalanceHistory) {
+                BalanceReductionView(isPresented: $showingBalanceHistory)
             }
             // Reorder moved to Settings
             .sheet(isPresented: $showingDiagnostics) {
@@ -1346,10 +1351,10 @@ private struct AccountCardView: View {
 // MARK: - Quick Actions
 
 private struct QuickActionsView: View {
-    let onManagePots: () -> Void
     let onTransferSchedules: () -> Void
     let onIncomeSchedules: () -> Void
     let onSalarySorter: () -> Void
+    let onShowBalanceHistory: () -> Void
     let onResetBalances: () -> Void
     let onDiagnostics: () -> Void
 
@@ -1362,10 +1367,10 @@ private struct QuickActionsView: View {
             Text("Shortcuts")
                 .font(.headline)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                QuickActionButton(icon: "tray.and.arrow.down", title: "Manage Pots", tint: .indigo, action: onManagePots)
                 QuickActionButton(icon: "arrow.left.arrow.right", title: "Transfer Schedules", tint: .blue, action: onTransferSchedules)
                 QuickActionButton(icon: "calendar.badge.clock", title: "Income Schedules", tint: .green, action: onIncomeSchedules)
                 QuickActionButton(icon: "chart.pie.fill", title: "Salary Sorter", tint: .purple, action: onSalarySorter)
+                QuickActionButton(icon: "chart.line.downtrend.xyaxis", title: "Balance Reduction", tint: .teal, action: onShowBalanceHistory)
                 QuickActionButton(icon: "arrow.counterclockwise", title: "Reset Balances", tint: .red, action: onResetBalances)
                 QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", tint: .orange, action: onDiagnostics)
             }
@@ -1696,6 +1701,7 @@ private struct PotsPanelSection: View {
     var selectedAccountId: Int? = nil
     var onTapPot: (Account, Pot) -> Void = { _, _ in }
     var onDeletePot: (Account, Pot) -> Void = { _, _ in }
+    var onManagePots: (() -> Void)? = nil
 
     @State private var collapsedAccountIds: Set<Int> = []
 
@@ -1737,6 +1743,15 @@ private struct PotsPanelSection: View {
                 Text("Pots")
                     .font(.headline)
                 Spacer()
+                if let onManagePots {
+                    Button("Manage") { onManagePots() }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundColor(.blue)
+                        .clipShape(Capsule())
+                }
             }
 
             if groupedPots.isEmpty {

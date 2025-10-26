@@ -71,6 +71,10 @@ actor LocalBudgetStore {
         state.targets
     }
 
+    func currentBalanceReductionLogs() -> [BalanceReductionLog] {
+        state.balanceReductionLogs
+    }
+
     func addAccount(_ submission: AccountSubmission) throws -> Account {
         let account = Account(
             id: state.nextAccountId,
@@ -107,7 +111,9 @@ actor LocalBudgetStore {
             pots: existing.pots,
             scheduled_payments: existing.scheduled_payments,
             incomes: existing.incomes,
-            expenses: existing.expenses
+            expenses: existing.expenses,
+            monthlyBaselineBalance: existing.monthlyBaselineBalance,
+            monthlyBaselineMonth: existing.monthlyBaselineMonth
         )
         state.accounts[index] = updated
         try persist()
@@ -766,10 +772,80 @@ actor LocalBudgetStore {
         state.lastTransfersExecutedAt = nil
         state.processedTransactionLogs = []
         state.nextProcessedTransactionLogId = 1
+        state.balanceReductionLogs = []
+        state.nextBalanceReductionLogId = 1
         // Track last reset timestamp
         state.lastResetAt = LocalBudgetStore.isoFormatter.string(from: Date())
         try persist()
         return ResetResponse(accounts: state.accounts, income_schedules: state.incomeSchedules)
+    }
+
+    func applyMonthlyReduction(on date: Date = Date()) throws -> [Account] {
+        let calendar = Calendar(identifier: .gregorian)
+        let monthKey = LocalBudgetStore.yearMonthFormatter.string(from: date)
+        guard
+            let day = calendar.dateComponents([.day], from: date).day,
+            let dayRange = calendar.range(of: .day, in: .month, for: date)
+        else {
+            return state.accounts
+        }
+
+        let totalDays = dayRange.count
+        let timestamp = LocalBudgetStore.isoFormatter.string(from: date)
+        var newLogs: [BalanceReductionLog] = []
+        for index in state.accounts.indices {
+            var account = state.accounts[index]
+            if account.excludeFromReset == true {
+                state.accounts[index] = account
+                continue
+            }
+            if account.monthlyBaselineMonth != monthKey || account.monthlyBaselineBalance == nil {
+                account.monthlyBaselineBalance = account.balance
+                account.monthlyBaselineMonth = monthKey
+            }
+
+            guard let baseline = account.monthlyBaselineBalance else {
+                state.accounts[index] = account
+                continue
+            }
+
+            let reductionFactor: Double
+            if totalDays <= 1 {
+                reductionFactor = 0
+            } else {
+                let remainingDays = max(totalDays - day, 0)
+                reductionFactor = Double(remainingDays) / Double(totalDays - 1)
+            }
+
+            let adjusted = (baseline * reductionFactor * 100).rounded() / 100
+            let sanitizedAdjusted = abs(adjusted) < 0.005 ? 0 : adjusted
+            account.balance = sanitizedAdjusted
+            let reductionAmount = baseline - sanitizedAdjusted
+            let log = BalanceReductionLog(
+                id: state.nextBalanceReductionLogId,
+                timestamp: timestamp,
+                monthKey: monthKey,
+                dayOfMonth: day,
+                accountId: account.id,
+                accountName: account.name,
+                baselineBalance: baseline,
+                resultingBalance: sanitizedAdjusted,
+                reductionAmount: reductionAmount
+            )
+            state.nextBalanceReductionLogId += 1
+            newLogs.append(log)
+            state.accounts[index] = account
+        }
+
+        if !newLogs.isEmpty {
+            state.balanceReductionLogs.insert(contentsOf: newLogs, at: 0)
+            if state.balanceReductionLogs.count > 500 {
+                state.balanceReductionLogs.removeLast(state.balanceReductionLogs.count - 500)
+            }
+        }
+
+        try persist()
+        return state.accounts
     }
 
     func lastResetTimestamp() -> String? {
@@ -1089,6 +1165,7 @@ private struct BudgetState: Codable {
     var transactions: [TransactionRecord]
     var targets: [TargetRecord]
     var processedTransactionLogs: [ProcessedTransactionLog]
+    var balanceReductionLogs: [BalanceReductionLog]
     var lastResetAt: String?
     var lastTransfersExecutedAt: String?
     var nextAccountId: Int
@@ -1101,6 +1178,7 @@ private struct BudgetState: Codable {
     var nextIncomeScheduleId: Int
     var nextTransferScheduleId: Int
     var nextProcessedTransactionLogId: Int
+    var nextBalanceReductionLogId: Int
 
     init(
         accounts: [Account],
@@ -1108,8 +1186,9 @@ private struct BudgetState: Codable {
         transferSchedules: [TransferSchedule],
         transactions: [TransactionRecord],
         targets: [TargetRecord],
-        lastResetAt: String? = nil,
         processedTransactionLogs: [ProcessedTransactionLog],
+        balanceReductionLogs: [BalanceReductionLog],
+        lastResetAt: String? = nil,
         lastTransfersExecutedAt: String?,
         nextAccountId: Int,
         nextPotId: Int,
@@ -1120,7 +1199,8 @@ private struct BudgetState: Codable {
         nextScheduledPaymentId: Int,
         nextIncomeScheduleId: Int,
         nextTransferScheduleId: Int,
-        nextProcessedTransactionLogId: Int
+        nextProcessedTransactionLogId: Int,
+        nextBalanceReductionLogId: Int
     ) {
         self.accounts = accounts
         self.incomeSchedules = incomeSchedules
@@ -1128,6 +1208,7 @@ private struct BudgetState: Codable {
         self.transactions = transactions
         self.targets = targets
         self.processedTransactionLogs = processedTransactionLogs
+        self.balanceReductionLogs = balanceReductionLogs
         self.lastResetAt = lastResetAt
         self.lastTransfersExecutedAt = lastTransfersExecutedAt
         self.nextAccountId = nextAccountId
@@ -1140,6 +1221,7 @@ private struct BudgetState: Codable {
         self.nextIncomeScheduleId = nextIncomeScheduleId
         self.nextTransferScheduleId = nextTransferScheduleId
         self.nextProcessedTransactionLogId = nextProcessedTransactionLogId
+        self.nextBalanceReductionLogId = nextBalanceReductionLogId
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1148,6 +1230,7 @@ private struct BudgetState: Codable {
         case transactions
         case targets
         case processedTransactionLogs = "processed_transactions"
+        case balanceReductionLogs = "balance_reduction_logs"
         case lastResetAt = "last_reset_at"
         case lastTransfersExecutedAt = "last_transfers_executed_at"
         case nextAccountId
@@ -1161,6 +1244,7 @@ private struct BudgetState: Codable {
         case transferSchedules = "transfer_schedules"
         case nextTransferScheduleId
         case nextProcessedTransactionLogId
+        case nextBalanceReductionLogId = "next_balance_reduction_log_id"
     }
 
     private enum LegacyKeys: String, CodingKey {
@@ -1169,6 +1253,7 @@ private struct BudgetState: Codable {
         case transactions
         case targets
         case processedTransactionLogs
+        case balanceReductionLogs
         case lastResetAt
         case lastTransfersExecutedAt
         case nextAccountId
@@ -1182,6 +1267,7 @@ private struct BudgetState: Codable {
         case transferSchedules
         case nextTransferScheduleId
         case nextProcessedTransactionLogId
+        case nextBalanceReductionLogId
     }
 
     init(from decoder: Decoder) throws {
@@ -1192,6 +1278,7 @@ private struct BudgetState: Codable {
             transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
             targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
             processedTransactionLogs = try container.decodeIfPresent([ProcessedTransactionLog].self, forKey: .processedTransactionLogs) ?? []
+            balanceReductionLogs = try container.decodeIfPresent([BalanceReductionLog].self, forKey: .balanceReductionLogs) ?? []
             lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
             lastTransfersExecutedAt = try container.decodeIfPresent(String.self, forKey: .lastTransfersExecutedAt)
             nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
@@ -1204,6 +1291,7 @@ private struct BudgetState: Codable {
             nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
             nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
             nextProcessedTransactionLogId = try container.decodeIfPresent(Int.self, forKey: .nextProcessedTransactionLogId) ?? 1
+            nextBalanceReductionLogId = try container.decodeIfPresent(Int.self, forKey: .nextBalanceReductionLogId) ?? 1
             return
         }
 
@@ -1214,6 +1302,7 @@ private struct BudgetState: Codable {
         transactions = try container.decodeIfPresent([TransactionRecord].self, forKey: .transactions) ?? []
         targets = try container.decodeIfPresent([TargetRecord].self, forKey: .targets) ?? []
         processedTransactionLogs = try container.decodeIfPresent([ProcessedTransactionLog].self, forKey: .processedTransactionLogs) ?? []
+        balanceReductionLogs = try container.decodeIfPresent([BalanceReductionLog].self, forKey: .balanceReductionLogs) ?? []
         lastResetAt = try container.decodeIfPresent(String.self, forKey: .lastResetAt)
         lastTransfersExecutedAt = try container.decodeIfPresent(String.self, forKey: .lastTransfersExecutedAt)
         nextAccountId = try container.decodeIfPresent(Int.self, forKey: .nextAccountId) ?? 1
@@ -1226,6 +1315,7 @@ private struct BudgetState: Codable {
         nextIncomeScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextIncomeScheduleId) ?? 1
         nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
         nextProcessedTransactionLogId = try container.decodeIfPresent(Int.self, forKey: .nextProcessedTransactionLogId) ?? 1
+        nextBalanceReductionLogId = try container.decodeIfPresent(Int.self, forKey: .nextBalanceReductionLogId) ?? 1
     }
 
     func normalized() -> BudgetState {
@@ -1268,6 +1358,9 @@ private struct BudgetState: Codable {
         let processedLogMax = processedTransactionLogs.map { $0.id }.max() ?? 0
         normalizedState.nextProcessedTransactionLogId = max(nextProcessedTransactionLogId, processedLogMax + 1)
 
+        let reductionLogMax = balanceReductionLogs.map { $0.id }.max() ?? 0
+        normalizedState.nextBalanceReductionLogId = max(nextBalanceReductionLogId, reductionLogMax + 1)
+
         return normalizedState
     }
 
@@ -1278,8 +1371,9 @@ private struct BudgetState: Codable {
             transferSchedules: [],
             transactions: [],
             targets: [],
-            lastResetAt: nil,
             processedTransactionLogs: [],
+            balanceReductionLogs: [],
+            lastResetAt: nil,
             lastTransfersExecutedAt: nil,
             nextAccountId: 1,
             nextPotId: 1,
@@ -1290,7 +1384,8 @@ private struct BudgetState: Codable {
             nextScheduledPaymentId: 1,
             nextIncomeScheduleId: 1,
             nextTransferScheduleId: 1,
-            nextProcessedTransactionLogId: 1
+            nextProcessedTransactionLogId: 1,
+            nextBalanceReductionLogId: 1
         )
     }
 
@@ -1401,8 +1496,9 @@ private struct BudgetState: Codable {
             transferSchedules: [],
             transactions: [],
             targets: [],
-            lastResetAt: nil,
             processedTransactionLogs: [],
+            balanceReductionLogs: [],
+            lastResetAt: nil,
             lastTransfersExecutedAt: nil,
             nextAccountId: 4,
             nextPotId: 5,
@@ -1413,7 +1509,8 @@ private struct BudgetState: Codable {
             nextScheduledPaymentId: 4,
             nextIncomeScheduleId: 2,
             nextTransferScheduleId: 1,
-            nextProcessedTransactionLogId: 1
+            nextProcessedTransactionLogId: 1,
+            nextBalanceReductionLogId: 1
         )
     }
 }

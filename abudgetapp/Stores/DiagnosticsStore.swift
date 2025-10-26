@@ -36,6 +36,7 @@ final class DiagnosticsStore: ObservableObject {
         "Add Scheduled Payment",
         "Add Transfer Schedule",
         "Execute Transfer Schedule",
+        "Apply Monthly Reduction",
         "Delete Transfer Schedule",
         "Delete Scheduled Payment",
         "Delete Transaction",
@@ -264,6 +265,27 @@ final class DiagnosticsStore: ObservableObject {
                 diagnosticsTransferSchedule = await self.store.currentTransferSchedules().first(where: { $0.id == schedule.id })
                 return response.message
             }),
+            ("Apply Monthly Reduction", {
+                guard let account = diagnosticsAccount else {
+                    throw BudgetDataError.invalidOperation("Missing diagnostics account for reduction")
+                }
+                let beforeLogs = await self.store.currentBalanceReductionLogs()
+                let priorCount = beforeLogs.count
+
+                let updatedAccounts = try await self.store.applyMonthlyReduction(on: Date())
+                diagnosticsAccount = updatedAccounts.first(where: { $0.id == account.id }) ?? diagnosticsAccount
+
+                let afterLogs = await self.store.currentBalanceReductionLogs()
+                let delta = afterLogs.count - priorCount
+                guard delta > 0 else {
+                    throw BudgetDataError.invalidOperation("Monthly reduction did not record any history entries")
+                }
+                let latestLog = afterLogs.sorted { $0.timestamp > $1.timestamp }.first
+                let totalReduced = afterLogs.suffix(delta).reduce(0.0) { $0 + max($1.reductionAmount, 0) }
+                let amountText = String(format: "%.2f", totalReduced)
+                let monthText = latestLog?.monthKey ?? "current month"
+                return "Logged \(delta) reduction run(s) for \(monthText) (−£\(amountText))."
+            }),
             ("Delete Transfer Schedule", {
                 guard let schedule = diagnosticsTransferSchedule else {
                     throw BudgetDataError.invalidOperation("Missing transfer schedule for deletion")
@@ -336,7 +358,11 @@ final class DiagnosticsStore: ObservableObject {
             ("Reset Balances", {
                 let reset = try await self.store.resetBalances()
                 self.accountsStore?.applyAccounts(reset.accounts)
-                return "Reset \(reset.accounts.count) accounts"
+                let remainingLogs = await self.store.currentBalanceReductionLogs()
+                guard remainingLogs.isEmpty else {
+                    throw BudgetDataError.invalidOperation("Reduction history not cleared by reset")
+                }
+                return "Reset \(reset.accounts.count) accounts and cleared reduction history"
             }),
             ("Reload Accounts", {
                 await self.accountsStore?.loadAccounts()

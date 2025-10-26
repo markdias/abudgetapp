@@ -4,6 +4,7 @@ import SwiftUI
 struct MyBudgetApp: App {
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("autoProcessTransactionsEnabled") private var autoProcessTransactionsEnabled = false
+    @AppStorage("autoReduceBalancesEnabled") private var autoReduceBalancesEnabled = false
     @StateObject private var accountsStore: AccountsStore
     @StateObject private var potsStore: PotsStore
     @StateObject private var diagnosticsStore: DiagnosticsStore
@@ -46,6 +47,9 @@ struct MyBudgetApp: App {
         }
         if autoProcessTransactionsEnabled {
             await accountsStore.processScheduledTransactions()
+        }
+        if autoReduceBalancesEnabled {
+            await accountsStore.applyMonthlyReduction()
         }
     }
 }

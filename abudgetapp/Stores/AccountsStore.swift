@@ -10,6 +10,7 @@ final class AccountsStore: ObservableObject {
     // Removed transactions tracking
     @Published private(set) var transactions: [TransactionRecord] = []
     @Published private(set) var processedTransactionLogs: [ProcessedTransactionLog] = []
+    @Published private(set) var balanceReductionLogs: [BalanceReductionLog] = []
     @Published private(set) var targets: [TargetRecord] = []
     @Published var isLoading = false
     @Published var statusMessage: StatusMessage?
@@ -30,6 +31,7 @@ final class AccountsStore: ObservableObject {
         accounts = fetchedAccounts
         transactions = await store.currentTransactions()
         processedTransactionLogs = await store.currentProcessedTransactions()
+        balanceReductionLogs = await store.currentBalanceReductionLogs()
         targets = await store.currentTargets()
         // Removed transfer queue; no pruning needed
     }
@@ -137,6 +139,7 @@ final class AccountsStore: ObservableObject {
         do {
             _ = try await store.resetBalances()
             // Reload full state so all dependent views (activities, pots) refresh immediately
+            balanceReductionLogs = []
             await loadAccounts()
             statusMessage = StatusMessage(title: "Balances Reset", message: "Accounts have been reset", kind: .warning)
         } catch let error as LocalBudgetStore.StoreError {
@@ -147,6 +150,27 @@ final class AccountsStore: ObservableObject {
             let dataError = BudgetDataError.unknown(error)
             lastError = dataError
             statusMessage = StatusMessage(title: "Reset Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
+    func applyMonthlyReduction(on date: Date = Date()) async {
+        do {
+            let updatedAccounts = try await store.applyMonthlyReduction(on: date)
+            applyAccounts(updatedAccounts)
+            balanceReductionLogs = await store.currentBalanceReductionLogs()
+            statusMessage = StatusMessage(
+                title: "Monthly Reduction Applied",
+                message: "Account balances adjusted for the current month.",
+                kind: .info
+            )
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Monthly Reduction Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Monthly Reduction Failed", message: dataError.localizedDescription, kind: .error)
         }
     }
 

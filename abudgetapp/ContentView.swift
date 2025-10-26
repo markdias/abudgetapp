@@ -11,6 +11,7 @@ struct ContentView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("autoProcessTransactionsEnabled") private var autoProcessingEnabled = false
+    @AppStorage("autoReduceBalancesEnabled") private var autoReduceEnabled = false
     @State private var selectedTab = 0
 
     var body: some View {
@@ -41,8 +42,16 @@ struct ContentView: View {
         }
         .tint(.purple)
         .onChange(of: scenePhase) { _, newPhase in
-            guard autoProcessingEnabled, newPhase == .active else { return }
-            Task { await accountsStore.processScheduledTransactions() }
+            guard newPhase == .active else { return }
+            guard autoProcessingEnabled || autoReduceEnabled else { return }
+            Task {
+                if autoProcessingEnabled {
+                    await accountsStore.processScheduledTransactions()
+                }
+                if autoReduceEnabled {
+                    await accountsStore.applyMonthlyReduction()
+                }
+            }
         }
     }
 }
