@@ -58,10 +58,30 @@ public struct Account: Identifiable, Codable, Hashable {
     
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(balance)
+        hasher.combine(type)
+        hasher.combine(accountType)
+        hasher.combine(credit_limit)
+        hasher.combine(excludeFromReset)
+        hasher.combine(pots)
+        hasher.combine(scheduled_payments)
+        hasher.combine(incomes)
+        hasher.combine(expenses)
     }
     
     public static func == (lhs: Account, rhs: Account) -> Bool {
-        return lhs.id == rhs.id
+        return lhs.id == rhs.id &&
+            lhs.name == rhs.name &&
+            lhs.balance == rhs.balance &&
+            lhs.type == rhs.type &&
+            lhs.accountType == rhs.accountType &&
+            lhs.credit_limit == rhs.credit_limit &&
+            lhs.excludeFromReset == rhs.excludeFromReset &&
+            lhs.pots == rhs.pots &&
+            lhs.scheduled_payments == rhs.scheduled_payments &&
+            lhs.incomes == rhs.incomes &&
+            lhs.expenses == rhs.expenses
     }
     
     public init(id: Int, name: String, balance: Double, type: String, accountType: String? = nil,
@@ -100,10 +120,18 @@ public struct Pot: Identifiable, Codable, Hashable {
     
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(balance)
+        hasher.combine(excludeFromReset)
+        hasher.combine(scheduled_payments)
     }
     
     public static func == (lhs: Pot, rhs: Pot) -> Bool {
-        return lhs.id == rhs.id
+        return lhs.id == rhs.id &&
+            lhs.name == rhs.name &&
+            lhs.balance == rhs.balance &&
+            lhs.excludeFromReset == rhs.excludeFromReset &&
+            lhs.scheduled_payments == rhs.scheduled_payments
     }
 }
 
