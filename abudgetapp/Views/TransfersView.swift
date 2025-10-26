@@ -31,11 +31,11 @@ struct TransfersView: View {
                             isProcessingTransactions = true
                             processTransactionsFeedback = nil
                             Task {
-                                let processedCount = await accountsStore.processScheduledTransactionsIfNeeded(upTo: Date(), bypassToggle: true)
+                                let result = await accountsStore.processScheduledTransactionsIfNeeded(upTo: Date(), bypassToggle: true)
                                 await MainActor.run {
-                                    if processedCount > 0 {
-                                        let suffix = processedCount == 1 ? "scheduled payment" : "scheduled payments"
-                                        processTransactionsFeedback = "Processed \(processedCount) \(suffix)."
+                                    if result.processedCount > 0 {
+                                        let suffix = result.processedCount == 1 ? "scheduled payment" : "scheduled payments"
+                                        processTransactionsFeedback = "Processed \(result.processedCount) \(suffix)."
                                     } else {
                                         processTransactionsFeedback = "No scheduled payments were pending."
                                     }

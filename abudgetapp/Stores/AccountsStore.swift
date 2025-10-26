@@ -1,5 +1,10 @@
 import Foundation
 
+struct ProcessScheduledTransactionsResult {
+    let processedCount: Int
+    let awaitingTransferExecution: Bool
+}
+
 @MainActor
 final class AccountsStore: ObservableObject {
     static let accountsDidChangeNotification = Notification.Name("AccountsStoreAccountsDidChange")
@@ -244,11 +249,20 @@ final class AccountsStore: ObservableObject {
     }
 
     @discardableResult
-    func processScheduledTransactionsIfNeeded(upTo date: Date, bypassToggle: Bool = false) async -> Int {
-        guard bypassToggle || UserDefaults.standard.bool(forKey: "processTransactionsEnabled") else { return 0 }
+    func processScheduledTransactionsIfNeeded(upTo date: Date, bypassToggle: Bool = false) async -> ProcessScheduledTransactionsResult {
+        guard bypassToggle || UserDefaults.standard.bool(forKey: "processTransactionsEnabled") else {
+            return ProcessScheduledTransactionsResult(processedCount: 0, awaitingTransferExecution: false)
+        }
         do {
-            let processed = try await store.processScheduledTransactions(upTo: date)
-            guard !processed.isEmpty else { return 0 }
+            let requireTransferExecution = !bypassToggle
+            let processed = try await store.processScheduledTransactions(
+                upTo: date,
+                requireTransferExecution: requireTransferExecution
+            )
+            guard !processed.isEmpty else {
+                let awaitingTransfer = requireTransferExecution && !(await store.hasTransferExecution(forMonthContaining: date))
+                return ProcessScheduledTransactionsResult(processedCount: 0, awaitingTransferExecution: awaitingTransfer)
+            }
             await loadAccounts()
             let count = processed.count
             let suffix = count == 1 ? "scheduled payment" : "scheduled payments"
@@ -257,7 +271,7 @@ final class AccountsStore: ObservableObject {
                 message: "Processed \(count) \(suffix).",
                 kind: .success
             )
-            return count
+            return ProcessScheduledTransactionsResult(processedCount: count, awaitingTransferExecution: false)
         } catch let error as LocalBudgetStore.StoreError {
             let dataError = error.asBudgetDataError
             lastError = dataError
@@ -266,7 +280,7 @@ final class AccountsStore: ObservableObject {
                 message: dataError.localizedDescription,
                 kind: .error
             )
-            return 0
+            return ProcessScheduledTransactionsResult(processedCount: 0, awaitingTransferExecution: false)
         } catch {
             let dataError = BudgetDataError.unknown(error)
             lastError = dataError
@@ -275,7 +289,7 @@ final class AccountsStore: ObservableObject {
                 message: dataError.localizedDescription,
                 kind: .error
             )
-            return 0
+            return ProcessScheduledTransactionsResult(processedCount: 0, awaitingTransferExecution: false)
         }
     }
 

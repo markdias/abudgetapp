@@ -27,6 +27,20 @@ actor LocalBudgetStore {
         return formatter
     }()
 
+    private static let dayMonthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd/MM/yyyy"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
+    private static let dayMonthNoYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd/MM"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
     private struct ScheduledPaymentProcessContext {
         let accountIndex: Int
         let potName: String?
@@ -435,36 +449,31 @@ actor LocalBudgetStore {
         try persist()
     }
 
-    func processScheduledTransactions(upTo throughDate: Date) throws -> [TransactionRecord] {
-        guard let transferDate = mostRecentTransferExecutionDate() else {
-            return []
-        }
-        if throughDate < transferDate {
-            return []
-        }
+    func processScheduledTransactions(upTo throughDate: Date, requireTransferExecution: Bool = true) throws -> [TransactionRecord] {
         let calendar = Calendar.current
-        guard calendar.isDate(transferDate, equalTo: throughDate, toGranularity: .month) else {
-            return []
-        }
 
-        let contexts = collectScheduledPaymentContexts(upTo: throughDate, calendar: calendar)
-        if contexts.isEmpty {
-            return []
+        if requireTransferExecution {
+            guard let transferDate = mostRecentTransferExecutionDate() else {
+                return []
+            }
+            if throughDate < transferDate {
+                return []
+            }
+            guard calendar.isDate(transferDate, equalTo: throughDate, toGranularity: .month) else {
+                return []
+            }
+            return try processScheduledPayments(upTo: throughDate, calendar: calendar)
+        } else {
+            if let transferDate = mostRecentTransferExecutionDate(), throughDate < transferDate {
+                return []
+            }
+            return try processScheduledPayments(upTo: throughDate, calendar: calendar)
         }
+    }
 
-        var processed: [TransactionRecord] = []
-        for context in contexts.sorted(by: { $0.dueDate < $1.dueDate }) {
-            let record = try applyScheduledPayment(context: context)
-            processed.append(record)
-            try markScheduledPaymentProcessed(context: context, processedDateString: record.date)
-        }
-
-        if processed.isEmpty {
-            return []
-        }
-
-        try persist()
-        return processed
+    func hasTransferExecution(forMonthContaining date: Date) -> Bool {
+        guard let transferDate = mostRecentTransferExecutionDate() else { return false }
+        return Calendar.current.isDate(transferDate, equalTo: date, toGranularity: .month)
     }
 
     func updateTransaction(id: Int, submission: TransactionSubmission) throws -> TransactionRecord {
@@ -872,6 +881,27 @@ actor LocalBudgetStore {
         return contexts
     }
 
+    private func processScheduledPayments(upTo throughDate: Date, calendar: Calendar) throws -> [TransactionRecord] {
+        let contexts = collectScheduledPaymentContexts(upTo: throughDate, calendar: calendar)
+        if contexts.isEmpty {
+            return []
+        }
+
+        var processed: [TransactionRecord] = []
+        for context in contexts.sorted(by: { $0.dueDate < $1.dueDate }) {
+            let record = try applyScheduledPayment(context: context)
+            processed.append(record)
+            try markScheduledPaymentProcessed(context: context, processedDateString: record.date)
+        }
+
+        if processed.isEmpty {
+            return []
+        }
+
+        try persist()
+        return processed
+    }
+
     private func dueDate(for payment: ScheduledPayment, throughDate: Date, calendar: Calendar) -> Date? {
         guard let day = dayOfMonth(from: payment.date, calendar: calendar) else { return nil }
         var components = calendar.dateComponents([.year, .month], from: throughDate)
@@ -915,11 +945,27 @@ actor LocalBudgetStore {
         if let numeric = Int(trimmed) {
             return numeric
         }
+
+        let lowercased = trimmed.lowercased()
+        let ordinalSuffixes = ["st", "nd", "rd", "th"]
+        if let suffix = ordinalSuffixes.first(where: { lowercased.hasSuffix($0) }) {
+            let withoutSuffix = trimmed.dropLast(suffix.count)
+            if let ordinalValue = Int(withoutSuffix) {
+                return ordinalValue
+            }
+        }
+
         if let isoDate = LocalBudgetStore.isoFormatter.date(from: trimmed) {
             return calendar.component(.day, from: isoDate)
         }
         if let simpleDate = LocalBudgetStore.simpleDateFormatter.date(from: trimmed) {
             return calendar.component(.day, from: simpleDate)
+        }
+        if let dayMonth = LocalBudgetStore.dayMonthFormatter.date(from: trimmed) {
+            return calendar.component(.day, from: dayMonth)
+        }
+        if let dayMonthNoYear = LocalBudgetStore.dayMonthNoYearFormatter.date(from: trimmed) {
+            return calendar.component(.day, from: dayMonthNoYear)
         }
         return nil
     }

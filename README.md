@@ -27,7 +27,7 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Activity Tab** – Full history view with filters that share the same activity source as the dashboard feed.
 * **Transfers** – Dedicated hub for planning transfer schedules, queuing expense-driven account transfers, executing income and transfer runs, resetting balances, and sorting salaries into pots. Transfer Schedules builds a queue of transactions that can be executed later from the Transfers tab.
 * **Processed Transactions Log** – Available from the Transfers tab to review every transaction in the data store with clear indicators for items that were processed automatically from scheduled payments.
-* **Process Transactions Now** – Temporary manual action in Transfers that lets you run scheduled payment processing on demand while validating automation behaviour.
+* **Process Transactions Now** – Temporary manual action in Transfers that lets you run scheduled payment processing on demand while validating automation behaviour, even if transfers have not yet been executed for the current month.
 * **Budget** – Summaries derived from pots and scheduled payments plus an upcoming payments list.
 * **Settings** – Local storage management (restore sample data, reload, delete-all), card reorder flow, and diagnostics launcher.
 * **Process Transactions Automation** – Optional toggle in Settings that automatically deducts scheduled payments from their pots once transfers run and on each payment's scheduled day.
