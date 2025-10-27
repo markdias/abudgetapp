@@ -396,6 +396,11 @@ struct ActivitiesPanelSection: View {
     @State private var showEditIncome = false
     @State private var showEditTransaction = false
     @State private var showEditTarget = false
+    @State private var previewTransaction: TransactionRecord? = nil
+    @State private var previewIncome: IncomePreviewContext? = nil
+    @State private var previewTarget: TargetPreviewContext? = nil
+    @State private var pendingDeleteItem: Item? = nil
+    @State private var showDeleteConfirmation = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -581,6 +586,8 @@ struct ActivitiesPanelSection: View {
                 VStack(spacing: 10) {
                     ForEach(itemsToShow) { item in
                         ActivityListItemRow(item: item)
+                            .contentShape(Rectangle())
+                            .onTapGesture { handleTap(item) }
                             .contextMenu {
                                 Button {
                                     handleEdit(item)
@@ -624,6 +631,25 @@ struct ActivitiesPanelSection: View {
             if let id = editingTargetId {
                 EditTargetSheet(targetId: id, isPresented: $showEditTarget)
             }
+        }
+        .sheet(item: $previewTransaction) { record in
+            TransactionPreviewSheet(record: record, accounts: accounts)
+        }
+        .sheet(item: $previewIncome) { context in
+            IncomePreviewSheet(context: context)
+        }
+        .sheet(item: $previewTarget) { context in
+            TargetPreviewSheet(context: context)
+        }
+        .confirmationDialog("Delete Activity?", isPresented: $showDeleteConfirmation, presenting: pendingDeleteItem) { item in
+            Button("Delete", role: .destructive) {
+                Task { await performDelete(item) }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteItem = nil
+            }
+        } message: { item in
+            Text("Are you sure you want to delete \"\(item.title)\"?")
         }
     }
 
@@ -759,6 +785,12 @@ private struct EditIncomeSheet: View {
     @State private var dayOfMonth: String = ""
     @State private var selectedPot: String? = nil
     @State private var didPreload = false
+    @State private var pendingSubmission: IncomeSubmission? = nil
+    @State private var changeSummary: [ChangeSummaryField] = []
+    @State private var previousSnapshot: [DetailSnapshot] = []
+    @State private var updatedSnapshot: [DetailSnapshot] = []
+    @State private var showSaveReview = false
+    @State private var showDeleteConfirmation = false
 
     private var account: Account? { accountsStore.account(for: accountId) }
     private var income: Income? { account?.incomes?.first(where: { $0.id == incomeId }) }
@@ -792,12 +824,12 @@ private struct EditIncomeSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                    Button("Save") { beginSaveReview() }.disabled(!canSave)
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 VStack {
-                    Button(role: .destructive) { Task { await deleteItem() } } label: {
+                    Button(role: .destructive) { showDeleteConfirmation = true } label: {
                         Text("Delete Income")
                             .frame(maxWidth: .infinity)
                     }
@@ -807,8 +839,33 @@ private struct EditIncomeSheet: View {
                 }
                 .background(.ultraThinMaterial)
             }
+            .sheet(isPresented: $showSaveReview) {
+                if let submission = pendingSubmission {
+                    ChangeReviewSheet(
+                        title: "Review Income Changes",
+                        changes: changeSummary,
+                        previousSnapshot: previousSnapshot,
+                        updatedSnapshot: updatedSnapshot,
+                        onCancel: cancelSaveReview,
+                        onConfirm: { confirmSaveReview(with: submission) }
+                    )
+                }
+            }
             .onAppear { preloadIfNeeded() }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
+            .onChange(of: showSaveReview) { _, isPresented in
+                if !isPresented {
+                    resetReviewState()
+                }
+            }
+            .confirmationDialog("Delete Income?", isPresented: $showDeleteConfirmation) {
+                Button("Delete", role: .destructive) {
+                    Task { await deleteItem() }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Are you sure you want to delete this income?")
+            }
         }
     }
 
@@ -823,17 +880,119 @@ private struct EditIncomeSheet: View {
         didPreload = true
     }
 
-    private func save() async {
-        guard let money = Double(amount) else { return }
-        let submission = IncomeSubmission(amount: abs(money), description: name, company: company, date: dayOfMonth, potName: selectedPot)
+    private func beginSaveReview() {
+        guard let income, let submission = makeSubmission(basedOn: income) else { return }
+        let accountName = account?.name ?? "Unknown"
+        let previous = buildSnapshot(from: income, accountName: accountName)
+        let updated = buildSnapshot(from: submission, accountName: accountName)
+        changeSummary = computeChanges(previous: previous, updated: updated)
+        previousSnapshot = previous
+        updatedSnapshot = updated
+        pendingSubmission = submission
+        showSaveReview = true
+    }
+
+    private func cancelSaveReview() {
+        resetReviewState()
+        showSaveReview = false
+    }
+
+    private func confirmSaveReview(with submission: IncomeSubmission) {
+        Task { await performSave(with: submission) }
+    }
+
+    private func performSave(with submission: IncomeSubmission) async {
         await accountsStore.updateIncome(accountId: accountId, incomeId: incomeId, submission: submission)
-        isPresented = false
+        await MainActor.run {
+            showSaveReview = false
+            resetReviewState()
+            isPresented = false
+        }
+    }
+
+    private func resetReviewState() {
+        pendingSubmission = nil
+        changeSummary = []
+        previousSnapshot = []
+        updatedSnapshot = []
+    }
+
+    private func makeSubmission(basedOn income: Income) -> IncomeSubmission? {
+        guard let money = Double(amount) else { return nil }
+        let trimmedDay = dayOfMonth.trimmingCharacters(in: .whitespacesAndNewlines)
+        return IncomeSubmission(
+            amount: abs(money),
+            description: name,
+            company: company,
+            date: trimmedDay.isEmpty ? nil : trimmedDay,
+            potName: selectedPot
+        )
+    }
+
+    private func buildSnapshot(from income: Income, accountName: String) -> [DetailSnapshot] {
+        [
+            DetailSnapshot(label: "Name", value: income.description.isEmpty ? "—" : income.description),
+            DetailSnapshot(label: "Company", value: income.company.isEmpty ? "—" : income.company),
+            DetailSnapshot(label: "Amount", value: formattedAmount(income.amount)),
+            DetailSnapshot(label: "Day", value: normalizeDay(income.date)),
+            DetailSnapshot(label: "Pot", value: potDescription(income.potName)),
+            DetailSnapshot(label: "Account", value: accountName)
+        ]
+    }
+
+    private func buildSnapshot(from submission: IncomeSubmission, accountName: String) -> [DetailSnapshot] {
+        let dayValue = submission.date ?? ""
+        return [
+            DetailSnapshot(label: "Name", value: submission.description.isEmpty ? "—" : submission.description),
+            DetailSnapshot(label: "Company", value: submission.company.isEmpty ? "—" : submission.company),
+            DetailSnapshot(label: "Amount", value: formattedAmount(submission.amount)),
+            DetailSnapshot(label: "Day", value: normalizeDay(dayValue)),
+            DetailSnapshot(label: "Pot", value: potDescription(submission.potName)),
+            DetailSnapshot(label: "Account", value: accountName)
+        ]
+    }
+
+    private func formattedAmount(_ value: Double) -> String {
+        "£" + String(format: "%.2f", value)
+    }
+
+    private func potDescription(_ value: String?) -> String {
+        guard let pot = value, !pot.isEmpty else { return "None" }
+        return pot
+    }
+
+    private func normalizeDay(_ value: String) -> String {
+        if let day = Int(value), (1...31).contains(day) { return "\(day)" }
+        return value.isEmpty ? "—" : value
     }
 
     private func deleteItem() async {
         await accountsStore.deleteIncome(accountId: accountId, incomeId: incomeId)
         isPresented = false
     }
+}
+
+private struct ChangeSummaryField: Identifiable {
+    let id = UUID()
+    let label: String
+    let previous: String
+    let updated: String
+}
+
+private struct DetailSnapshot: Identifiable {
+    let id = UUID()
+    let label: String
+    let value: String
+}
+
+private func computeChanges(previous: [DetailSnapshot], updated: [DetailSnapshot]) -> [ChangeSummaryField] {
+    let updatedLookup = Dictionary(uniqueKeysWithValues: updated.map { ($0.label, $0.value) })
+    var changes: [ChangeSummaryField] = []
+    for detail in previous {
+        guard let newValue = updatedLookup[detail.label], detail.value != newValue else { continue }
+        changes.append(ChangeSummaryField(label: detail.label, previous: detail.value, updated: newValue))
+    }
+    return changes
 }
 
 private struct EditTransactionSheet: View {
@@ -853,6 +1012,11 @@ private struct EditTransactionSheet: View {
     @State private var paymentType: String = "direct_debit" // "card" or "direct_debit"
     @State private var dayOfMonth: String = ""
     @State private var didPreload = false
+    @State private var pendingSubmission: TransactionSubmission? = nil
+    @State private var changeSummary: [ChangeSummaryField] = []
+    @State private var previousSnapshot: [DetailSnapshot] = []
+    @State private var updatedSnapshot: [DetailSnapshot] = []
+    @State private var showSaveReview = false
 
     private var record: TransactionRecord? { accountsStore.transaction(for: transactionId) }
     private var toAccount: Account? { toAccountId.flatMap { accountsStore.account(for: $0) } }
@@ -898,7 +1062,7 @@ private struct EditTransactionSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                    Button("Save") { beginSaveReview() }.disabled(!canSave)
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -913,10 +1077,27 @@ private struct EditTransactionSheet: View {
                 }
                 .background(.ultraThinMaterial)
             }
+            .sheet(isPresented: $showSaveReview) {
+                if let submission = pendingSubmission {
+                    ChangeReviewSheet(
+                        title: "Review Transaction Changes",
+                        changes: changeSummary,
+                        previousSnapshot: previousSnapshot,
+                        updatedSnapshot: updatedSnapshot,
+                        onCancel: cancelSaveReview,
+                        onConfirm: { confirmSaveReview(with: submission) }
+                    )
+                }
+            }
             .onAppear { preloadIfNeeded() }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
             .onChange(of: accountsStore.transactions) { _, _ in preloadIfNeeded() }
             .onChange(of: toAccountId) { _, newValue in handleAccountChange(newValue) }
+            .onChange(of: showSaveReview) { _, isPresented in
+                if !isPresented {
+                    resetReviewState()
+                }
+            }
         }
     }
 
@@ -959,11 +1140,132 @@ private struct EditTransactionSheet: View {
         }
     }
 
-    private func save() async {
-        guard let toAccountId, let money = Double(amount) else { return }
-        let submission = TransactionSubmission(name: name, vendor: vendor, amount: money, date: dayOfMonth, fromAccountId: nil, toAccountId: toAccountId, toPotName: selectedPot, paymentType: paymentType)
+    private func beginSaveReview() {
+        guard let currentRecord = record,
+              let submission = makeSubmission(basedOn: currentRecord) else { return }
+        let previous = buildSnapshot(from: currentRecord)
+        let updated = buildSnapshot(from: submission)
+        changeSummary = computeChanges(previous: previous, updated: updated)
+        previousSnapshot = previous
+        updatedSnapshot = updated
+        pendingSubmission = submission
+        showSaveReview = true
+    }
+
+    private func cancelSaveReview() {
+        resetReviewState()
+        showSaveReview = false
+    }
+
+    private func confirmSaveReview(with submission: TransactionSubmission) {
+        Task {
+            await performSave(with: submission)
+        }
+    }
+
+    private func performSave(with submission: TransactionSubmission) async {
         await accountsStore.updateTransaction(id: transactionId, submission: submission)
-        isPresented = false
+        await MainActor.run {
+            showSaveReview = false
+            resetReviewState()
+            isPresented = false
+        }
+    }
+
+    private func resetReviewState() {
+        pendingSubmission = nil
+        changeSummary = []
+        previousSnapshot = []
+        updatedSnapshot = []
+    }
+
+    private func makeSubmission(basedOn record: TransactionRecord) -> TransactionSubmission? {
+        guard let toAccountId, let money = Double(amount) else { return nil }
+        let trimmedDay = dayOfMonth.trimmingCharacters(in: .whitespacesAndNewlines)
+        return TransactionSubmission(
+            name: name,
+            vendor: vendor,
+            amount: money,
+            date: trimmedDay.isEmpty ? nil : trimmedDay,
+            fromAccountId: record.fromAccountId,
+            toAccountId: toAccountId,
+            toPotName: selectedPot,
+            paymentType: paymentType
+        )
+    }
+
+    private func buildSnapshot(from record: TransactionRecord) -> [DetailSnapshot] {
+        buildSnapshot(
+            name: record.name,
+            vendor: record.vendor,
+            amount: record.amount,
+            date: record.date,
+            toAccountId: record.toAccountId,
+            potName: record.toPotName,
+            paymentType: record.paymentType,
+            fromAccountId: record.fromAccountId
+        )
+    }
+
+    private func buildSnapshot(from submission: TransactionSubmission) -> [DetailSnapshot] {
+        let dayValue = submission.date ?? ""
+        return buildSnapshot(
+            name: submission.name,
+            vendor: submission.vendor,
+            amount: submission.amount,
+            date: dayValue,
+            toAccountId: submission.toAccountId,
+            potName: submission.toPotName,
+            paymentType: submission.paymentType,
+            fromAccountId: submission.fromAccountId
+        )
+    }
+
+    private func buildSnapshot(
+        name: String,
+        vendor: String,
+        amount: Double,
+        date: String,
+        toAccountId: Int,
+        potName: String?,
+        paymentType: String?,
+        fromAccountId: Int?
+    ) -> [DetailSnapshot] {
+        [
+            DetailSnapshot(label: "Name", value: name.isEmpty ? "—" : name),
+            DetailSnapshot(label: "Vendor", value: vendor.isEmpty ? "—" : vendor),
+            DetailSnapshot(label: "Amount", value: formattedAmount(amount)),
+            DetailSnapshot(label: "Day", value: date.isEmpty ? "—" : date),
+            DetailSnapshot(label: "Payment Type", value: paymentTypeDescription(paymentType)),
+            DetailSnapshot(label: "To Account", value: accountName(for: toAccountId)),
+            DetailSnapshot(label: "Pot", value: potDescription(potName)),
+            DetailSnapshot(label: "From Account", value: {
+                guard let id = fromAccountId else { return "None" }
+                return accountName(for: id)
+            }())
+        ]
+    }
+
+    private func formattedAmount(_ value: Double) -> String {
+        "£" + String(format: "%.2f", value)
+    }
+
+    private func paymentTypeDescription(_ value: String?) -> String {
+        switch value {
+        case "card": return "Card"
+        case "direct_debit": return "Direct Debit"
+        case .some(let value) where !value.isEmpty: return value.capitalized
+        default: return "—"
+        }
+    }
+
+    private func potDescription(_ value: String?) -> String {
+        guard let pot = value, !pot.isEmpty else { return "None" }
+        return pot
+    }
+
+    private func accountName(for id: Int) -> String {
+        accountsStore.account(for: id)?.name ?? "Unknown"
     }
 
     private func deleteItem() async {
@@ -984,6 +1286,12 @@ private struct EditTargetSheet: View {
     @State private var amount: String = ""
     @State private var dayOfMonth: String = ""
     @State private var didPreload = false
+    @State private var pendingSubmission: TargetSubmission? = nil
+    @State private var changeSummary: [ChangeSummaryField] = []
+    @State private var previousSnapshot: [DetailSnapshot] = []
+    @State private var updatedSnapshot: [DetailSnapshot] = []
+    @State private var showSaveReview = false
+    @State private var showDeleteConfirmation = false
 
     private var record: TargetRecord? { accountsStore.targets.first { $0.id == targetId } }
 
@@ -1009,12 +1317,12 @@ private struct EditTargetSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button("Save") { Task { await save() } }.disabled(!canSave)
+                    Button("Save") { beginSaveReview() }.disabled(!canSave)
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 VStack {
-                    Button(role: .destructive) { Task { await deleteItem() } } label: {
+                    Button(role: .destructive) { showDeleteConfirmation = true } label: {
                         Text("Delete Budget")
                             .frame(maxWidth: .infinity)
                     }
@@ -1024,9 +1332,34 @@ private struct EditTargetSheet: View {
                 }
                 .background(.ultraThinMaterial)
             }
+            .sheet(isPresented: $showSaveReview) {
+                if let submission = pendingSubmission {
+                    ChangeReviewSheet(
+                        title: "Review Budget Changes",
+                        changes: changeSummary,
+                        previousSnapshot: previousSnapshot,
+                        updatedSnapshot: updatedSnapshot,
+                        onCancel: cancelSaveReview,
+                        onConfirm: { confirmSaveReview(with: submission) }
+                    )
+                }
+            }
             .onAppear { preloadIfNeeded() }
             .onChange(of: accountsStore.targets) { _, _ in preloadIfNeeded() }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
+            .onChange(of: showSaveReview) { _, isPresented in
+                if !isPresented {
+                    resetReviewState()
+                }
+            }
+            .confirmationDialog("Delete Budget?", isPresented: $showDeleteConfirmation) {
+                Button("Delete", role: .destructive) {
+                    Task { await deleteItem() }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Are you sure you want to delete this budget?")
+            }
         }
     }
 
@@ -1041,12 +1374,79 @@ private struct EditTargetSheet: View {
         didPreload = true
     }
 
-    private func save() async {
-        guard let record else { return }
-        guard let money = Double(amount) else { return }
-        let submission = TargetSubmission(name: name, amount: abs(money), date: dayOfMonth, accountId: record.accountId)
+    private func beginSaveReview() {
+        guard let record, let submission = makeSubmission(basedOn: record) else { return }
+        let previous = buildSnapshot(from: record, accountName: accountName)
+        let updated = buildSnapshot(from: submission, accountName: accountName)
+        changeSummary = computeChanges(previous: previous, updated: updated)
+        previousSnapshot = previous
+        updatedSnapshot = updated
+        pendingSubmission = submission
+        showSaveReview = true
+    }
+
+    private func cancelSaveReview() {
+        resetReviewState()
+        showSaveReview = false
+    }
+
+    private func confirmSaveReview(with submission: TargetSubmission) {
+        Task { await performSave(with: submission) }
+    }
+
+    private func performSave(with submission: TargetSubmission) async {
         await accountsStore.updateTarget(id: targetId, submission: submission)
-        isPresented = false
+        await MainActor.run {
+            showSaveReview = false
+            resetReviewState()
+            isPresented = false
+        }
+    }
+
+    private func resetReviewState() {
+        pendingSubmission = nil
+        changeSummary = []
+        previousSnapshot = []
+        updatedSnapshot = []
+    }
+
+    private func makeSubmission(basedOn record: TargetRecord) -> TargetSubmission? {
+        guard let money = Double(amount) else { return nil }
+        let trimmedDay = dayOfMonth.trimmingCharacters(in: .whitespacesAndNewlines)
+        return TargetSubmission(
+            name: name,
+            amount: abs(money),
+            date: trimmedDay.isEmpty ? nil : trimmedDay,
+            accountId: record.accountId
+        )
+    }
+
+    private func buildSnapshot(from record: TargetRecord, accountName: String) -> [DetailSnapshot] {
+        [
+            DetailSnapshot(label: "Name", value: record.name.isEmpty ? "—" : record.name),
+            DetailSnapshot(label: "Amount", value: formattedAmount(record.amount)),
+            DetailSnapshot(label: "Day", value: normalizeDay(record.date)),
+            DetailSnapshot(label: "Account", value: accountName)
+        ]
+    }
+
+    private func buildSnapshot(from submission: TargetSubmission, accountName: String) -> [DetailSnapshot] {
+        let dayValue = submission.date ?? ""
+        return [
+            DetailSnapshot(label: "Name", value: submission.name.isEmpty ? "—" : submission.name),
+            DetailSnapshot(label: "Amount", value: formattedAmount(submission.amount)),
+            DetailSnapshot(label: "Day", value: normalizeDay(dayValue)),
+            DetailSnapshot(label: "Account", value: accountName)
+        ]
+    }
+
+    private func formattedAmount(_ value: Double) -> String {
+        "£" + String(format: "%.2f", value)
+    }
+
+    private func normalizeDay(_ value: String) -> String {
+        if let day = Int(value), (1...31).contains(day) { return "\(day)" }
+        return value.isEmpty ? "—" : value
     }
 
     private func deleteItem() async {
@@ -1057,6 +1457,31 @@ private struct EditTargetSheet: View {
 
 // MARK: - Private helpers
 private extension ActivitiesPanelSection {
+    func handleTap(_ item: Item) {
+        switch item.kind {
+        case .transaction:
+            guard let transactionId = item.transactionId else { return }
+            if let record = transactions.first(where: { $0.id == transactionId }) {
+                previewTransaction = record
+            }
+        case .income:
+            guard
+                let accountId = item.accountId,
+                let incomeId = item.incomeId,
+                let account = accountsStore.account(for: accountId),
+                let income = account.incomes?.first(where: { $0.id == incomeId })
+            else { return }
+            previewIncome = IncomePreviewContext(income: income, accountName: account.name)
+        case .target:
+            guard
+                let targetId = item.targetId,
+                let target = targets.first(where: { $0.id == targetId })
+            else { return }
+            let accountName = accounts.first(where: { $0.id == target.accountId })?.name ?? item.accountName
+            previewTarget = TargetPreviewContext(target: target, accountName: accountName)
+        }
+    }
+
     func handleEdit(_ item: Item) {
         switch item.kind {
         case .income:
@@ -1072,22 +1497,28 @@ private extension ActivitiesPanelSection {
     }
 
     func handleDelete(_ item: Item) {
-        // Fire-and-forget deletes to keep UI simple
-        Task {
-            switch item.kind {
-            case .income:
-                if let accountId = item.accountId, let incomeId = item.incomeId {
-                    await accountsStore.deleteIncome(accountId: accountId, incomeId: incomeId)
-                }
-            case .transaction:
-                if let id = item.transactionId {
-                    await accountsStore.deleteTransaction(id: id)
-                }
-            case .target:
-                if let id = item.targetId {
-                    await accountsStore.deleteTarget(id: id)
-                }
+        pendingDeleteItem = item
+        showDeleteConfirmation = true
+    }
+
+    func performDelete(_ item: Item) async {
+        switch item.kind {
+        case .income:
+            if let accountId = item.accountId, let incomeId = item.incomeId {
+                await accountsStore.deleteIncome(accountId: accountId, incomeId: incomeId)
             }
+        case .transaction:
+            if let id = item.transactionId {
+                await accountsStore.deleteTransaction(id: id)
+            }
+        case .target:
+            if let id = item.targetId {
+                await accountsStore.deleteTarget(id: id)
+            }
+        }
+        await MainActor.run {
+            showDeleteConfirmation = false
+            pendingDeleteItem = nil
         }
     }
 }
@@ -1977,6 +2408,238 @@ private struct PotRow: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+    }
+}
+
+private struct IncomePreviewContext: Identifiable {
+    let id = UUID()
+    let income: Income
+    let accountName: String
+}
+
+private struct TargetPreviewContext: Identifiable {
+    let id = UUID()
+    let target: TargetRecord
+    let accountName: String
+}
+
+private struct TransactionPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let record: TransactionRecord
+    let accounts: [Account]
+
+    private var toAccountName: String {
+        accounts.first(where: { $0.id == record.toAccountId })?.name ?? "Unknown"
+    }
+
+    private var fromAccountName: String? {
+        guard let id = record.fromAccountId else { return nil }
+        return accounts.first(where: { $0.id == id })?.name
+    }
+
+    private var formattedAmount: String { "£" + String(format: "%.2f", record.amount) }
+
+    private var paymentTypeDescription: String {
+        switch record.paymentType {
+        case "card": return "Card"
+        case "direct_debit": return "Direct Debit"
+        case .some(let value) where !value.isEmpty: return value.capitalized
+        default: return "—"
+        }
+    }
+
+    private var potDescription: String {
+        if let pot = record.toPotName, !pot.isEmpty {
+            return pot
+        }
+        return "None"
+    }
+
+    private var dayDescription: String {
+        if let day = Int(record.date), (1...31).contains(day) {
+            return "\(day)"
+        }
+        return record.date.isEmpty ? "—" : record.date
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Transaction") {
+                    LabeledContent("Name", value: record.name.isEmpty ? "—" : record.name)
+                    LabeledContent("Vendor", value: record.vendor.isEmpty ? "—" : record.vendor)
+                    LabeledContent("Amount", value: formattedAmount)
+                    LabeledContent("Day", value: dayDescription)
+                    LabeledContent("Payment Type", value: paymentTypeDescription)
+                }
+
+                Section("Accounts") {
+                    LabeledContent("To Account", value: toAccountName)
+                    if let fromAccountName, !fromAccountName.isEmpty {
+                        LabeledContent("From Account", value: fromAccountName)
+                    }
+                    LabeledContent("Pot", value: potDescription)
+                }
+
+                Section("Identifiers") {
+                    LabeledContent("Transaction ID", value: "\(record.id)")
+                }
+            }
+            .navigationTitle("Transaction Details")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct IncomePreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let context: IncomePreviewContext
+
+    private var formattedAmount: String { "£" + String(format: "%.2f", context.income.amount) }
+    private var potDescription: String {
+        if let pot = context.income.potName, !pot.isEmpty { return pot }
+        return "None"
+    }
+    private var dayDescription: String {
+        let date = context.income.date
+        if let day = Int(date), (1...31).contains(day) { return "\(day)" }
+        return date.isEmpty ? "—" : date
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Income") {
+                    LabeledContent("Name", value: context.income.description.isEmpty ? "—" : context.income.description)
+                    LabeledContent("Company", value: context.income.company.isEmpty ? "—" : context.income.company)
+                    LabeledContent("Amount", value: formattedAmount)
+                    LabeledContent("Day", value: dayDescription)
+                    LabeledContent("Pot", value: potDescription)
+                }
+
+                Section("Account") {
+                    LabeledContent("Account", value: context.accountName)
+                }
+
+                Section("Identifiers") {
+                    LabeledContent("Income ID", value: "\(context.income.id)")
+                }
+            }
+            .navigationTitle("Income Details")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct TargetPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let context: TargetPreviewContext
+
+    private var formattedAmount: String { "£" + String(format: "%.2f", context.target.amount) }
+    private var dayDescription: String {
+        let date = context.target.date
+        if let day = Int(date), (1...31).contains(day) { return "\(day)" }
+        return date.isEmpty ? "—" : date
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Budget") {
+                    LabeledContent("Name", value: context.target.name.isEmpty ? "—" : context.target.name)
+                    LabeledContent("Amount", value: formattedAmount)
+                    LabeledContent("Day", value: dayDescription)
+                }
+
+                Section("Account") {
+                    LabeledContent("Account", value: context.accountName)
+                }
+
+                Section("Identifiers") {
+                    LabeledContent("Budget ID", value: "\(context.target.id)")
+                }
+            }
+            .navigationTitle("Budget Details")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct ChangeReviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let title: String
+    let changes: [ChangeSummaryField]
+    let previousSnapshot: [DetailSnapshot]
+    let updatedSnapshot: [DetailSnapshot]
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Changed Fields") {
+                    if changes.isEmpty {
+                        Text("No changes detected. Saving will keep the item the same.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(changes) { change in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(change.label)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("\(change.previous) -> \(change.updated)")
+                                    .font(.subheadline)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
+                Section("Previous Version") {
+                    ForEach(previousSnapshot) { detail in
+                        LabeledContent(detail.label, value: detail.value)
+                    }
+                }
+
+                Section("New Version") {
+                    ForEach(updatedSnapshot) { detail in
+                        LabeledContent(detail.label, value: detail.value)
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        onConfirm()
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
 }
 
