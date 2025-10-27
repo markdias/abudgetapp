@@ -99,6 +99,70 @@ private struct BrandCardModifier: ViewModifier {
     }
 }
 
+private struct BrandFormModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+            .formStyle(.grouped)
+            .listSectionSpacing(24)
+    }
+}
+
+private struct BrandFormSectionModifier: ViewModifier {
+    var padding: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .brandCardStyle(padding: padding)
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 18, trailing: 0))
+            .listRowBackground(Color.clear)
+    }
+}
+
+private struct BrandFormHeaderModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(.footnote, design: .rounded).weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .tracking(0.8)
+    }
+}
+
+struct BrandFormSection<Content: View>: View {
+    private let title: String?
+    private let padding: CGFloat
+    private let spacing: CGFloat
+    @ViewBuilder private let content: () -> Content
+
+    init(
+        _ title: String? = nil,
+        padding: CGFloat = 20,
+        spacing: CGFloat = 16,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.padding = padding
+        self.spacing = spacing
+        self.content = content
+    }
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: spacing) {
+                if let title, !title.isEmpty {
+                    Text(title)
+                        .brandFormSectionHeaderStyle()
+                }
+                content()
+            }
+            .brandFormSectionStyle(padding: padding)
+        }
+    }
+}
+
 extension View {
     func brandCardStyle(padding: CGFloat = 22) -> some View {
         modifier(BrandCardModifier(padding: padding))
@@ -106,5 +170,17 @@ extension View {
 
     func neonBorder() -> some View {
         modifier(NeonBorder())
+    }
+
+    func brandFormStyle() -> some View {
+        modifier(BrandFormModifier())
+    }
+
+    func brandFormSectionStyle(padding: CGFloat = 20) -> some View {
+        modifier(BrandFormSectionModifier(padding: padding))
+    }
+
+    func brandFormSectionHeaderStyle() -> some View {
+        modifier(BrandFormHeaderModifier())
     }
 }

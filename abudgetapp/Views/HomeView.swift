@@ -329,6 +329,14 @@ private struct StackedAccountDeck: View {
     @State private var draggingAccount: Account?
     @State private var dragOffset: CGSize = .zero
 
+    private var isStacked: Bool {
+        selectedAccountId == nil && accounts.count > 1
+    }
+
+    private var stackSpacing: CGFloat {
+        isStacked ? spacing * 0.6 : spacing
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
@@ -339,6 +347,7 @@ private struct StackedAccountDeck: View {
                     }
                     return accounts
                 }()
+                let cardSpacing = stackSpacing
 
                 ForEach(Array(visibleAccounts.enumerated()), id: \.element.id) { index, account in
                     AccountCardView(
@@ -352,7 +361,7 @@ private struct StackedAccountDeck: View {
                         },
                         onManage: nil
                     )
-                    .offset(y: CGFloat(index) * spacing)
+                    .offset(y: CGFloat(index) * cardSpacing)
                     .offset(draggingAccount?.id == account.id ? dragOffset : .zero)
                     .zIndex(draggingAccount?.id == account.id ? 99 : Double(index))
                     .shadow(color: BrandTheme.accent.opacity(draggingAccount?.id == account.id ? 0.35 : 0.18), radius: draggingAccount?.id == account.id ? 16 : 10, x: 0, y: 12)
@@ -369,7 +378,12 @@ private struct StackedAccountDeck: View {
                 }
             }
             // Reserve vertical space for the stacked offsets so content below doesn't overlap
-            .frame(height: 180 + CGFloat(max((selectedAccountId == nil ? accounts.count : 1) - 1, 0)) * spacing, alignment: .top)
+            .frame(
+                height: AccountCardView.standardHeight
+                    + CGFloat(max((selectedAccountId == nil ? accounts.count : 1) - 1, 0))
+                    * stackSpacing,
+                alignment: .top
+            )
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 28)
@@ -385,7 +399,7 @@ private struct StackedAccountDeck: View {
             }
             .onEnded { value in
                 guard selectedAccountId == nil else { return }
-                let offset = Int(round(value.translation.height / spacing))
+                let offset = Int(round(value.translation.height / stackSpacing))
                 let targetIndex = max(min(index + offset, accounts.count - 1), 0)
                 if targetIndex != index {
                     onReorder(index, targetIndex)
@@ -445,6 +459,7 @@ struct ActivitiesPanelSection: View {
     @State private var previewTarget: TargetPreviewContext? = nil
     @State private var pendingDeleteItem: Item? = nil
     @State private var showDeleteConfirmation = false
+    private let filterColumns: [GridItem] = [GridItem(.adaptive(minimum: 120), spacing: 10)]
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -617,20 +632,24 @@ struct ActivitiesPanelSection: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 10) {
+            LazyVGrid(columns: filterColumns, alignment: .leading, spacing: 10) {
                 ForEach(Filter.allCases) { option in
                     Button {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                             filter = option
                         }
                     } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: option.icon)
+                        Label {
                             Text(option.rawValue)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        } icon: {
+                            Image(systemName: option.icon)
                         }
-                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(.caption2, design: .rounded).weight(.semibold))
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
+                        .padding(.vertical, 8)
                         .frame(maxWidth: .infinity)
                         .background(
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -903,22 +922,60 @@ private struct EditIncomeSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if let account { HStack { Text("Account"); Spacer(); Text(account.name).foregroundStyle(.secondary) } }
-                Section("Income") {
-                    TextField("Name", text: $name)
-                    TextField("Company", text: $company)
-                    TextField("Value", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
-                    if let pots = account?.pots, !pots.isEmpty {
-                        Picker("Pot", selection: $selectedPot) {
-                            Text("None").tag(nil as String?)
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name as String?)
+            ZStack {
+                BrandBackground()
+                Form {
+                    if let account {
+                        BrandFormSection("Account", padding: 18, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(account.name)
+                                    .font(.system(.headline, design: .rounded).weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text((account.accountType ?? account.type).capitalized)
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
+
+                    BrandFormSection("Income") {
+                        TextField("Name", text: $name)
+                        TextField("Company", text: $company)
+                        TextField("Value", text: $amount)
+                            .keyboardType(.decimalPad)
+                        TextField("Day of Month (1-31)", text: $dayOfMonth)
+                            .keyboardType(.numberPad)
+                        if let pots = account?.pots, !pots.isEmpty {
+                            Picker("Pot", selection: $selectedPot) {
+                                Text("None").tag(nil as String?)
+                                ForEach(pots, id: \.name) { pot in
+                                    Text(pot.name).tag(pot.name as String?)
+                                }
+                            }
+                        }
+                    }
+
+                    BrandFormSection("Danger Zone", padding: 16, spacing: 12) {
+                        Button(role: .destructive) { showDeleteConfirmation = true } label: {
+                            Text("Delete Income")
+                                .font(.system(.callout, design: .rounded).weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .foregroundColor(Color.red.opacity(0.85))
+                                .background(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(Color.red.opacity(0.12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                                .stroke(Color.red.opacity(0.45), lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Edit Income")
             .toolbar {
@@ -926,18 +983,6 @@ private struct EditIncomeSheet: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button("Save") { beginSaveReview() }.disabled(!canSave)
                 }
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack {
-                    Button(role: .destructive) { showDeleteConfirmation = true } label: {
-                        Text("Delete Income")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .padding()
-                }
-                .background(.ultraThinMaterial)
             }
             .sheet(isPresented: $showSaveReview) {
                 if let submission = pendingSubmission {
@@ -1133,45 +1178,73 @@ private struct EditTransactionSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("To") {
-                    Picker("Account", selection: $toAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
-                }
-            }
-            if let pots = toAccount?.pots, !pots.isEmpty {
-                Picker("Pot", selection: $selectedPot) {
-                    Text("None").tag(nil as String?)
-                    ForEach(pots, id: \.name) { pot in
-                        Text(pot.name).tag(pot.name as String?)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("To") {
+                        Picker("Account", selection: $toAccountId) {
+                            Text("Select Account").tag(nil as Int?)
+                            ForEach(accountsStore.accounts) { account in
+                                Text(account.name).tag(account.id as Int?)
+                            }
+                        }
+                        if let pots = toAccount?.pots, !pots.isEmpty {
+                            Picker("Pot", selection: $selectedPot) {
+                                Text("None").tag(nil as String?)
+                                ForEach(pots, id: \.name) { pot in
+                                    Text(pot.name).tag(pot.name as String?)
+                                }
+                            }
+                        }
+                    }
+
+                    if !creditAccounts.isEmpty {
+                        BrandFormSection("Credit Card Link") {
+                            Picker("Linked Card", selection: $linkedCreditAccountId) {
+                                Text("None").tag(nil as Int?)
+                                ForEach(creditAccounts) { account in
+                                    Text(account.name).tag(account.id as Int?)
+                                }
+                            }
+                        }
+                    }
+
+                    BrandFormSection("Details") {
+                        Picker("Payment Type", selection: $paymentType) {
+                            Text("Card").tag("card")
+                            Text("Direct Debit").tag("direct_debit")
+                            Text("Credit Card Charge").tag("credit_card_charge").disabled(true)
+                        }
+                        .pickerStyle(.navigationLink)
+                        TextField("Name", text: $name)
+                        TextField("Vendor", text: $vendor)
+                        TextField("Amount", text: $amount)
+                            .keyboardType(.decimalPad)
+                        TextField("Day of Month (1-31)", text: $dayOfMonth)
+                            .keyboardType(.numberPad)
+                    }
+
+                    BrandFormSection("Danger Zone", padding: 16, spacing: 12) {
+                        Button(role: .destructive) { Task { await deleteItem() } } label: {
+                            Text("Delete Transaction")
+                                .font(.system(.callout, design: .rounded).weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .foregroundColor(Color.red.opacity(0.85))
+                                .background(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(Color.red.opacity(0.12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                                .stroke(Color.red.opacity(0.45), lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-            }
-        }
-        if !creditAccounts.isEmpty {
-            Section("Credit Card Link") {
-                Picker("Linked Card", selection: $linkedCreditAccountId) {
-                    Text("None").tag(nil as Int?)
-                    ForEach(creditAccounts) { account in
-                        Text(account.name).tag(account.id as Int?)
-                    }
-                }
-            }
-        }
-                Section("Details") {
-                    Picker("Payment Type", selection: $paymentType) {
-                        Text("Card").tag("card")
-                        Text("Direct Debit").tag("direct_debit")
-                        Text("Credit Card Charge").tag("credit_card_charge").disabled(true)
-                    }
-                    .pickerStyle(.navigationLink)
-                    TextField("Name", text: $name)
-                    TextField("Vendor", text: $vendor)
-                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
-                }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Edit Transaction")
             .toolbar {
@@ -1179,18 +1252,6 @@ private struct EditTransactionSheet: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button("Save") { beginSaveReview() }.disabled(!canSave)
                 }
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack {
-                    Button(role: .destructive) { Task { await deleteItem() } } label: {
-                        Text("Delete Transaction")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .padding()
-                }
-                .background(.ultraThinMaterial)
             }
             .sheet(isPresented: $showSaveReview) {
                 if let submission = pendingSubmission {
@@ -1436,15 +1497,46 @@ private struct EditTargetSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if !accountName.isEmpty {
-                    HStack { Text("Account"); Spacer(); Text(accountName).foregroundStyle(.secondary) }
+            ZStack {
+                BrandBackground()
+                Form {
+                    if !accountName.isEmpty {
+                        BrandFormSection("Account", padding: 18, spacing: 8) {
+                            Text(accountName)
+                                .font(.system(.headline, design: .rounded).weight(.semibold))
+                                .foregroundStyle(.primary)
+                        }
+                    }
+
+                    BrandFormSection("Budget") {
+                        TextField("Name", text: $name)
+                        TextField("Amount", text: $amount)
+                            .keyboardType(.decimalPad)
+                        TextField("Day of Month (1-31)", text: $dayOfMonth)
+                            .keyboardType(.numberPad)
+                    }
+
+                    BrandFormSection("Danger Zone", padding: 16, spacing: 12) {
+                        Button(role: .destructive) { showDeleteConfirmation = true } label: {
+                            Text("Delete Budget")
+                                .font(.system(.callout, design: .rounded).weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .foregroundColor(Color.red.opacity(0.85))
+                                .background(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(Color.red.opacity(0.12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                                .stroke(Color.red.opacity(0.45), lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                Section("Budget") {
-                    TextField("Name", text: $name)
-                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
-                }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Edit Budget")
             .toolbar {
@@ -1452,18 +1544,6 @@ private struct EditTargetSheet: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button("Save") { beginSaveReview() }.disabled(!canSave)
                 }
-            }
-            .safeAreaInset(edge: .bottom) {
-                VStack {
-                    Button(role: .destructive) { showDeleteConfirmation = true } label: {
-                        Text("Delete Budget")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .padding()
-                }
-                .background(.ultraThinMaterial)
             }
             .sheet(isPresented: $showSaveReview) {
                 if let submission = pendingSubmission {
@@ -1695,45 +1775,53 @@ private struct AddTransactionSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("To") {
-                    Picker("Account", selection: $toAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
-                        }
-                    }
-                    if let pots = toAccount?.pots, !pots.isEmpty {
-                        Picker("Pot", selection: $potName) {
-                            Text("None").tag(nil as String?)
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name as String?)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("To") {
+                        Picker("Account", selection: $toAccountId) {
+                            Text("Select Account").tag(nil as Int?)
+                            ForEach(accountsStore.accounts) { account in
+                                Text(account.name).tag(account.id as Int?)
                             }
-                }
-                }
-            }
-            if !creditAccounts.isEmpty {
-                Section("Credit Card Link") {
-                    Picker("Linked Card", selection: $linkedCreditAccountId) {
-                        Text("None").tag(nil as Int?)
-                        ForEach(creditAccounts) { account in
-                            Text(account.name).tag(account.id as Int?)
+                        }
+                        if let pots = toAccount?.pots, !pots.isEmpty {
+                            Picker("Pot", selection: $potName) {
+                                Text("None").tag(nil as String?)
+                                ForEach(pots, id: \.name) { pot in
+                                    Text(pot.name).tag(pot.name as String?)
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            Section("Transaction") {
-                Picker("Payment Type", selection: $paymentType) {
-                    Text("Card").tag("card")
-                    Text("Direct Debit").tag("direct_debit")
+                    if !creditAccounts.isEmpty {
+                        BrandFormSection("Credit Card Link") {
+                            Picker("Linked Card", selection: $linkedCreditAccountId) {
+                                Text("None").tag(nil as Int?)
+                                ForEach(creditAccounts) { account in
+                                    Text(account.name).tag(account.id as Int?)
+                                }
+                            }
+                        }
                     }
-                    .pickerStyle(.navigationLink)
-                    TextField("Name", text: $type)
-                    TextField("Company", text: $company)
-                    TextField("Value", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+
+                    BrandFormSection("Transaction") {
+                        Picker("Payment Type", selection: $paymentType) {
+                            Text("Card").tag("card")
+                            Text("Direct Debit").tag("direct_debit")
+                        }
+                        .pickerStyle(.navigationLink)
+                        TextField("Name", text: $type)
+                        TextField("Company", text: $company)
+                        TextField("Value", text: $amount)
+                            .keyboardType(.decimalPad)
+                        TextField("Day of Month (1-31)", text: $dayOfMonth)
+                            .keyboardType(.numberPad)
+                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Add Transaction")
             .toolbar {
@@ -1798,21 +1886,28 @@ private struct AddTargetSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Account") {
-                    Picker("Account", selection: $accountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Account") {
+                        Picker("Account", selection: $accountId) {
+                            Text("Select Account").tag(nil as Int?)
+                            ForEach(accountsStore.accounts) { account in
+                                Text(account.name).tag(account.id as Int?)
+                            }
                         }
                     }
-                }
 
-                Section("Target") {
-                    TextField("Name", text: $name)
-                    TextField("Value", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                    BrandFormSection("Target") {
+                        TextField("Name", text: $name)
+                        TextField("Value", text: $amount)
+                            .keyboardType(.decimalPad)
+                        TextField("Day of Month (1-31)", text: $dayOfMonth)
+                            .keyboardType(.numberPad)
+                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Add Target")
             .toolbar {
@@ -1860,30 +1955,40 @@ private struct AddIncomeSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Account") {
-                    if let preset = presetAccountId, let account = accountsStore.account(for: preset) {
-                        HStack {
-                            Text("Selected")
-                            Spacer()
-                            Text(account.name).foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Picker("Account", selection: $selectedAccountId) {
-                            Text("Select Account").tag(nil as Int?)
-                            ForEach(accountsStore.accounts) { account in
-                                Text(account.name).tag(account.id as Int?)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Account", spacing: 12) {
+                        if let preset = presetAccountId, let account = accountsStore.account(for: preset) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(account.name)
+                                    .font(.system(.headline, design: .rounded).weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text("Preset from quick action")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Picker("Account", selection: $selectedAccountId) {
+                                Text("Select Account").tag(nil as Int?)
+                                ForEach(accountsStore.accounts) { account in
+                                    Text(account.name).tag(account.id as Int?)
+                                }
                             }
                         }
                     }
-                }
 
-                Section("Income") {
-                    TextField("Name", text: $name)
-                    TextField("Company", text: $company)
-                    TextField("Value", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                    BrandFormSection("Income") {
+                        TextField("Name", text: $name)
+                        TextField("Company", text: $company)
+                        TextField("Value", text: $amount)
+                            .keyboardType(.decimalPad)
+                        TextField("Day of Month (1-31)", text: $dayOfMonth)
+                            .keyboardType(.numberPad)
+                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Add Income")
             .toolbar {
@@ -1907,9 +2012,13 @@ private struct AddIncomeSheet: View {
 }
 
 private struct AccountCardView: View {
+    private static let cardHeight: CGFloat = 172
+
     let account: Account
     var onTap: (() -> Void)? = nil
     var onManage: (() -> Void)? = nil
+
+    static var standardHeight: CGFloat { cardHeight }
 
     private var gradient: [Color] {
         switch account.type.lowercased() {
@@ -1944,37 +2053,39 @@ private struct AccountCardView: View {
                 .fill(AngularGradient(colors: gradient, center: .center, startAngle: .degrees(20), endAngle: .degrees(380)))
                 .overlay(
                     RoundedRectangle(cornerRadius: 32, style: .continuous)
-                        .fill(.ultraThinMaterial.opacity(0.55))
+                        .fill(.ultraThinMaterial.opacity(0.58))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 32, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.18), lineWidth: 1.2)
                 )
 
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         typeBadge
                         Text(account.name)
                             .font(.system(.title3, design: .rounded).weight(.semibold))
                             .foregroundColor(.white)
+                            .lineLimit(2)
                     }
 
                     Spacer()
 
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(account.formattedBalance)
-                            .font(.system(.title2, design: .rounded).weight(.bold))
-                            .foregroundColor(.white)
-                        Text("Balance")
-                            .font(.system(.caption, design: .rounded))
-                            .foregroundColor(.white.opacity(0.75))
-                    }
+                    Image(systemName: account.isCredit ? "creditcard.fill" : "banknote.fill")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.85))
+                        .padding(12)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
                 }
 
-                HStack(alignment: .center) {
+                Spacer(minLength: 0)
+
+                HStack(alignment: .bottom) {
                     if account.isCredit, let limit = account.credit_limit {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             Text("Limit £\(String(format: "%.0f", limit))")
                                 .font(.system(.caption, design: .rounded))
                                 .foregroundColor(.white.opacity(0.85))
@@ -1992,18 +2103,20 @@ private struct AccountCardView: View {
 
                     Spacer()
 
-                    Image(systemName: account.isCredit ? "creditcard.fill" : "banknote.fill")
-                        .font(.system(size: 28))
-                        .foregroundColor(.white.opacity(0.85))
-                        .padding(10)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(account.formattedBalance)
+                            .font(.system(.title2, design: .rounded).weight(.bold))
+                            .foregroundColor(.white)
+                        Text("Balance")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundColor(.white.opacity(0.75))
+                    }
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 28)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 26)
         }
-        .frame(maxWidth: .infinity, minHeight: 200, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: AccountCardView.standardHeight, alignment: .leading)
         .onTapGesture { onTap?() }
     }
 }
@@ -2525,40 +2638,48 @@ private struct PotEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Pot") {
-                    HStack {
-                        Text("Account")
-                        Spacer()
-                        Text(context.account.name).foregroundStyle(.secondary)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Pot") {
+                        HStack {
+                            Text("Account")
+                            Spacer()
+                            Text(context.account.name).foregroundStyle(.secondary)
+                        }
+                        TextField("Name", text: $name)
+                        TextField("Balance", text: $balance)
+                            .keyboardType(.decimalPad)
+                        Toggle("Exclude from Reset", isOn: $excludeFromReset)
+                            .onChange(of: excludeFromReset) { _, _ in
+                                let currentBalance = balance
+                                Task {
+                                    await potsStore.toggleExclusion(accountId: context.account.id, potName: context.pot.name)
+                                    await MainActor.run {
+                                        balance = currentBalance
+                                    }
+                                }
+                            }
                     }
-                    TextField("Name", text: $name)
-                    TextField("Balance", text: $balance).keyboardType(.decimalPad)
-                    Toggle("Exclude from Reset", isOn: $excludeFromReset)
-                        .onChange(of: excludeFromReset) { _, _ in
-                            let currentBalance = balance
-                            Task {
-                                await potsStore.toggleExclusion(accountId: context.account.id, potName: context.pot.name)
-                                await MainActor.run {
-                                    balance = currentBalance
+
+                    BrandFormSection("Transactions", spacing: 12) {
+                        if potTransactions.isEmpty {
+                            Text("No transactions for this pot")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(potTransactions, id: \.id) { r in
+                                HStack {
+                                    Text(r.name.isEmpty ? r.vendor : r.name)
+                                    Spacer()
+                                    Text("£\(String(format: "%.2f", r.amount))")
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
-                }
-                Section("Transactions") {
-                    let records = accountsStore.transactions.filter { $0.toAccountId == context.account.id && ($0.toPotName ?? "") == context.pot.name }
-                    if records.isEmpty {
-                        Text("No transactions for this pot").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(records, id: \.id) { r in
-                            HStack {
-                                Text(r.name.isEmpty ? r.vendor : r.name)
-                                Spacer()
-                                Text("£\(String(format: "%.2f", r.amount))").foregroundStyle(.secondary)
-                            }
-                        }
                     }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Manage Pot")
             .toolbar {
@@ -2573,6 +2694,12 @@ private struct PotEditorSheet: View {
     }
 
     private var canSave: Bool { !name.isEmpty && Double(balance) != nil }
+
+    private var potTransactions: [TransactionRecord] {
+        accountsStore.transactions.filter { record in
+            record.toAccountId == context.account.id && (record.toPotName ?? "") == context.pot.name
+        }
+    }
 
     private func preload() {
         name = context.pot.name
@@ -2695,27 +2822,32 @@ private struct TransactionPreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Transaction") {
-                    LabeledContent("Name", value: record.name.isEmpty ? "—" : record.name)
-                    LabeledContent("Vendor", value: record.vendor.isEmpty ? "—" : record.vendor)
-                    LabeledContent("Amount", value: formattedAmount)
-                    LabeledContent("Day", value: dayDescription)
-                    LabeledContent("Payment Type", value: paymentTypeDescription)
-                }
-
-                Section("Accounts") {
-                    LabeledContent("To Account", value: toAccountName)
-                    if let fromAccountName, !fromAccountName.isEmpty {
-                        LabeledContent("From Account", value: fromAccountName)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Transaction", spacing: 12) {
+                        LabeledContent("Name", value: record.name.isEmpty ? "—" : record.name)
+                        LabeledContent("Vendor", value: record.vendor.isEmpty ? "—" : record.vendor)
+                        LabeledContent("Amount", value: formattedAmount)
+                        LabeledContent("Day", value: dayDescription)
+                        LabeledContent("Payment Type", value: paymentTypeDescription)
                     }
-                    LabeledContent("Pot", value: potDescription)
-                    LabeledContent("Linked Credit Card", value: linkedCreditAccountName)
-                }
 
-                Section("Identifiers") {
-                    LabeledContent("Transaction ID", value: "\(record.id)")
+                    BrandFormSection("Accounts", spacing: 12) {
+                        LabeledContent("To Account", value: toAccountName)
+                        if let fromAccountName, !fromAccountName.isEmpty {
+                            LabeledContent("From Account", value: fromAccountName)
+                        }
+                        LabeledContent("Pot", value: potDescription)
+                        LabeledContent("Linked Credit Card", value: linkedCreditAccountName)
+                    }
+
+                    BrandFormSection("Identifiers", spacing: 12) {
+                        LabeledContent("Transaction ID", value: "\(record.id)")
+                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Transaction Details")
             .toolbar {
@@ -2745,22 +2877,27 @@ private struct IncomePreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Income") {
-                    LabeledContent("Name", value: context.income.description.isEmpty ? "—" : context.income.description)
-                    LabeledContent("Company", value: context.income.company.isEmpty ? "—" : context.income.company)
-                    LabeledContent("Amount", value: formattedAmount)
-                    LabeledContent("Day", value: dayDescription)
-                    LabeledContent("Pot", value: potDescription)
-                }
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Income", spacing: 12) {
+                        LabeledContent("Name", value: context.income.description.isEmpty ? "—" : context.income.description)
+                        LabeledContent("Company", value: context.income.company.isEmpty ? "—" : context.income.company)
+                        LabeledContent("Amount", value: formattedAmount)
+                        LabeledContent("Day", value: dayDescription)
+                        LabeledContent("Pot", value: potDescription)
+                    }
 
-                Section("Account") {
-                    LabeledContent("Account", value: context.accountName)
-                }
+                    BrandFormSection("Account", spacing: 12) {
+                        LabeledContent("Account", value: context.accountName)
+                    }
 
-                Section("Identifiers") {
-                    LabeledContent("Income ID", value: "\(context.income.id)")
+                    BrandFormSection("Identifiers", spacing: 12) {
+                        LabeledContent("Income ID", value: "\(context.income.id)")
+                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Income Details")
             .toolbar {
@@ -2786,20 +2923,25 @@ private struct TargetPreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Budget") {
-                    LabeledContent("Name", value: context.target.name.isEmpty ? "—" : context.target.name)
-                    LabeledContent("Amount", value: formattedAmount)
-                    LabeledContent("Day", value: dayDescription)
-                }
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Budget", spacing: 12) {
+                        LabeledContent("Name", value: context.target.name.isEmpty ? "—" : context.target.name)
+                        LabeledContent("Amount", value: formattedAmount)
+                        LabeledContent("Day", value: dayDescription)
+                    }
 
-                Section("Account") {
-                    LabeledContent("Account", value: context.accountName)
-                }
+                    BrandFormSection("Account", spacing: 12) {
+                        LabeledContent("Account", value: context.accountName)
+                    }
 
-                Section("Identifiers") {
-                    LabeledContent("Budget ID", value: "\(context.target.id)")
+                    BrandFormSection("Identifiers", spacing: 12) {
+                        LabeledContent("Budget ID", value: "\(context.target.id)")
+                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Budget Details")
             .toolbar {
@@ -2823,37 +2965,42 @@ private struct ChangeReviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Changed Fields") {
-                    if changes.isEmpty {
-                        Text("No changes detected. Saving will keep the item the same.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(changes) { change in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(change.label)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("\(change.previous) -> \(change.updated)")
-                                    .font(.subheadline)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Changed Fields", spacing: 12) {
+                        if changes.isEmpty {
+                            Text("No changes detected. Saving will keep the item the same.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(changes) { change in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(change.label)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("\(change.previous) -> \(change.updated)")
+                                        .font(.subheadline)
+                                }
+                                .padding(.vertical, 2)
                             }
-                            .padding(.vertical, 2)
+                        }
+                    }
+
+                    BrandFormSection("Previous Version", spacing: 12) {
+                        ForEach(previousSnapshot) { detail in
+                            LabeledContent(detail.label, value: detail.value)
+                        }
+                    }
+
+                    BrandFormSection("New Version", spacing: 12) {
+                        ForEach(updatedSnapshot) { detail in
+                            LabeledContent(detail.label, value: detail.value)
                         }
                     }
                 }
-
-                Section("Previous Version") {
-                    ForEach(previousSnapshot) { detail in
-                        LabeledContent(detail.label, value: detail.value)
-                    }
-                }
-
-                Section("New Version") {
-                    ForEach(updatedSnapshot) { detail in
-                        LabeledContent(detail.label, value: detail.value)
-                    }
-                }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle(title)
             .toolbar {

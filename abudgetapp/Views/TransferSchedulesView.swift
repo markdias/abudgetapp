@@ -7,19 +7,21 @@ struct ManageTransferSchedulesView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    ManageButton(title: "Add Transfer Schedules", color: .blue, destination: { AddTransferSchedulesScreen() })
-                    ManageButton(title: "Execute Transfer Schedules", color: .purple, destination: { ExecuteTransferSchedulesScreen() })
-                    ManageButton(title: "Completed Transfers", color: .gray, destination: { CompletedTransfersScreen() }, disabled: transferStore.schedules.allSatisfy { !$0.isCompleted })
+            ZStack {
+                BrandBackground()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        ManageButton(title: "Add Transfer Schedules", color: BrandTheme.accentSecondary, icon: "plus.circle.fill", destination: { AddTransferSchedulesScreen() })
+                        ManageButton(title: "Execute Transfer Schedules", color: BrandTheme.accentTertiary, icon: "play.circle.fill", destination: { ExecuteTransferSchedulesScreen() })
+                        ManageButton(title: "Completed Transfers", color: BrandTheme.accentQuaternary, icon: "checkmark.circle.fill", destination: { CompletedTransfersScreen() }, disabled: transferStore.schedules.allSatisfy { !$0.isCompleted })
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 28)
                 }
-                .frame(maxWidth: 420)
-                .padding()
             }
             .navigationTitle("Transfer Schedules")
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } } }
             .task { await transferStore.load() }
-            .background(Color(.systemGroupedBackground))
         }
     }
 
@@ -29,6 +31,7 @@ struct ManageTransferSchedulesView: View {
 private struct ManageButton<Destination: View>: View {
     let title: String
     let color: Color
+    let icon: String
     @ViewBuilder let destination: () -> Destination
     var disabled: Bool = false
 
@@ -36,18 +39,37 @@ private struct ManageButton<Destination: View>: View {
         NavigationLink {
             destination()
         } label: {
-            Text(title)
-                .font(.headline)
-                .fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .foregroundStyle(.white)
-                .background(color.opacity(disabled ? 0.4 : 1.0))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: color.opacity(0.18), radius: 8, x: 0, y: 4)
+            HStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(disabled ? 0.35 : 0.55))
+                        .frame(width: 44, height: 44)
+                        .shadow(color: color.opacity(0.25), radius: 8, x: 0, y: 4)
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+
+                Text(title)
+                    .font(.system(.headline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 20)
         }
-        .disabled(disabled)
         .buttonStyle(.plain)
+        .brandCardStyle(padding: 22)
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(color.opacity(disabled ? 0.18 : 0.3), lineWidth: 1.2)
+        )
+        .opacity(disabled ? 0.55 : 1)
+        .disabled(disabled)
     }
 }
 
@@ -60,85 +82,100 @@ private struct AddTransferSchedulesScreen: View {
     @State private var expandedCards: Set<String> = []
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Select Source").font(.subheadline).fontWeight(.semibold)
-                    Picker("Select source", selection: $source) {
-                        Text("None").tag(Source.none)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(Source.account(account.id))
-                            if let pots = account.pots {
-                                ForEach(pots, id: \.name) { pot in
-                                    Text("\(account.name) • \(pot.name)").tag(Source.pot(account.id, pot.name))
+        ZStack {
+            BrandBackground()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Select Source")
+                            .font(.system(.callout, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Picker("Select source", selection: $source) {
+                            Text("None").tag(Source.none)
+                            ForEach(accountsStore.accounts) { account in
+                                Text(account.name).tag(Source.account(account.id))
+                                if let pots = account.pots {
+                                    ForEach(pots, id: \.name) { pot in
+                                        Text("\(account.name) • \(pot.name)").tag(Source.pot(account.id, pot.name))
+                                    }
                                 }
                             }
                         }
+                        .pickerStyle(.menu)
                     }
-                    .pickerStyle(.menu)
-                }
+                    .brandCardStyle()
 
-                Text("Available Transfers").font(.headline)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Pot Transfers").font(.subheadline).foregroundStyle(.secondary)
-                    ForEach(potDestinations, id: \.id) { dest in
-                        let entries = entriesForDestination(accountId: dest.accountId, potName: dest.potName)
-                        let total = entries.reduce(0.0) { $0 + $1.amount }
-                        let existing = scheduleForDestination(accountId: dest.accountId, potName: dest.potName)
-                        destinationCard(id: dest.id,
-                                        name: dest.title,
-                                        subtitle: dest.subtitle,
-                                        amount: total,
-                                        entries: entries,
-                                        buttonTitle: "Schedule Transfer (\(formatCurrency(total)))",
-                                        existingSchedule: existing,
-                                        onDelete: {
-                                            if let s = existing { Task { await transferStore.delete(schedule: s) } }
-                                        }) {
-                            let src: (Int, String?)
-                            switch source {
-                            case .none: return
-                            case .account(let id): src = (id, nil)
-                            case .pot(let id, let pot): src = (id, pot)
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Pot Transfers")
+                            .font(.system(.headline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text("Automatically collect direct debits, card payments, and budgets into matching pots.")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        ForEach(potDestinations, id: \.id) { dest in
+                            let entries = entriesForDestination(accountId: dest.accountId, potName: dest.potName)
+                            let total = entries.reduce(0.0) { $0 + $1.amount }
+                            let existing = scheduleForDestination(accountId: dest.accountId, potName: dest.potName)
+                            destinationCard(id: dest.id,
+                                            name: dest.title,
+                                            subtitle: dest.subtitle,
+                                            amount: total,
+                                            entries: entries,
+                                            buttonTitle: "Schedule Transfer (\(formatCurrency(total)))",
+                                            existingSchedule: existing,
+                                            onDelete: {
+                                                if let s = existing { Task { await transferStore.delete(schedule: s) } }
+                                            }) {
+                                let src: (Int, String?)
+                                switch source {
+                                case .none: return
+                                case .account(let id): src = (id, nil)
+                                case .pot(let id, let pot): src = (id, pot)
+                                }
+                                Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: dest.potName, amount: total, description: dest.title) }
                             }
-                            Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: dest.potName, amount: total, description: dest.title) }
+                            .disabled(source == .none || total <= 0)
                         }
-                        .disabled(source == .none || total <= 0)
                     }
-                }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Account Transfers").font(.subheadline).foregroundStyle(.secondary)
-                    ForEach(accountDestinations, id: \.id) { dest in
-                        let entries = entriesForDestination(accountId: dest.accountId, potName: nil)
-                        let total = entries.reduce(0.0) { $0 + $1.amount }
-                        let existing = scheduleForDestination(accountId: dest.accountId, potName: nil)
-                        destinationCard(id: dest.id,
-                                        name: dest.title,
-                                        subtitle: dest.subtitle,
-                                        amount: total,
-                                        entries: entries,
-                                        buttonTitle: "Schedule Transfer (\(formatCurrency(total)))",
-                                        existingSchedule: existing,
-                                        onDelete: {
-                                            if let s = existing { Task { await transferStore.delete(schedule: s) } }
-                                        }) {
-                            let src: (Int, String?)
-                            switch source {
-                            case .none: return
-                            case .account(let id): src = (id, nil)
-                            case .pot(let id, let pot): src = (id, pot)
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Account Transfers")
+                            .font(.system(.headline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text("Roll budgets and scheduled transactions into the right account before pay day.")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        ForEach(accountDestinations, id: \.id) { dest in
+                            let entries = entriesForDestination(accountId: dest.accountId, potName: nil)
+                            let total = entries.reduce(0.0) { $0 + $1.amount }
+                            let existing = scheduleForDestination(accountId: dest.accountId, potName: nil)
+                            destinationCard(id: dest.id,
+                                            name: dest.title,
+                                            subtitle: dest.subtitle,
+                                            amount: total,
+                                            entries: entries,
+                                            buttonTitle: "Schedule Transfer (\(formatCurrency(total)))",
+                                            existingSchedule: existing,
+                                            onDelete: {
+                                                if let s = existing { Task { await transferStore.delete(schedule: s) } }
+                                            }) {
+                                let src: (Int, String?)
+                                switch source {
+                                case .none: return
+                                case .account(let id): src = (id, nil)
+                                case .pot(let id, let pot): src = (id, pot)
+                                }
+                                Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: nil, amount: total, description: dest.title) }
                             }
-                            Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: nil, amount: total, description: dest.title) }
+                            .disabled(source == .none || total <= 0)
                         }
-                        .disabled(source == .none || total <= 0)
                     }
                 }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 28)
             }
-            .padding()
         }
         .navigationTitle("Add Transfers")
-        .background(Color(.systemGroupedBackground))
     }
 
     // MARK: - Add helpers
@@ -191,76 +228,109 @@ private struct AddTransferSchedulesScreen: View {
     }
 
     private func destinationCard(id: String, name: String, subtitle: String, amount: Double, entries: [DestEntry], buttonTitle: String, existingSchedule: TransferSchedule?, onDelete: @escaping () -> Void, action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(name).font(.subheadline).fontWeight(.semibold)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(name)
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
+
                 Spacer()
+
                 Text(formatCurrency(amount))
-                    .font(.caption)
-                    .padding(.horizontal, 8)
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color.purple.opacity(0.15))
-                    .foregroundColor(.purple)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(LinearGradient(colors: [BrandTheme.accentTertiary.opacity(0.22), BrandTheme.accentSecondary.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .foregroundStyle(.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
                 Button(action: { toggleExpanded(id) }) {
-                    Image(systemName: isExpanded(id) ? "chevron.up" : "chevron.down").foregroundStyle(.secondary)
+                    Image(systemName: isExpanded(id) ? "chevron.up" : "chevron.down")
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
             }
+
             if isExpanded(id) && !entries.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(entries) { item in
-                        HStack {
+                        HStack(alignment: .center, spacing: 10) {
                             Text(item.title)
-                                .font(.caption)
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
                             if item.kind == .transaction, let method = item.method, !method.isEmpty {
                                 Text(method == "direct_debit" ? "DD" : "CARD")
-                                    .font(.caption2)
+                                    .font(.system(.caption2, design: .rounded).weight(.bold))
                                     .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(method == "direct_debit" ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
-                                    .foregroundColor(method == "direct_debit" ? .purple : .secondary)
+                                    .padding(.vertical, 3)
+                                    .background(method == "direct_debit" ? BrandTheme.accent.opacity(0.18) : Color.white.opacity(0.08))
+                                    .foregroundColor(.white)
                                     .clipShape(Capsule())
                             }
                             Spacer()
                             Text(formatCurrency(item.amount))
-                                .font(.caption)
+                                .font(.system(.caption, design: .rounded))
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
+
             if let _ = existingSchedule {
                 HStack {
                     scheduledBadge()
                     Spacer()
-                    Button("Delete", role: .destructive, action: onDelete).buttonStyle(.borderedProminent).tint(.red)
+                    Button("Delete", role: .destructive, action: onDelete)
+                        .buttonStyle(.plain)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color.red.opacity(0.16))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .stroke(Color.red.opacity(0.45), lineWidth: 1)
+                                )
+                        )
+                        .foregroundColor(.red.opacity(0.9))
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
                 }
             } else {
-                Button(buttonTitle, action: action)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.purple)
+                Button(action: action) {
+                    Text(buttonTitle)
+                        .font(.system(.callout, design: .rounded).weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(LinearGradient(colors: [BrandTheme.accentSecondary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing))
+                )
+                .foregroundColor(.white)
+                .shadow(color: BrandTheme.accent.opacity(0.25), radius: 12, x: 0, y: 6)
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .brandCardStyle(padding: 20)
     }
 
     private func formatCurrency(_ amount: Double) -> String { "£" + String(format: "%.2f", abs(amount)) }
     private func scheduledBadge() -> some View {
         Text("SCHEDULED")
-            .font(.caption2)
-            .padding(.horizontal, 8)
+            .font(.system(.caption2, design: .rounded).weight(.semibold))
+            .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(Color.gray.opacity(0.15))
-            .foregroundColor(.secondary)
+            .background(BrandTheme.accentTertiary.opacity(0.18))
+            .foregroundColor(.white)
             .clipShape(Capsule())
     }
     private func toggleExpanded(_ id: String) { if expandedCards.contains(id) { expandedCards.remove(id) } else { expandedCards.insert(id) } }
@@ -277,87 +347,158 @@ private struct ExecuteTransferSchedulesScreen: View {
     @EnvironmentObject private var transferStore: TransferSchedulesStore
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                Button {
-                    Task { await transferStore.executeAll() }
-                } label: {
-                    Text("Execute All Transfer Schedules")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
-                .disabled(transferStore.schedules.allSatisfy { $0.isCompleted })
+        ZStack {
+            BrandBackground()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
+                    Button {
+                        Task { await transferStore.executeAll() }
+                    } label: {
+                        Text("Execute All Transfer Schedules")
+                            .font(.system(.callout, design: .rounded).weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(LinearGradient(colors: [BrandTheme.accentSecondary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing))
+                    )
+                    .foregroundColor(.white)
+                    .shadow(color: BrandTheme.accent.opacity(0.25), radius: 12, x: 0, y: 6)
+                    .opacity(transferStore.schedules.allSatisfy { $0.isCompleted } ? 0.45 : 1)
+                    .disabled(transferStore.schedules.allSatisfy { $0.isCompleted })
 
-                Text("By Destination").font(.headline)
-                groupedList
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("By Destination")
+                            .font(.system(.headline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.primary)
+                        groupedList
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 28)
             }
-            .padding()
         }
         .navigationTitle("Execute Transfers")
-        .background(Color(.systemGroupedBackground))
     }
 
     private var groupedList: some View {
         Group {
             if transferStore.schedules.isEmpty {
-                Text("No transfer schedules").foregroundStyle(.secondary)
+                Text("No transfer schedules")
+                    .font(.system(.callout, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 18)
+                    .brandCardStyle()
             } else {
                 let groups = Dictionary(grouping: transferStore.schedules.filter { $0.isActive }) { item in
-                    return GroupKey(toAccountId: item.toAccountId, toPotName: item.toPotName ?? "")
+                    GroupKey(toAccountId: item.toAccountId, toPotName: item.toPotName ?? "")
                 }
-                VStack(spacing: 12) {
+                VStack(spacing: 18) {
                     ForEach(groups.keys.sorted(by: { $0.displayName(accountsStore) < $1.displayName(accountsStore) }), id: \.self) { key in
                         let items = groups[key] ?? []
                         let total = items.reduce(0.0) { $0 + $1.amount }
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(key.displayName(accountsStore)).font(.subheadline).fontWeight(.semibold)
+                        let schedule = scheduleForDestination(accountId: key.toAccountId, potName: key.toPotName.isEmpty ? nil : key.toPotName)
+                        let canExecute = {
+                            guard let schedule else { return false }
+                            return !schedule.isCompleted && canExecuteSchedule(schedule)
+                        }()
+
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack(alignment: .top, spacing: 14) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(key.displayName(accountsStore))
+                                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                                        .foregroundStyle(.primary)
+
                                     let hasCompleted = (items.first { $0.isCompleted } != nil)
-                                    Text("\(hasCompleted ? "Scheduled" : "Total pending"): £\(String(format: "%.2f", total))")
-                                        .font(.caption)
+                                    Text("\(hasCompleted ? "Scheduled" : "Total pending") \(formatCurrency(total))")
+                                        .font(.system(.caption, design: .rounded))
                                         .foregroundStyle(.secondary)
                                 }
-                                Spacer(minLength: 12)
-                                VStack(spacing: 8) {
-                                    let schedule = scheduleForDestination(accountId: key.toAccountId, potName: key.toPotName.isEmpty ? nil : key.toPotName)
-                                    let canExecute = (schedule != nil) && !(schedule!.isCompleted) && canExecuteSchedule(schedule!)
-                                    Button((schedule?.isCompleted ?? false) ? "Executed" : "Execute") {
-                                        Task { await transferStore.executeGroup(toAccountId: key.toAccountId, toPotName: key.toPotName.isEmpty ? nil : key.toPotName) }
+
+                                Spacer()
+
+                                Text("\(items.count) items")
+                                    .font(.system(.caption2, design: .rounded))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(Color.white.opacity(0.08))
+                                    .clipShape(Capsule())
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            if let schedule {
+                                HStack(spacing: 12) {
+                                    let executeTitle = schedule.isCompleted ? "Executed" : "Execute"
+                                    Button(executeTitle) {
+                                        Task {
+                                            await transferStore.executeGroup(toAccountId: key.toAccountId, toPotName: key.toPotName.isEmpty ? nil : key.toPotName)
+                                        }
                                     }
-                                    .disabled(!(canExecute))
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.green)
-                                    if let schedule = schedule {
-                                        
-                                        Button("Delete", role: .destructive) { Task { await transferStore.delete(schedule: schedule) } }
-                                            .buttonStyle(.borderedProminent)
-                                            .tint(.red)
+                                    .buttonStyle(.plain)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: schedule.isCompleted
+                                                        ? [Color.gray.opacity(0.35), Color.gray.opacity(0.28)]
+                                                        : [BrandTheme.accentTertiary, BrandTheme.accentSecondary],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                )
+                                            )
+                                    )
+                                    .foregroundColor(.white)
+                                    .opacity(canExecute ? 1 : 0.45)
+                                    .disabled(!canExecute)
+
+                                    Button("Delete") {
+                                        Task { await transferStore.delete(schedule: schedule) }
                                     }
+                                    .buttonStyle(.plain)
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 18)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                            .fill(Color.red.opacity(0.16))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                                    .stroke(Color.red.opacity(0.45), lineWidth: 1)
+                                            )
+                                    )
+                                    .foregroundColor(.red.opacity(0.9))
                                 }
                             }
-                            VStack(alignment: .leading, spacing: 6) {
+
+                            VStack(alignment: .leading, spacing: 8) {
                                 ForEach(items, id: \.id) { item in
                                     HStack {
-                                        Text("From: \(sourceLabel(for: item))").font(.caption)
+                                        Text("From: \(sourceLabel(for: item))")
+                                            .font(.system(.caption, design: .rounded))
+                                            .foregroundStyle(.primary)
                                         Spacer()
-                                        Text(formatCurrency(item.amount)).font(.caption).foregroundStyle(.secondary)
+                                        Text(formatCurrency(item.amount))
+                                            .font(.system(.caption, design: .rounded))
+                                            .foregroundStyle(.secondary)
                                         if item.isCompleted {
-                                            Text("Executed").font(.caption2).foregroundStyle(.green)
+                                            Text("Executed")
+                                                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                                                .foregroundStyle(.green)
                                         } else if !canExecuteSchedule(item) {
-                                            Text("Insufficient funds").font(.caption2).foregroundStyle(.red)
+                                            Text("Insufficient funds")
+                                                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                                                .foregroundStyle(.red)
                                         }
                                     }
                                 }
                             }
                         }
-                        .padding(12)
-                        .background(Color(.systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-                        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 2)
+                        .brandCardStyle(padding: 20)
                     }
                 }
             }
@@ -615,136 +756,128 @@ struct CompletedTransfersScreen: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 12) {
-                if sourceAccount == nil || (executedIncomes.isEmpty && flowSteps.isEmpty) {
-                    ContentUnavailableView(
-                        "No Completed Transfers",
-                        systemImage: "checkmark.seal",
-                        description: Text("Run executions to see history here.")
-                    )
-                } else {
-                    // 1. Income into source account
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Income into \(sourceAccountName)")
-                            .font(.headline)
-
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(sourceAccountName)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                Text("Total Executed Income")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("+\(formatCurrency(sourceIncomeTotal))")
-                                .font(.title3)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Color.green.opacity(0.17))
-                                .foregroundColor(.green)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        }
+        ZStack {
+            BrandBackground()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
+                    if sourceAccount == nil || (executedIncomes.isEmpty && flowSteps.isEmpty) {
+                        ContentUnavailableView(
+                            "No Completed Transfers",
+                            systemImage: "checkmark.seal",
+                            description: Text("Run executions to see history here.")
+                        )
+                        .brandCardStyle()
+                    } else {
+                        incomeSummaryCard
+                        allocationFlowCard
                     }
-                    .padding(12)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.black.opacity(0.06))
-                    )
-
-                    // 2. Allocation Flow, item by item
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Allocation Flow")
-                            .font(.headline)
-                            .padding(.bottom, 8)
-
-                        ForEach(annotatedSteps) { row in
-                            let step = row.step
-
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        Text(step.path)
-                                            .font(.subheadline)
-                                        if let tag = step.methodTag, !tag.isEmpty {
-                                            Text(tag)
-                                                .font(.caption2)
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(
-                                                    tag == "BUDGET"
-                                                    ? Color.gray.opacity(0.15)
-                                                    : Color.purple.opacity(0.15)
-                                                )
-                                                .foregroundColor(
-                                                    tag == "BUDGET"
-                                                    ? .secondary
-                                                    : .purple
-                                                )
-                                                .clipShape(Capsule())
-                                        }
-                                    }
-
-                                    if !step.date.isEmpty {
-                                        Text(formattedDate(step.date))
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-
-                                Spacer()
-
-                                Text("-\(formatCurrency(step.amount))")
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 6)
-                                    .background(Color.purple.opacity(0.15))
-                                    .foregroundColor(.purple)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            }
-
-                            HStack {
-                                Text("Remaining in \(sourceAccountName)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(formatCurrency(row.remainingAfter))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Divider()
-                                .padding(.vertical, 2)
-                        }
-
-                        // Final row
-                        HStack {
-                            Text("Final Balance in \(sourceAccountName)")
-                                .font(.headline)
-                            Spacer()
-                            Text(formatCurrency(finalRemaining))
-                                .font(.headline)
-                                .foregroundColor(.blue)
-                        }
-                        .padding(.top, 10)
-                    }
-                    .padding(12)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.black.opacity(0.06))
-                    )
                 }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 28)
             }
-            .padding()
         }
         .navigationTitle("Completed Transfers")
-        .background(Color(.systemGroupedBackground))
+    }
+
+    private var incomeSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Income into \(sourceAccountName)")
+                .font(.system(.headline, design: .rounded).weight(.semibold))
+                .foregroundStyle(.primary)
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(sourceAccountName)
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    Text("Total executed income")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text("+\(formatCurrency(sourceIncomeTotal))")
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        LinearGradient(colors: [BrandTheme.accentTertiary.opacity(0.25), BrandTheme.accentSecondary.opacity(0.18)], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+        .brandCardStyle(padding: 22)
+    }
+
+    private var allocationFlowCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Allocation Flow")
+                .font(.system(.headline, design: .rounded).weight(.semibold))
+                .foregroundStyle(.primary)
+
+            ForEach(annotatedSteps) { row in
+                let step = row.step
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(step.path)
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        if let tag = step.methodTag, !tag.isEmpty {
+                            Text(tag)
+                                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(
+                                    tag == "BUDGET"
+                                    ? Color.white.opacity(0.08)
+                                    : BrandTheme.accent.opacity(0.18)
+                                )
+                                .foregroundColor(tag == "BUDGET" ? .secondary : .white)
+                                .clipShape(Capsule())
+                        }
+                        Spacer()
+                        Text("-\(formatCurrency(step.amount))")
+                            .font(.system(.caption, design: .rounded))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(LinearGradient(colors: [BrandTheme.accent.opacity(0.18), BrandTheme.accentSecondary.opacity(0.14)], startPoint: .leading, endPoint: .trailing))
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+
+                    if !step.date.isEmpty {
+                        Text(formattedDate(step.date))
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Remaining in \(sourceAccountName)")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(formatCurrency(row.remainingAfter))
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+                    .background(Color.white.opacity(0.1))
+            }
+
+            HStack {
+                Text("Final Balance in \(sourceAccountName)")
+                    .font(.system(.headline, design: .rounded).weight(.semibold))
+                Spacer()
+                Text(formatCurrency(finalRemaining))
+                    .font(.system(.headline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(LinearGradient(colors: [BrandTheme.accentSecondary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing))
+            }
+            .padding(.top, 8)
+        }
+        .brandCardStyle(padding: 22)
     }
 }
 

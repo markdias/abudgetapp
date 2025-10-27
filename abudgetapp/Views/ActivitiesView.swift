@@ -12,7 +12,7 @@ struct ActivitiesView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 24) {
-                        VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 16) {
                             Text("Focus your feed")
                                 .font(.system(.title3, design: .rounded).weight(.semibold))
                                 .foregroundStyle(LinearGradient(colors: [BrandTheme.accentSecondary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing))
@@ -25,6 +25,7 @@ struct ActivitiesView: View {
                                     }
                                 }
                                 .pickerStyle(.menu)
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
                                 if let id = selectedAccountId,
                                    let account = accountsStore.account(for: id),
@@ -36,10 +37,12 @@ struct ActivitiesView: View {
                                         }
                                     }
                                     .pickerStyle(.menu)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
                             .font(.system(.callout, design: .rounded))
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .brandCardStyle()
 
                         ActivitiesPanelSection(

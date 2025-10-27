@@ -16,23 +16,28 @@ struct AccountFormView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Details") {
-                    TextField("Name", text: $name)
-                    TextField("Starting Balance", text: $balance)
-                        .keyboardType(.decimalPad)
-                    Picker("Type", selection: $type) {
-                        ForEach(accountTypes, id: \.self) { value in
-                            Text(value.capitalized).tag(value)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Details") {
+                        TextField("Name", text: $name)
+                        TextField("Starting Balance", text: $balance)
+                            .keyboardType(.decimalPad)
+                        Picker("Type", selection: $type) {
+                            ForEach(accountTypes, id: \.self) { value in
+                                Text(value.capitalized).tag(value)
+                            }
+                        }
+                        TextField("Account Category", text: $accountType)
+                        if type == "credit" {
+                            TextField("Credit Limit", text: $creditLimit)
+                                .keyboardType(.decimalPad)
+                            Toggle("Exclude from Reset", isOn: $excludeFromReset)
                         }
                     }
-                    TextField("Account Category", text: $accountType)
-                    if type == "credit" {
-                        TextField("Credit Limit", text: $creditLimit)
-                            .keyboardType(.decimalPad)
-                        Toggle("Exclude from Reset", isOn: $excludeFromReset)
-                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Add Account")
             .toolbar {
@@ -91,21 +96,28 @@ struct EditAccountFormView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Details") {
-                    TextField("Name", text: $name)
-                    TextField("Balance", text: $balance).keyboardType(.decimalPad)
-                    Picker("Type", selection: $type) {
-                        ForEach(["current", "credit", "savings", "investment"], id: \.self) { value in
-                            Text(value.capitalized).tag(value)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Details") {
+                        TextField("Name", text: $name)
+                        TextField("Balance", text: $balance)
+                            .keyboardType(.decimalPad)
+                        Picker("Type", selection: $type) {
+                            ForEach(["current", "credit", "savings", "investment"], id: \.self) { value in
+                                Text(value.capitalized).tag(value)
+                            }
+                        }
+                        TextField("Account Category", text: $accountType)
+                        if type == "credit" {
+                            TextField("Credit Limit", text: $creditLimit)
+                                .keyboardType(.decimalPad)
+                            Toggle("Exclude from Reset", isOn: $excludeFromReset)
                         }
                     }
-                    TextField("Account Category", text: $accountType)
-                    if type == "credit" {
-                        TextField("Credit Limit", text: $creditLimit).keyboardType(.decimalPad)
-                        Toggle("Exclude from Reset", isOn: $excludeFromReset)
-                    }
                 }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Edit Account")
             .toolbar {
@@ -164,20 +176,26 @@ struct PotFormView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Account") {
-                    Picker("Account", selection: $selectedAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
+            ZStack {
+                BrandBackground()
+                Form {
+                    BrandFormSection("Account") {
+                        Picker("Account", selection: $selectedAccountId) {
+                            Text("Select Account").tag(nil as Int?)
+                            ForEach(accountsStore.accounts) { account in
+                                Text(account.name).tag(account.id as Int?)
+                            }
                         }
                     }
+
+                    BrandFormSection("Details") {
+                        TextField("Name", text: $name)
+                        TextField("Balance", text: $balance)
+                            .keyboardType(.decimalPad)
+                    }
                 }
-                Section("Details") {
-                    TextField("Name", text: $name)
-                    TextField("Balance", text: $balance)
-                        .keyboardType(.decimalPad)
-                }
+                .brandFormStyle()
+                .padding(.top, 12)
             }
             .navigationTitle("Add Pot")
             .toolbar {
