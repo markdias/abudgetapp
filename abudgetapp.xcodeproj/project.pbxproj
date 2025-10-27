@@ -6,14 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		FD48F9AB2E1AE1E800C9E4FB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD2E89BA2D73127200F8E275 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FD2E89C12D73127200F8E275;
+			remoteInfo = abudgetapp;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		FD01F5212EAEE3D100C6A6DA /* abudgetappUITests */ = {isa = PBXFileReference; lastKnownFileType = folder; path = abudgetappUITests; sourceTree = "<group>"; };
 		FD2E89C22D73127200F8E275 /* abudgetapp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = abudgetapp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FD48F9A52E1AE1E800C9E4FB /* abudgetappUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = abudgetappUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		FD2E89C42D73127200F8E275 /* abudgetapp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = abudgetapp;
+			sourceTree = "<group>";
+		};
+		FD48F9A92E1AE1E800C9E4FB /* abudgetappUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = abudgetappUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -26,14 +43,31 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FD48F9A22E1AE1E800C9E4FB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		FD01F4E02EAEE31500C6A6DA /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				FD48F9A92E1AE1E800C9E4FB /* abudgetappUITests */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
 		FD2E89B92D73127200F8E275 = {
 			isa = PBXGroup;
 			children = (
+				FD01F5212EAEE3D100C6A6DA /* abudgetappUITests */,
 				FD2E89C42D73127200F8E275 /* abudgetapp */,
 				FD2E89C32D73127200F8E275 /* Products */,
+				FD01F4E02EAEE31500C6A6DA /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -41,6 +75,7 @@
 			isa = PBXGroup;
 			children = (
 				FD2E89C22D73127200F8E275 /* abudgetapp.app */,
+				FD48F9A52E1AE1E800C9E4FB /* abudgetappUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +105,29 @@
 			productReference = FD2E89C22D73127200F8E275 /* abudgetapp.app */;
 			productType = "com.apple.product-type.application";
 		};
+		FD48F9A12E1AE1E800C9E4FB /* abudgetappUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FD48F9A82E1AE1E800C9E4FB /* Build configuration list for PBXNativeTarget "abudgetappUITests" */;
+			buildPhases = (
+				FD48F9A32E1AE1E800C9E4FB /* Sources */,
+				FD48F9A22E1AE1E800C9E4FB /* Frameworks */,
+				FD48F9A42E1AE1E800C9E4FB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FD48F9AA2E1AE1E800C9E4FB /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FD48F9A92E1AE1E800C9E4FB /* abudgetappUITests */,
+			);
+			name = abudgetappUITests;
+			packageProductDependencies = (
+			);
+			productName = abudgetappUITests;
+			productReference = FD48F9A52E1AE1E800C9E4FB /* abudgetappUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +140,10 @@
 				TargetAttributes = {
 					FD2E89C12D73127200F8E275 = {
 						CreatedOnToolsVersion = 16.2;
+					};
+					FD48F9A12E1AE1E800C9E4FB = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = FD2E89C12D73127200F8E275;
 					};
 				};
 			};
@@ -100,12 +162,20 @@
 			projectRoot = "";
 			targets = (
 				FD2E89C12D73127200F8E275 /* abudgetapp */,
+				FD48F9A12E1AE1E800C9E4FB /* abudgetappUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		FD2E89C02D73127200F8E275 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD48F9A42E1AE1E800C9E4FB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +192,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FD48F9A32E1AE1E800C9E4FB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		FD48F9AA2E1AE1E800C9E4FB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FD2E89C12D73127200F8E275 /* abudgetapp */;
+			targetProxy = FD48F9AB2E1AE1E800C9E4FB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		FD2E89CE2D73127300F8E275 /* Debug */ = {
@@ -302,6 +387,42 @@
 			};
 			name = Release;
 		};
+		FD48F9A62E1AE1E800C9E4FB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M7KXVX37Y7;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = markdias.abudgetappUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = abudgetapp;
+			};
+			name = Debug;
+		};
+		FD48F9A72E1AE1E800C9E4FB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M7KXVX37Y7;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = markdias.abudgetappUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = abudgetapp;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -319,6 +440,15 @@
 			buildConfigurations = (
 				FD2E89D12D73127300F8E275 /* Debug */,
 				FD2E89D22D73127300F8E275 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FD48F9A82E1AE1E800C9E4FB /* Build configuration list for PBXNativeTarget "abudgetappUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FD48F9A62E1AE1E800C9E4FB /* Debug */,
+				FD48F9A72E1AE1E800C9E4FB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

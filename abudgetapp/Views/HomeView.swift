@@ -756,9 +756,9 @@ private struct EditIncomeSheet: View {
     @State private var name: String = ""
     @State private var company: String = ""
     @State private var amount: String = ""
-    @State private var paymentType: String = "direct_debit" // "card" or "direct_debit"
     @State private var dayOfMonth: String = ""
     @State private var selectedPot: String? = nil
+    @State private var didPreload = false
 
     private var account: Account? { accountsStore.account(for: accountId) }
     private var income: Income? { account?.incomes?.first(where: { $0.id == incomeId }) }
@@ -807,18 +807,20 @@ private struct EditIncomeSheet: View {
                 }
                 .background(.ultraThinMaterial)
             }
-            .onAppear { preload() }
+            .onAppear { preloadIfNeeded() }
+            .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
         }
     }
 
-    private func preload() {
-        if let income {
-            name = income.description
-            company = income.company
-            amount = String(format: "%.2f", income.amount)
-            dayOfMonth = income.date
-            selectedPot = income.potName
-        }
+    private func preloadIfNeeded() {
+        guard !didPreload else { return }
+        guard let income else { return }
+        name = income.description
+        company = income.company
+        amount = String(format: "%.2f", income.amount)
+        dayOfMonth = income.date
+        selectedPot = income.potName
+        didPreload = true
     }
 
     private func save() async {
@@ -843,12 +845,14 @@ private struct EditTransactionSheet: View {
 
     @State private var toAccountId: Int?
     @State private var selectedPot: String?
+    @State private var initialAccountId: Int?
+    @State private var initialPotName: String?
     @State private var name: String = ""
     @State private var vendor: String = ""
     @State private var amount: String = ""
     @State private var paymentType: String = "direct_debit" // "card" or "direct_debit"
     @State private var dayOfMonth: String = ""
-    @State private var didLoad: Bool = false
+    @State private var didPreload = false
 
     private var record: TransactionRecord? { accountsStore.transaction(for: transactionId) }
     private var toAccount: Account? { toAccountId.flatMap { accountsStore.account(for: $0) } }
@@ -909,21 +913,49 @@ private struct EditTransactionSheet: View {
                 }
                 .background(.ultraThinMaterial)
             }
-            .onAppear { if !didLoad { preload(); didLoad = true } }
-            .onChange(of: toAccountId) { _, _ in selectedPot = nil }
+            .onAppear { preloadIfNeeded() }
+            .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
+            .onChange(of: accountsStore.transactions) { _, _ in preloadIfNeeded() }
+            .onChange(of: toAccountId) { _, newValue in handleAccountChange(newValue) }
         }
     }
 
-    private func preload() {
-        if let record {
-            toAccountId = record.toAccountId
-            selectedPot = record.toPotName
-            name = record.name
-            vendor = record.vendor
-            amount = String(format: "%.2f", record.amount)
-            paymentType = record.paymentType ?? "direct_debit"
-            paymentType = record.paymentType ?? "direct_debit"
-            dayOfMonth = record.date
+    private func preloadIfNeeded() {
+        guard !didPreload else { return }
+        guard let record else { return }
+        initialAccountId = record.toAccountId
+        initialPotName = record.toPotName
+        toAccountId = record.toAccountId
+        selectedPot = record.toPotName
+        name = record.name
+        vendor = record.vendor
+        amount = String(format: "%.2f", record.amount)
+        paymentType = record.paymentType ?? "direct_debit"
+        dayOfMonth = record.date
+        didPreload = true
+    }
+
+    private func handleAccountChange(_ newValue: Int?) {
+        guard let newValue, let account = accountsStore.account(for: newValue) else {
+            selectedPot = nil
+            return
+        }
+
+        guard let pots = account.pots, !pots.isEmpty else {
+            selectedPot = nil
+            return
+        }
+
+        if let selectedPot, pots.contains(where: { $0.name == selectedPot }) {
+            return
+        }
+
+        if newValue == initialAccountId,
+           let initialPotName,
+           pots.contains(where: { $0.name == initialPotName }) {
+            selectedPot = initialPotName
+        } else {
+            selectedPot = nil
         }
     }
 
@@ -951,6 +983,7 @@ private struct EditTargetSheet: View {
     @State private var name: String = ""
     @State private var amount: String = ""
     @State private var dayOfMonth: String = ""
+    @State private var didPreload = false
 
     private var record: TargetRecord? { accountsStore.targets.first { $0.id == targetId } }
 
@@ -991,17 +1024,21 @@ private struct EditTargetSheet: View {
                 }
                 .background(.ultraThinMaterial)
             }
-            .onAppear { preload() }
+            .onAppear { preloadIfNeeded() }
+            .onChange(of: accountsStore.targets) { _, _ in preloadIfNeeded() }
+            .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
         }
     }
 
-    private func preload() {
-        if let record {
-            accountName = accountsStore.accounts.first(where: { $0.id == record.accountId })?.name ?? ""
-            name = record.name
-            amount = String(format: "%.2f", record.amount)
-            dayOfMonth = record.date
-        }
+    private func preloadIfNeeded() {
+        guard !didPreload else { return }
+        guard let record else { return }
+        guard let account = accountsStore.accounts.first(where: { $0.id == record.accountId }) else { return }
+        accountName = account.name
+        name = record.name
+        amount = String(format: "%.2f", record.amount)
+        dayOfMonth = record.date
+        didPreload = true
     }
 
     private func save() async {
@@ -1979,6 +2016,7 @@ private struct ActivityEditorView: View {
     @State private var dayOfMonth: String = ""
     @State private var selectedIncomePot: String? = nil
     @State private var selectedExpenseDestinationAccountId: Int?
+    @State private var didPreload = false
 
     private var isIncome: Bool { activity.category == .income }
     private var isExpense: Bool { activity.category == .expense }
@@ -2074,7 +2112,9 @@ private struct ActivityEditorView: View {
                     Button(role: .destructive) { Task { await deleteItem() } } label: { Text("Delete") }
                 }
             }
-            .onAppear { preload() }
+            .onAppear { preloadIfNeeded() }
+            .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
+            .onChange(of: accountsStore.transactions) { _, _ in preloadIfNeeded() }
         }
     }
 
@@ -2092,7 +2132,11 @@ private struct ActivityEditorView: View {
         return false
     }
 
-    private func preload() {
+    private func preloadIfNeeded() {
+        guard !didPreload else { return }
+        if isExpense && accountId == nil {
+            return
+        }
         descriptionText = activity.title
         company = activity.company ?? ""
         amount = String(format: "%.2f", abs(activity.amount))
@@ -2109,6 +2153,7 @@ private struct ActivityEditorView: View {
                 selectedExpenseDestinationAccountId = accountId
             }
         }
+        didPreload = true
     }
 
     private func save() async {
@@ -2160,6 +2205,7 @@ private struct TransactionActivityEditorView: View {
     @State private var amount: String = ""
     @State private var dayOfMonth: String = ""
     @State private var didLoad: Bool = false
+    @State private var didPreload = false
 
     private var transactionId: Int? {
         if let value = activity.metadata["transactionId"], let id = Int(value) { return id }
@@ -2215,7 +2261,9 @@ private struct TransactionActivityEditorView: View {
                     Button(role: .destructive) { Task { await deleteItem() } } label: { Text("Delete") }
                 }
             }
-            .onAppear { if !didLoad { preload(); didLoad = true } }
+            .onAppear { preloadIfNeeded() }
+            .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
+            .onChange(of: accountsStore.transactions) { _, _ in preloadIfNeeded() }
             .onChange(of: toAccountId) { _, _ in selectedPot = nil }
         }
     }
@@ -2226,7 +2274,8 @@ private struct TransactionActivityEditorView: View {
         return true
     }
 
-    private func preload() {
+    private func preloadIfNeeded() {
+        guard !didPreload else { return }
         if let recordId = transactionId, let record = accountsStore.transaction(for: recordId) {
             toAccountId = record.toAccountId
             selectedPot = record.toPotName
@@ -2239,14 +2288,20 @@ private struct TransactionActivityEditorView: View {
             } else {
                 dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
             }
+            didPreload = true
+            return
         } else {
-            toAccountId = accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id
+            guard let fallbackAccountId = accountsStore.accounts.first(where: { $0.name == activity.accountName })?.id else {
+                return
+            }
+            toAccountId = fallbackAccountId
             selectedPot = activity.metadata["potName"].flatMap { $0.isEmpty ? nil : $0 }
             name = activity.title
             vendor = activity.company ?? ""
-            if let company = activity.company, company == "Direct Debit" { paymentType = "direct_debit" } else { paymentType = "direct_debit" }
+            if let company = activity.company, company == "Direct Debit" { paymentType = "direct_debit" } else { paymentType = "card" }
             amount = String(format: "%.2f", abs(activity.amount))
             dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
+            didPreload = true
         }
     }
 
