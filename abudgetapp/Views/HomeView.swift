@@ -845,6 +845,8 @@ private struct EditTransactionSheet: View {
 
     @State private var toAccountId: Int?
     @State private var selectedPot: String?
+    @State private var initialAccountId: Int?
+    @State private var initialPotName: String?
     @State private var name: String = ""
     @State private var vendor: String = ""
     @State private var amount: String = ""
@@ -914,13 +916,15 @@ private struct EditTransactionSheet: View {
             .onAppear { preloadIfNeeded() }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
             .onChange(of: accountsStore.transactions) { _, _ in preloadIfNeeded() }
-            .onChange(of: toAccountId) { _, _ in selectedPot = nil }
+            .onChange(of: toAccountId) { _, newValue in handleAccountChange(newValue) }
         }
     }
 
     private func preloadIfNeeded() {
         guard !didPreload else { return }
         guard let record else { return }
+        initialAccountId = record.toAccountId
+        initialPotName = record.toPotName
         toAccountId = record.toAccountId
         selectedPot = record.toPotName
         name = record.name
@@ -929,6 +933,30 @@ private struct EditTransactionSheet: View {
         paymentType = record.paymentType ?? "direct_debit"
         dayOfMonth = record.date
         didPreload = true
+    }
+
+    private func handleAccountChange(_ newValue: Int?) {
+        guard let newValue, let account = accountsStore.account(for: newValue) else {
+            selectedPot = nil
+            return
+        }
+
+        guard let pots = account.pots, !pots.isEmpty else {
+            selectedPot = nil
+            return
+        }
+
+        if let selectedPot, pots.contains(where: { $0.name == selectedPot }) {
+            return
+        }
+
+        if newValue == initialAccountId,
+           let initialPotName,
+           pots.contains(where: { $0.name == initialPotName }) {
+            selectedPot = initialPotName
+        } else {
+            selectedPot = nil
+        }
     }
 
     private func save() async {
