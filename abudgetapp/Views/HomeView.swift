@@ -48,7 +48,10 @@ struct HomeView: View {
     }
 
     private var totalBalance: Double {
-        accountsStore.accounts.reduce(0) { $0 + $1.balance }
+        accountsStore.accounts.reduce(0) { partial, account in
+            let signedBalance = account.isCredit ? -abs(account.balance) : account.balance
+            return partial + signedBalance
+        }
     }
 
     private var todaysSpending: Double { 0 }
