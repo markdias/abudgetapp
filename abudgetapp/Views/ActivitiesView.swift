@@ -61,8 +61,9 @@ struct ActivitiesView: View {
                 }
             }
             .navigationTitle("Activity")
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(BrandTheme.tabBarBackground.opacity(0.9), for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.light, for: .navigationBar)
             .onChange(of: selectedAccountId) { _, _ in selectedPotName = nil }
         }

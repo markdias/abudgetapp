@@ -49,8 +49,9 @@ struct TransfersView: View {
                 }
             }
             .navigationTitle("Transfers")
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(BrandTheme.tabBarBackground.opacity(0.9), for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.light, for: .navigationBar)
             .sheet(isPresented: $showingIncomeSchedules) {
                 ManageIncomeSchedulesView(isPresented: $showingIncomeSchedules)

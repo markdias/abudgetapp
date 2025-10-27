@@ -62,8 +62,6 @@ struct HomeView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 26) {
-                        BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
-
                         if reorderableAccounts.isEmpty {
                             ContentUnavailableView(
                                 "No Accounts",
@@ -94,6 +92,7 @@ struct HomeView: View {
                             searchText: searchText
                         )
                         .brandCardStyle()
+                        .padding(.top, 16)
 
                         PotsPanelSection(
                             accounts: accountsStore.accounts,
@@ -118,15 +117,19 @@ struct HomeView: View {
                             onDiagnostics: { showingDiagnostics = true }
                         )
                         .brandCardStyle()
+
+                        BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
+                            .brandCardStyle()
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 28)
-                    .padding(.bottom, 120)
+                    .padding(.bottom, 140)
                 }
             }
             .navigationTitle("Overview")
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(BrandTheme.tabBarBackground.opacity(0.92), for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.clear, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.light, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -329,12 +332,32 @@ private struct StackedAccountDeck: View {
     @State private var draggingAccount: Account?
     @State private var dragOffset: CGSize = .zero
 
+    private let previewDepth: Int = 4
+
     private var isStacked: Bool {
         selectedAccountId == nil && accounts.count > 1
     }
 
     private var stackSpacing: CGFloat {
-        isStacked ? spacing * 0.6 : spacing
+        isStacked ? spacing * 0.45 : spacing
+    }
+
+    private var visibleAccountCount: Int {
+        if let id = selectedAccountId,
+           accounts.contains(where: { $0.id == id }) {
+            return 1
+        }
+        return accounts.count
+    }
+
+    private var deckDepth: Int {
+        min(visibleAccountCount, previewDepth)
+    }
+
+    private var stackHeight: CGFloat {
+        AccountCardView.standardHeight
+        + CGFloat(max(deckDepth - 1, 0)) * stackSpacing
+        + (isStacked ? 36 : 0)
     }
 
     var body: some View {
@@ -350,6 +373,7 @@ private struct StackedAccountDeck: View {
                 let cardSpacing = stackSpacing
 
                 ForEach(Array(visibleAccounts.enumerated()), id: \.element.id) { index, account in
+                    let depth = min(index, previewDepth - 1)
                     AccountCardView(
                         account: account,
                         onTap: {
@@ -361,7 +385,7 @@ private struct StackedAccountDeck: View {
                         },
                         onManage: nil
                     )
-                    .offset(y: CGFloat(index) * cardSpacing)
+                    .offset(y: CGFloat(depth) * cardSpacing)
                     .offset(draggingAccount?.id == account.id ? dragOffset : .zero)
                     .zIndex(draggingAccount?.id == account.id ? 99 : Double(index))
                     .shadow(color: BrandTheme.accent.opacity(draggingAccount?.id == account.id ? 0.35 : 0.18), radius: draggingAccount?.id == account.id ? 16 : 10, x: 0, y: 12)
@@ -379,9 +403,7 @@ private struct StackedAccountDeck: View {
             }
             // Reserve vertical space for the stacked offsets so content below doesn't overlap
             .frame(
-                height: AccountCardView.standardHeight
-                    + CGFloat(max((selectedAccountId == nil ? accounts.count : 1) - 1, 0))
-                    * stackSpacing,
+                height: stackHeight,
                 alignment: .top
             )
         }
@@ -2012,7 +2034,7 @@ private struct AddIncomeSheet: View {
 }
 
 private struct AccountCardView: View {
-    private static let cardHeight: CGFloat = 172
+    static let cardHeight: CGFloat = 132
 
     let account: Account
     var onTap: (() -> Void)? = nil
@@ -2033,88 +2055,72 @@ private struct AccountCardView: View {
         }
     }
 
-    private var typeBadge: some View {
-        Text(account.type.uppercased())
-            .font(.system(.caption2, design: .rounded).weight(.bold))
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(.white.opacity(0.12))
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.6)
-            )
-    }
-
     var body: some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(AngularGradient(colors: gradient, center: .center, startAngle: .degrees(20), endAngle: .degrees(380)))
+                .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay(
                     RoundedRectangle(cornerRadius: 32, style: .continuous)
-                        .fill(.ultraThinMaterial.opacity(0.58))
+                        .fill(.ultraThinMaterial.opacity(0.55))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 32, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 1.2)
+                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 1.1)
                 )
 
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .center, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        typeBadge
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(account.formattedBalance)
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.95))
+                        Text(account.accountType?.capitalized ?? account.type.capitalized)
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 6) {
                         Text(account.name)
-                            .font(.system(.title3, design: .rounded).weight(.semibold))
-                            .foregroundColor(.white)
+                            .font(.system(.headline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.trailing)
                             .lineLimit(2)
+
+                        if account.isCredit, let limit = account.credit_limit {
+                            Text("Limit £\(String(format: "%.0f", limit))")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                }
+
+                HStack(alignment: .center, spacing: 12) {
+                    if account.isCredit, let available = account.availableCredit {
+                        Text("Available £\(String(format: "%.2f", available))")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.78))
+                    } else {
+                        let potCount = account.pots?.count ?? 0
+                        Text(potCount == 1 ? "1 pot · budgeted" : "\(potCount) pots")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.78))
                     }
 
                     Spacer()
 
                     Image(systemName: account.isCredit ? "creditcard.fill" : "banknote.fill")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.85))
-                        .padding(12)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(8)
                         .background(Color.white.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
-                }
-
-                Spacer(minLength: 0)
-
-                HStack(alignment: .bottom) {
-                    if account.isCredit, let limit = account.credit_limit {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Limit £\(String(format: "%.0f", limit))")
-                                .font(.system(.caption, design: .rounded))
-                                .foregroundColor(.white.opacity(0.85))
-                            if let available = account.availableCredit {
-                                Text("Available £\(String(format: "%.2f", available))")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.85))
-                            }
-                        }
-                    } else {
-                        Text(account.accountType?.uppercased() ?? account.type.uppercased())
-                            .font(.system(.caption, design: .rounded))
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(account.formattedBalance)
-                            .font(.system(.title2, design: .rounded).weight(.bold))
-                            .foregroundColor(.white)
-                        Text("Balance")
-                            .font(.system(.caption2, design: .rounded))
-                            .foregroundColor(.white.opacity(0.75))
-                    }
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.16), radius: 8, x: 0, y: 4)
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 26)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 22)
         }
         .frame(maxWidth: .infinity, minHeight: AccountCardView.standardHeight, alignment: .leading)
         .onTapGesture { onTap?() }
