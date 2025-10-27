@@ -1,0 +1,20 @@
+import SwiftUI
+
+#if canImport(UIKit)
+struct BlurView: UIViewRepresentable {
+    let style: UIBlurEffect.Style
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        UIVisualEffectView(effect: UIBlurEffect(style: style))
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        uiView.effect = UIBlurEffect(style: style)
+    }
+}
+#else
+struct BlurView: View {
+    let style: Int
+    var body: some View { Color.clear }
+}
+#endif

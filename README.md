@@ -30,6 +30,15 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 * **Settings** – Local storage management (restore sample data, reload, delete-all), card reorder flow, and diagnostics launcher.
 * **Diagnostics** – Developer QA surface that adds/removes sample data, executes income schedules, resets balances, and reports status for each step.
 
+## Visual Design
+
+The 2025 refresh reimagines the MyBudget UI with a glassy, neon-accented look that leans into modern iOS design conventions:
+
+* **Immersive gradients** – Every top-level screen floats above a dual-radial background gradient inspired by Monzo's palette. Navigation bars and tab bars inherit blurred materials so transitions feel continuous across tabs.
+* **Glass cards** – Dashboards, filter panels, and quick actions live inside reusable `brandCardStyle` containers that blend translucency, neon borders, and soft shadows for depth while keeping content legible in both light and dark modes.
+* **Vibrant iconography** – Account cards and workflow shortcuts showcase bold angular gradients, layered blurs, and rounded typography to reinforce hierarchy without relying on heavy borders.
+* **Rounded typography** – Headings, badges, and chip controls adopt the rounded SF font variant to echo native iOS 17+ design language and improve scannability on dense financial data.
+
 ## Local Persistence
 
 Budget data is saved locally on the device. A bundled sample dataset seeds the app on first launch, and you can restore it at any time from **Settings → Local Storage → Restore Sample Dataset**. Data lives in the app's Application Support directory and no network connectivity is required.

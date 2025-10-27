@@ -7,45 +7,60 @@ struct ActivitiesView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Filters Section (Activities screen only)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Filters").font(.headline)
-                        Picker("Account", selection: $selectedAccountId) {
-                            Text("All Accounts").tag(nil as Int?)
-                            ForEach(accountsStore.accounts) { account in
-                                Text(account.name).tag(account.id as Int?)
-                            }
-                        }
-                        .pickerStyle(.menu)
+            ZStack {
+                BrandBackground()
 
-                        if let id = selectedAccountId,
-                           let account = accountsStore.account(for: id),
-                           let pots = account.pots, !pots.isEmpty {
-                            Picker("Pot", selection: $selectedPotName) {
-                                Text("All Pots").tag(nil as String?)
-                                ForEach(pots, id: \.name) { pot in
-                                    Text(pot.name).tag(pot.name as String?)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Focus your feed")
+                                .font(.system(.title3, design: .rounded).weight(.semibold))
+                                .foregroundStyle(LinearGradient(colors: [BrandTheme.accentSecondary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing))
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                Picker("Account", selection: $selectedAccountId) {
+                                    Text("All Accounts").tag(nil as Int?)
+                                    ForEach(accountsStore.accounts) { account in
+                                        Text(account.name).tag(account.id as Int?)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+
+                                if let id = selectedAccountId,
+                                   let account = accountsStore.account(for: id),
+                                   let pots = account.pots, !pots.isEmpty {
+                                    Picker("Pot", selection: $selectedPotName) {
+                                        Text("All Pots").tag(nil as String?)
+                                        ForEach(pots, id: \.name) { pot in
+                                            Text(pot.name).tag(pot.name as String?)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
                                 }
                             }
-                            .pickerStyle(.menu)
+                            .font(.system(.callout, design: .rounded))
                         }
-                    }
+                        .brandCardStyle()
 
-                    ActivitiesPanelSection(
-                        accounts: accountsStore.accounts,
-                        transactions: accountsStore.transactions,
-                        targets: accountsStore.targets,
-                        selectedAccountId: selectedAccountId,
-                        limit: Int.max,
-                        selectedPotName: selectedPotName
-                    )
+                        ActivitiesPanelSection(
+                            accounts: accountsStore.accounts,
+                            transactions: accountsStore.transactions,
+                            targets: accountsStore.targets,
+                            selectedAccountId: selectedAccountId,
+                            limit: Int.max,
+                            selectedPotName: selectedPotName
+                        )
+                        .brandCardStyle()
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 28)
+                    .padding(.bottom, 120)
                 }
-                .padding()
             }
             .navigationTitle("Activity")
-            .background(Color(.systemGroupedBackground))
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(BrandTheme.tabBarBackground.opacity(0.9), for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
             .onChange(of: selectedAccountId) { _, _ in selectedPotName = nil }
         }
     }

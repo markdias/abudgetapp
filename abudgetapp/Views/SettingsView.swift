@@ -18,12 +18,15 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Appearance") {
-                    Picker("Appearance", selection: $appAppearanceRaw) {
-                        Text("Always Light").tag(AppAppearance.light.rawValue)
-                        Text("Always Dark").tag(AppAppearance.dark.rawValue)
-                        Text("System Settings").tag(AppAppearance.system.rawValue)
+            ZStack {
+                BrandBackground()
+
+                Form {
+                    Section("Appearance") {
+                        Picker("Appearance", selection: $appAppearanceRaw) {
+                            Text("Always Light").tag(AppAppearance.light.rawValue)
+                            Text("Always Dark").tag(AppAppearance.dark.rawValue)
+                            Text("System Settings").tag(AppAppearance.system.rawValue)
                     }
                 }
                 Section("Activities") {
@@ -90,8 +93,14 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                }
+                .scrollContentBackground(.hidden)
+                .formStyle(.grouped)
             }
             .navigationTitle("Settings")
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(BrandTheme.tabBarBackground.opacity(0.9), for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
             .sheet(isPresented: $showingCardReorder) {
                 CardReorderView(isPresented: $showingCardReorder)
             }

@@ -34,7 +34,7 @@ struct MyBudgetApp: App {
                 .environmentObject(incomeSchedulesStore)
                 .environmentObject(transferSchedulesStore)
                 .preferredColorScheme(mappedColorScheme)
-                .accentColor(.purple)
+                .accentColor(BrandTheme.accent)
                 .task {
                     await bootstrap()
                 }

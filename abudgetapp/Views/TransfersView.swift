@@ -14,31 +14,44 @@ struct TransfersView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
-                    VStack(spacing: 16) {
-                        LargeActionButton(title: "Transfer Schedules", color: .blue) { showingTransferSchedules = true }
-                        LargeActionButton(title: "Income Schedules", color: .green) {
-                            showingIncomeSchedules = true
+            ZStack {
+                BrandBackground()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        VStack(alignment: .leading, spacing: 20) {
+                            Text("Move money and stay on track")
+                                .font(.system(.title3, design: .rounded).weight(.semibold))
+                                .foregroundStyle(LinearGradient(colors: [BrandTheme.accent, BrandTheme.accentSecondary], startPoint: .leading, endPoint: .trailing))
+
+                            VStack(spacing: 18) {
+                                LargeActionButton(title: "Transfer Schedules", icon: "arrow.left.arrow.right", gradient: [BrandTheme.accentSecondary, Color.blue.opacity(0.7)]) { showingTransferSchedules = true }
+                                LargeActionButton(title: "Income Schedules", icon: "calendar.badge.clock", gradient: [BrandTheme.accentTertiary, Color.green.opacity(0.7)]) {
+                                    showingIncomeSchedules = true
+                                }
+                                LargeActionButton(title: "Processed Transactions", icon: "tray.full.fill", gradient: [BrandTheme.accentQuaternary, Color.teal.opacity(0.7)]) {
+                                    showingProcessedTransactions = true
+                                }
+                                LargeActionButton(title: "Salary Sorter", icon: "chart.pie.fill", gradient: [BrandTheme.accent, Color.pink.opacity(0.7)]) { showingSalarySorter = true }
+                                LargeActionButton(title: "Balance Reduction", icon: "chart.line.downtrend.xyaxis", gradient: [BrandTheme.accentTertiary, Color.mint.opacity(0.7)]) {
+                                    showingBalanceHistory = true
+                                }
+                                LargeActionButton(title: "Reset Balance", icon: "arrow.counterclockwise", gradient: [BrandTheme.accentQuaternary, BrandTheme.accent]) {
+                                    showingResetConfirm = true
+                                }
+                            }
                         }
-                        LargeActionButton(title: "Processed Transactions", color: .teal) {
-                            showingProcessedTransactions = true
-                        }
-                        LargeActionButton(title: "Salary Sorter", color: .purple) { showingSalarySorter = true }
-                        LargeActionButton(title: "Balance Reduction", color: .indigo) {
-                            showingBalanceHistory = true
-                        }
-                        LargeActionButton(title: "Reset Balance", color: .red) {
-                            showingResetConfirm = true
-                        }
+                        .brandCardStyle()
                     }
-                    .frame(maxWidth: 420)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 28)
+                    .padding(.bottom, 120)
                 }
-                .padding(.vertical, 24)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Transfers")
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(BrandTheme.tabBarBackground.opacity(0.9), for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
             .sheet(isPresented: $showingIncomeSchedules) {
                 ManageIncomeSchedulesView(isPresented: $showingIncomeSchedules)
             }
@@ -77,21 +90,47 @@ struct TransfersView: View {
 
 private struct LargeActionButton: View {
     let title: String
-    let color: Color
+    let icon: String
+    let gradient: [Color]
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.headline)
-                .fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
+            HStack(alignment: .center, spacing: 16) {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 56, height: 56)
+                    .overlay(
+                        Image(systemName: icon)
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundColor(.white)
+                    )
+                    .shadow(color: gradient.first?.opacity(0.4) ?? BrandTheme.accent.opacity(0.3), radius: 10, x: 0, y: 6)
+
+                Text(title)
+                    .font(.system(.headline, design: .rounded).weight(.semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(.headline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 18)
+            .padding(.horizontal, 20)
         }
-        .foregroundStyle(.white)
-        .background(color)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: color.opacity(0.18), radius: 8, x: 0, y: 4)
+        .foregroundStyle(.primary)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.white.opacity(0.07))
+                .background(BlurView(style: .systemMaterialDark).clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+        )
         .accessibilityAddTraits(.isButton)
     }
 }

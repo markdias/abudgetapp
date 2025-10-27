@@ -57,65 +57,77 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    if reorderableAccounts.isEmpty {
-                        ContentUnavailableView(
-                            "No Accounts",
-                            systemImage: "creditcard",
-                            description: Text("Use the add menu to create your first account.")
+            ZStack {
+                BrandBackground()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 26) {
+                        BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
+
+                        if reorderableAccounts.isEmpty {
+                            ContentUnavailableView(
+                                "No Accounts",
+                                systemImage: "creditcard",
+                                description: Text("Use the add menu to create your first account.")
+                            )
+                            .brandCardStyle()
+                        } else {
+                            StackedAccountDeck(
+                                accounts: reorderableAccounts,
+                                selectedAccountId: $selectedAccountId,
+                                spacing: cardSpacing,
+                                onReorder: handleReorder,
+                                onAddPot: { _ in showingAddPot = true },
+                                onEditAccount: { account in editingAccount = account },
+                                onDelete: { account in
+                                    Task { await accountsStore.deleteAccount(id: account.id) }
+                                }
+                            )
+                            .brandCardStyle(padding: 0)
+                        }
+
+                        ActivitiesPanelSection(
+                            accounts: accountsStore.accounts,
+                            transactions: accountsStore.transactions,
+                            targets: accountsStore.targets,
+                            selectedAccountId: selectedAccountId,
+                            searchText: searchText
                         )
-                        .frame(maxWidth: .infinity)
-                    } else {
-                        StackedAccountDeck(
-                            accounts: reorderableAccounts,
-                            selectedAccountId: $selectedAccountId,
-                            spacing: cardSpacing,
-                            onReorder: handleReorder,
-                            onAddPot: { _ in showingAddPot = true },
-                            onEditAccount: { account in editingAccount = account },
-                            onDelete: { account in
-                                Task { await accountsStore.deleteAccount(id: account.id) }
-                            }
+                        .brandCardStyle()
+
+                        PotsPanelSection(
+                            accounts: accountsStore.accounts,
+                            potsByAccount: potsStore.potsByAccount,
+                            selectedAccountId: selectedAccountId,
+                            onTapPot: { account, pot in
+                                selectedPotContext = PotEditContext(account: account, pot: pot)
+                            },
+                            onDeletePot: { account, pot in
+                                Task { await potsStore.deletePot(accountId: account.id, potName: pot.name) }
+                            },
+                            onManagePots: { showingPotsManager = true }
                         )
+                        .brandCardStyle()
+
+                        QuickActionsView(
+                            onTransferSchedules: { showingTransferSchedules = true },
+                            onIncomeSchedules: { showingIncomeSchedules = true },
+                            onSalarySorter: { showingSalarySorter = true },
+                            onShowBalanceHistory: { showingBalanceHistory = true },
+                            onResetBalances: { showingResetConfirm = true },
+                            onDiagnostics: { showingDiagnostics = true }
+                        )
+                        .brandCardStyle()
                     }
-                    ActivitiesPanelSection(
-                        accounts: accountsStore.accounts,
-                        transactions: accountsStore.transactions,
-                        targets: accountsStore.targets,
-                        selectedAccountId: selectedAccountId,
-                        searchText: searchText
-                    )
-
-                    PotsPanelSection(
-                        accounts: accountsStore.accounts,
-                        potsByAccount: potsStore.potsByAccount,
-                        selectedAccountId: selectedAccountId,
-                        onTapPot: { account, pot in
-                            selectedPotContext = PotEditContext(account: account, pot: pot)
-                        },
-                        onDeletePot: { account, pot in
-                            Task { await potsStore.deletePot(accountId: account.id, potName: pot.name) }
-                        },
-                        onManagePots: { showingPotsManager = true }
-                    )
-
-                    QuickActionsView(
-                        onTransferSchedules: { showingTransferSchedules = true },
-                        onIncomeSchedules: { showingIncomeSchedules = true },
-                        onSalarySorter: { showingSalarySorter = true },
-                        onShowBalanceHistory: { showingBalanceHistory = true },
-                        onResetBalances: { showingResetConfirm = true },
-                        onDiagnostics: { showingDiagnostics = true }
-                    )
-
-                    BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 28)
+                    .padding(.bottom, 120)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 16)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Dashboard")
+            .navigationTitle("Overview")
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(BrandTheme.tabBarBackground.opacity(0.92), for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: refreshAllData) {
@@ -245,31 +257,61 @@ private struct BalanceSummaryCard: View {
     let todaysSpending: Double
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 22) {
             Text("Current Balance")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(.callout, design: .rounded))
+                .fontWeight(.semibold)
+                .foregroundStyle(LinearGradient(colors: [BrandTheme.accent.opacity(0.8), .white.opacity(0.8)], startPoint: .leading, endPoint: .trailing))
 
             Text("£\(String(format: "%.2f", totalBalance))")
-                .font(.system(size: 36, weight: .bold))
+                .font(.system(size: 48, weight: .bold, design: .rounded))
+                .foregroundStyle(LinearGradient(colors: [BrandTheme.accent, BrandTheme.accentSecondary], startPoint: .leading, endPoint: .trailing))
+                .shadow(color: BrandTheme.accent.opacity(0.25), radius: 16, x: 0, y: 12)
 
-            HStack {
-                Label("Spent today", systemImage: "sun.max")
-                    .font(.caption)
+            HStack(spacing: 16) {
+                Label("Spent today", systemImage: "bolt.fill")
+                    .font(.system(.footnote, design: .rounded))
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
                 Text("£\(String(format: "%.2f", todaysSpending))")
-                    .font(.caption)
-                    .foregroundColor(.red)
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .foregroundStyle(LinearGradient(colors: [BrandTheme.accentQuaternary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing))
             }
+
+            Capsule()
+                .fill(LinearGradient(colors: [BrandTheme.accent.opacity(0.4), BrandTheme.accentTertiary.opacity(0.5)], startPoint: .leading, endPoint: .trailing))
+                .frame(height: 6)
+                .overlay(
+                    Capsule()
+                        .fill(Color.white.opacity(0.45))
+                        .frame(width: 80, height: 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                )
+                .opacity(0.7)
         }
-        .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 6)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .fill(LinearGradient(colors: [BrandTheme.accent.opacity(0.22), BrandTheme.accentSecondary.opacity(0.22)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 32, style: .continuous)
+                        .fill(.ultraThinMaterial.opacity(0.8))
+                )
+                .overlay(
+                    AngularGradient(colors: [BrandTheme.accent, BrandTheme.accentTertiary, BrandTheme.accentSecondary, BrandTheme.accent], center: .center)
+                        .opacity(0.12)
+                        .blendMode(.screen)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 32, style: .continuous)
+                        .strokeBorder(BrandTheme.cardBorder, lineWidth: 1.4)
+                        .opacity(0.75)
+                )
+        )
     }
 }
 
@@ -288,47 +330,49 @@ private struct StackedAccountDeck: View {
     @State private var dragOffset: CGSize = .zero
 
     var body: some View {
-        ZStack(alignment: .top) {
-            // When a card is selected, show only that card; otherwise show the whole stack
-            let visibleAccounts: [Account] = {
-                if let id = selectedAccountId, let a = accounts.first(where: { $0.id == id }) {
-                    return [a]
-                }
-                return accounts
-            }()
+        VStack(spacing: 0) {
+            ZStack(alignment: .top) {
+                // When a card is selected, show only that card; otherwise show the whole stack
+                let visibleAccounts: [Account] = {
+                    if let id = selectedAccountId, let a = accounts.first(where: { $0.id == id }) {
+                        return [a]
+                    }
+                    return accounts
+                }()
 
-            ForEach(Array(visibleAccounts.enumerated()), id: \.element.id) { index, account in
-                AccountCardView(
-                    account: account,
-                    onTap: {
-                        if selectedAccountId == account.id {
-                            selectedAccountId = nil
-                        } else {
-                            selectedAccountId = account.id
+                ForEach(Array(visibleAccounts.enumerated()), id: \.element.id) { index, account in
+                    AccountCardView(
+                        account: account,
+                        onTap: {
+                            if selectedAccountId == account.id {
+                                selectedAccountId = nil
+                            } else {
+                                selectedAccountId = account.id
+                            }
+                        },
+                        onManage: nil
+                    )
+                    .offset(y: CGFloat(index) * spacing)
+                    .offset(draggingAccount?.id == account.id ? dragOffset : .zero)
+                    .zIndex(draggingAccount?.id == account.id ? 99 : Double(index))
+                    .shadow(color: BrandTheme.accent.opacity(draggingAccount?.id == account.id ? 0.35 : 0.18), radius: draggingAccount?.id == account.id ? 16 : 10, x: 0, y: 12)
+                    .gesture(dragGesture(for: account, at: index))
+                    .contextMenu {
+                        Button("Add Pot") { onAddPot(account) }
+                        Button("Edit Account") { onEditAccount(account) }
+                        Divider()
+                        Button(role: .destructive) { onDelete(account) } label: {
+                            Text("Delete")
+                            Image(systemName: "trash")
                         }
-                    },
-                    onManage: nil
-                )
-                .offset(y: CGFloat(index) * spacing)
-                .offset(draggingAccount?.id == account.id ? dragOffset : .zero)
-                .zIndex(draggingAccount?.id == account.id ? 99 : Double(index))
-                .shadow(color: .black.opacity(0.12), radius: draggingAccount?.id == account.id ? 12 : 4, x: 0, y: 6)
-                .gesture(dragGesture(for: account, at: index))
-                .contextMenu {
-                    Button("Add Pot") { onAddPot(account) }
-                    Button("Edit Account") { onEditAccount(account) }
-                    Divider()
-                    Button(role: .destructive) { onDelete(account) } label: {
-                        Text("Delete")
-                        Image(systemName: "trash")
                     }
                 }
             }
+            // Reserve vertical space for the stacked offsets so content below doesn't overlap
+            .frame(height: 180 + CGFloat(max((selectedAccountId == nil ? accounts.count : 1) - 1, 0)) * spacing, alignment: .top)
         }
-        // Reserve vertical space for the stacked offsets so content below doesn't overlap
-        .frame(height: 160 + CGFloat(max((selectedAccountId == nil ? accounts.count : 1) - 1, 0)) * spacing, alignment: .top)
-        // Keep small top padding so the deck sits closer to the balance card
-        .padding(.top, 10)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 28)
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: draggingAccount?.id)
     }
 
@@ -408,6 +452,15 @@ struct ActivitiesPanelSection: View {
         case transaction = "Transactions"
         case target = "Budget"
         var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .all: return "sparkles"
+            case .income: return "arrow.down.circle"
+            case .transaction: return "arrow.left.arrow.right.circle"
+            case .target: return "scope"
+            }
+        }
     }
 
     private var combinedItems: [Item] {
@@ -553,24 +606,48 @@ struct ActivitiesPanelSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Activities")
-                        .font(.headline)
-                    Spacer()
-                }
-                Picker("Filter", selection: $filter) {
-                    ForEach(Filter.allCases) { f in
-                        Text(f.rawValue).tag(f)
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Recent Activity")
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .foregroundStyle(LinearGradient(colors: [BrandTheme.accent, BrandTheme.accentSecondary], startPoint: .leading, endPoint: .trailing))
+
+                Text("Filter incomes, spending and goals in one feed.")
+                    .font(.system(.footnote, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                ForEach(Filter.allCases) { option in
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            filter = option
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: option.icon)
+                            Text(option.rawValue)
+                        }
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(filter == option ? BrandTheme.accent.opacity(0.18) : Color.white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(filter == option ? BrandTheme.accent.opacity(0.6) : Color.white.opacity(0.08), lineWidth: 1)
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
-                .pickerStyle(.segmented)
             }
 
             if !normalizedSearch.isEmpty {
                 Text("Results for “\(normalizedSearch)”")
-                    .font(.caption)
+                    .font(.system(.footnote, design: .rounded))
                     .foregroundStyle(.secondary)
             }
 
@@ -588,7 +665,7 @@ struct ActivitiesPanelSection: View {
                     description: noResultsMessage
                 )
             } else {
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     ForEach(itemsToShow) { item in
                         ActivityListItemRow(item: item)
                             .contentShape(Rectangle())
@@ -617,10 +694,7 @@ struct ActivitiesPanelSection: View {
                 }
             }
         }
-        .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         // Edit sheets
         .sheet(isPresented: $showEditIncome) {
             if let ctx = editingIncome {
@@ -707,16 +781,21 @@ private struct ActivityListItemRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(color)
-                .frame(width: 44, height: 44)
-                .overlay(Image(systemName: icon).foregroundColor(.white))
+        HStack(spacing: 16) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(LinearGradient(colors: iconGradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 52, height: 52)
+                .overlay(
+                    Image(systemName: icon)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundColor(.white)
+                )
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(item.title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.primary)
+
                 HStack(spacing: 6) {
                     Text(item.accountName)
                     if let pot = item.potName, !pot.isEmpty {
@@ -724,58 +803,68 @@ private struct ActivityListItemRow: View {
                         Text(pot)
                     }
                 }
-                .font(.caption)
+                .font(.system(.caption, design: .rounded))
                 .foregroundStyle(.secondary)
+
                 if let company = item.company, !company.isEmpty {
                     Text(company)
-                        .font(.caption2)
-                        .foregroundStyle(Color(.tertiaryLabel))
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(.secondary)
                 }
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: 6) {
                 Text(formattedAmount)
-                    .font(.subheadline)
-                    .foregroundColor(isIncome ? .green : .primary)
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(amountGradient)
                 Text(dayOfMonthText)
-                    .font(.caption2)
+                    .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .padding(.vertical, 16)
+        .padding(.horizontal, 18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+                .background(BlurView(style: .systemChromeMaterialDark).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+        )
     }
 
     private var isIncome: Bool { item.kind == .income }
     private var isTransaction: Bool { item.kind == .transaction }
-    private var color: Color {
-        switch item.kind {
-        case .income:
-            return .green.opacity(0.85)
-        case .transaction:
-            // Color by payment type to aid scanning
-            if let t = item.metadata["paymentType"] {
-                switch t {
-                case "card": return .purple.opacity(0.85)
-                case "credit_card_charge": return .indigo.opacity(0.85)
-                case "direct_debit": return .blue.opacity(0.85)
-                default: break
-                }
-            }
-            return .blue.opacity(0.85)
-        case .target:
-            return .orange.opacity(0.85)
-        }
-    }
     private var icon: String {
         switch item.kind {
         case .income: return "arrow.down.circle.fill"
         case .transaction: return "arrow.left.arrow.right.circle.fill"
-        case .target: return "target"
+        case .target: return "scope"
+        }
+    }
+
+    private var iconGradient: [Color] {
+        switch item.kind {
+        case .income:
+            return [BrandTheme.accentTertiary, Color.green.opacity(0.7)]
+        case .transaction:
+            return [BrandTheme.accentSecondary, Color.blue.opacity(0.7)]
+        case .target:
+            return [BrandTheme.accentQuaternary, BrandTheme.accent]
+        }
+    }
+
+    private var amountGradient: LinearGradient {
+        if isIncome {
+            return LinearGradient(colors: [BrandTheme.accentTertiary, Color.white], startPoint: .topLeading, endPoint: .bottomTrailing)
+        } else if isTransaction {
+            return LinearGradient(colors: [BrandTheme.accentSecondary, Color.white.opacity(0.9)], startPoint: .leading, endPoint: .trailing)
+        } else {
+            return LinearGradient(colors: [BrandTheme.accentQuaternary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing)
         }
     }
 }
@@ -1822,81 +1911,99 @@ private struct AccountCardView: View {
     var onTap: (() -> Void)? = nil
     var onManage: (() -> Void)? = nil
 
-    private var gradient: LinearGradient {
-        let start: Color
-        let end: Color
-        switch account.type {
+    private var gradient: [Color] {
+        switch account.type.lowercased() {
         case "credit":
-            start = Color.blue
-            end = Color.indigo
+            return [BrandTheme.accentSecondary, Color.blue.opacity(0.6), BrandTheme.accentTertiary]
         case "current":
-            start = Color.red
-            end = Color.orange
+            return [BrandTheme.accent, BrandTheme.accentQuaternary, Color.pink.opacity(0.7)]
         case "savings":
-            start = Color.green
-            end = Color.mint
+            return [BrandTheme.accentTertiary, Color.mint, Color.green.opacity(0.7)]
         default:
-            start = Color.purple
-            end = Color.indigo
+            return [BrandTheme.accentSecondary, BrandTheme.accent, BrandTheme.accentTertiary]
         }
-        return LinearGradient(colors: [start, end], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var typeBadge: some View {
+        Text(account.type.uppercased())
+            .font(.system(.caption2, design: .rounded).weight(.bold))
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(.white.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.6)
+            )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top) {
-                Label {
-                    Text(account.name)
-                        .font(.system(size: 18, weight: .semibold))
-                } icon: {
-                    Image(systemName: "person.fill")
-                        .foregroundColor(.white.opacity(0.95))
-                }
-                .foregroundColor(.white)
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .fill(AngularGradient(colors: gradient, center: .center, startAngle: .degrees(20), endAngle: .degrees(380)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 32, style: .continuous)
+                        .fill(.ultraThinMaterial.opacity(0.55))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 32, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 1.2)
+                )
 
-                Spacer()
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        typeBadge
+                        Text(account.name)
+                            .font(.system(.title3, design: .rounded).weight(.semibold))
+                            .foregroundColor(.white)
+                    }
 
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(account.formattedBalance)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                    Text("Balance")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.85))
-                }
-            }
+                    Spacer()
 
-            HStack(alignment: .center) {
-                Text(account.type.lowercased())
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.85))
-
-                Spacer()
-
-                if account.isCredit, let limit = account.credit_limit {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("Limit £\(String(format: "%.0f", limit))")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.85))
-                        if let available = account.availableCredit {
-                            Text("Available £\(String(format: "%.2f", available))")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.9))
-                        }
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(account.formattedBalance)
+                            .font(.system(.title2, design: .rounded).weight(.bold))
+                            .foregroundColor(.white)
+                        Text("Balance")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundColor(.white.opacity(0.75))
                     }
                 }
+
+                HStack(alignment: .center) {
+                    if account.isCredit, let limit = account.credit_limit {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Limit £\(String(format: "%.0f", limit))")
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundColor(.white.opacity(0.85))
+                            if let available = account.availableCredit {
+                                Text("Available £\(String(format: "%.2f", available))")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                        }
+                    } else {
+                        Text(account.accountType?.uppercased() ?? account.type.uppercased())
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+
+                    Spacer()
+
+                    Image(systemName: account.isCredit ? "creditcard.fill" : "banknote.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(.white.opacity(0.85))
+                        .padding(10)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 28)
         }
-        .padding(.top, 0)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 14)
-        .frame(maxWidth: .infinity, minHeight: 160, alignment: .leading)
-        .background(gradient)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.15), lineWidth: 1)
-        )
+        .frame(maxWidth: .infinity, minHeight: 200, alignment: .leading)
         .onTapGesture { onTap?() }
     }
 }
@@ -1916,45 +2023,58 @@ private struct QuickActionsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Shortcuts")
-                .font(.headline)
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                QuickActionButton(icon: "arrow.left.arrow.right", title: "Transfer Schedules", tint: .blue, action: onTransferSchedules)
-                QuickActionButton(icon: "calendar.badge.clock", title: "Income Schedules", tint: .green, action: onIncomeSchedules)
-                QuickActionButton(icon: "chart.pie.fill", title: "Salary Sorter", tint: .purple, action: onSalarySorter)
-                QuickActionButton(icon: "chart.line.downtrend.xyaxis", title: "Balance Reduction", tint: .teal, action: onShowBalanceHistory)
-                QuickActionButton(icon: "arrow.counterclockwise", title: "Reset Balances", tint: .red, action: onResetBalances)
-                QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", tint: .orange, action: onDiagnostics)
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Workflow Shortcuts")
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .foregroundStyle(LinearGradient(colors: [BrandTheme.accent, BrandTheme.accentSecondary], startPoint: .leading, endPoint: .trailing))
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                QuickActionButton(icon: "arrow.left.arrow.right", title: "Transfer\nSchedules", gradient: [BrandTheme.accentSecondary, Color.blue.opacity(0.7)], action: onTransferSchedules)
+                QuickActionButton(icon: "calendar.badge.clock", title: "Income\nSchedules", gradient: [BrandTheme.accentTertiary, Color.green.opacity(0.7)], action: onIncomeSchedules)
+                QuickActionButton(icon: "chart.pie.fill", title: "Salary\nSorter", gradient: [BrandTheme.accent, Color.pink.opacity(0.7)], action: onSalarySorter)
+                QuickActionButton(icon: "chart.line.downtrend.xyaxis", title: "Balance\nReduction", gradient: [BrandTheme.accentTertiary, Color.teal.opacity(0.7)], action: onShowBalanceHistory)
+                QuickActionButton(icon: "arrow.counterclockwise", title: "Reset\nBalances", gradient: [BrandTheme.accentQuaternary, BrandTheme.accent], action: onResetBalances)
+                QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", gradient: [BrandTheme.accentSecondary, Color.orange.opacity(0.8)], action: onDiagnostics)
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct QuickActionButton: View {
     let icon: String
     let title: String
-    let tint: Color
+    let gradient: [Color]
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundColor(.white)
-                    .frame(width: 50, height: 50)
-                    .background(tint)
-                    .clipShape(Circle())
+            VStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 58, height: 58)
+                    .overlay(
+                        Image(systemName: icon)
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundColor(.white)
+                    )
+                    .shadow(color: gradient.first?.opacity(0.45) ?? BrandTheme.accent.opacity(0.3), radius: 10, x: 0, y: 6)
+
                 Text(title)
-                    .font(.caption)
+                    .multilineTextAlignment(.center)
+                    .font(.system(.caption, design: .rounded).weight(.medium))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .background(BlurView(style: .systemUltraThinMaterialDark).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
         }
         .buttonStyle(.plain)
     }
@@ -2291,19 +2411,28 @@ private struct PotsPanelSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text("Pots")
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Pots")
+                        .font(.system(.title3, design: .rounded).weight(.semibold))
+                        .foregroundStyle(LinearGradient(colors: [BrandTheme.accentSecondary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing))
+                    Text("Segment balances and ring-fence your goals.")
+                        .font(.system(.footnote, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 if let onManagePots {
-                    Button("Manage") { onManagePots() }
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.blue.opacity(0.12))
-                        .foregroundColor(.blue)
-                        .clipShape(Capsule())
+                    Button(action: onManagePots) {
+                        Label("Manage", systemImage: "slider.horizontal.3")
+                            .font(.system(.caption, design: .rounded).weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(BrandTheme.accent.opacity(0.16))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
                 }
             }
 
@@ -2314,24 +2443,24 @@ private struct PotsPanelSection: View {
                     description: Text("Create pots to organize balances.")
                 )
             } else {
-                VStack(spacing: 10) {
+                VStack(spacing: 16) {
                     ForEach(groupedPots, id: \.account.id) { entry in
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 16) {
                             Button {
                                 toggleAccount(entry.account.id)
                             } label: {
                                 HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
+                                    VStack(alignment: .leading, spacing: 4) {
                                         Text(entry.account.name)
-                                            .font(.subheadline)
-                                            .fontWeight(.semibold)
+                                            .font(.system(.headline, design: .rounded).weight(.semibold))
+                                            .foregroundStyle(.primary)
                                         Text("\(entry.pots.count) pot\(entry.pots.count == 1 ? "" : "s")")
-                                            .font(.caption)
+                                            .font(.system(.caption, design: .rounded))
                                             .foregroundStyle(.secondary)
                                     }
                                     Spacer()
                                     Image(systemName: isCollapsed(entry.account.id) ? "chevron.right" : "chevron.down")
-                                        .font(.footnote.weight(.semibold))
+                                        .font(.system(.footnote, design: .rounded).weight(.bold))
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(.vertical, 4)
@@ -2339,7 +2468,7 @@ private struct PotsPanelSection: View {
                             .buttonStyle(.plain)
 
                             if !isCollapsed(entry.account.id) {
-                                VStack(spacing: 10) {
+                                VStack(spacing: 12) {
                                     ForEach(entry.pots, id: \.id) { pot in
                                         PotRow(pot: pot, accountName: entry.account.name)
                                             .onTapGesture { onTapPot(entry.account, pot) }
@@ -2362,19 +2491,22 @@ private struct PotsPanelSection: View {
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                .fill(Color.white.opacity(0.06))
+                                .background(BlurView(style: .systemMaterialDark).clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous)))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                                )
+                        )
                     }
                 }
             }
         }
-        .padding()
         .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -2466,33 +2598,37 @@ private struct PotRow: View {
     let accountName: String
 
     var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.purple.opacity(0.2))
-                .frame(width: 44, height: 44)
-                .overlay(Image(systemName: "tray.fill").foregroundColor(.purple))
-
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(pot.name)
-                    .font(.subheadline).fontWeight(.medium)
+                    .font(.system(.body, design: .rounded).weight(.semibold))
                 Text(accountName)
-                    .font(.caption)
+                    .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .trailing, spacing: 6) {
                 Text("£\(String(format: "%.2f", pot.balance))")
-                    .font(.subheadline).foregroundColor(.primary)
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(LinearGradient(colors: [BrandTheme.accentSecondary, BrandTheme.accent], startPoint: .leading, endPoint: .trailing))
                 Text("Balance")
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+                .background(BlurView(style: .systemThinMaterialDark).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
     }
 }
 
