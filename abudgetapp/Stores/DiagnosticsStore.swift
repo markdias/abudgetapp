@@ -215,7 +215,8 @@ final class DiagnosticsStore: ObservableObject {
                         fromAccountId: nil,
                         toAccountId: account.id,
                         toPotName: diagnosticsPot?.name,
-                        paymentType: "card"
+                        paymentType: "card",
+                        linkedCreditAccountId: nil
                     )
                 )
                 diagnosticsTransaction = transaction

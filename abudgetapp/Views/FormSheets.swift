@@ -10,6 +10,7 @@ struct AccountFormView: View {
     @State private var accountType = "personal"
     @State private var creditLimit = ""
     @State private var isSaving = false
+    @State private var excludeFromReset = false
 
     private let accountTypes = ["current", "credit", "savings", "investment"]
 
@@ -29,6 +30,7 @@ struct AccountFormView: View {
                     if type == "credit" {
                         TextField("Credit Limit", text: $creditLimit)
                             .keyboardType(.decimalPad)
+                        Toggle("Exclude from Reset", isOn: $excludeFromReset)
                     }
                 }
             }
@@ -40,6 +42,11 @@ struct AccountFormView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save", action: save)
                         .disabled(!isValid)
+                }
+            }
+            .onChange(of: type) { _, newValue in
+                if newValue != "credit" {
+                    excludeFromReset = false
                 }
             }
         }
@@ -59,7 +66,8 @@ struct AccountFormView: View {
             balance: startingBalance,
             type: type,
             accountType: accountType,
-            credit_limit: limit
+            credit_limit: limit,
+            excludeFromReset: type == "credit" ? excludeFromReset : false
         )
         Task {
             await accountsStore.addAccount(submission)
@@ -79,6 +87,7 @@ struct EditAccountFormView: View {
     @State private var type = "current"
     @State private var accountType = "personal"
     @State private var creditLimit = ""
+    @State private var excludeFromReset = false
 
     var body: some View {
         NavigationStack {
@@ -94,6 +103,7 @@ struct EditAccountFormView: View {
                     TextField("Account Category", text: $accountType)
                     if type == "credit" {
                         TextField("Credit Limit", text: $creditLimit).keyboardType(.decimalPad)
+                        Toggle("Exclude from Reset", isOn: $excludeFromReset)
                     }
                 }
             }
@@ -103,6 +113,11 @@ struct EditAccountFormView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Save", action: save).disabled(!isValid) }
             }
             .onAppear(perform: preload)
+            .onChange(of: type) { _, newValue in
+                if newValue != "credit" {
+                    excludeFromReset = false
+                }
+            }
         }
     }
 
@@ -118,6 +133,7 @@ struct EditAccountFormView: View {
         type = account.type
         accountType = account.accountType ?? "personal"
         if let limit = account.credit_limit { creditLimit = String(format: "%.0f", limit) }
+        excludeFromReset = account.excludeFromReset ?? false
     }
 
     private func save() {
@@ -127,7 +143,8 @@ struct EditAccountFormView: View {
             balance: newBalance,
             type: type,
             accountType: accountType,
-            credit_limit: Double(creditLimit)
+            credit_limit: Double(creditLimit),
+            excludeFromReset: type == "credit" ? excludeFromReset : false
         )
         Task {
             await accountsStore.updateAccount(id: account.id, submission: submission)

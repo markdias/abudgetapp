@@ -176,7 +176,9 @@ private struct AddTransferSchedulesScreen: View {
     @MainActor
     private func entriesForDestination(accountId: Int, potName: String?) -> [DestEntry] {
         let potKey = potName ?? ""
-        let filteredTx = accountsStore.transactions.filter { $0.toAccountId == accountId && ($0.toPotName ?? "") == potKey }
+        let filteredTx = accountsStore.transactions.filter {
+            $0.kind == .scheduled && $0.toAccountId == accountId && ($0.toPotName ?? "") == potKey
+        }
         let tx: [DestEntry] = filteredTx.map { r in
             let title = r.name.isEmpty ? r.vendor : r.name
             return DestEntry(id: "t-\(r.id)", title: title, amount: r.amount, kind: .transaction, method: r.paymentType)
@@ -469,7 +471,7 @@ struct CompletedTransfersScreen: View {
     private func entriesForDestination(accountId: Int, potName: String?) -> [DestEntry] {
         let potKey = potName ?? ""
         let filteredTx = accountsStore.transactions.filter {
-            $0.toAccountId == accountId && ($0.toPotName ?? "") == potKey
+            $0.kind == .scheduled && $0.toAccountId == accountId && ($0.toPotName ?? "") == potKey
         }
         let tx: [DestEntry] = filteredTx.map { r in
             let title = r.name.isEmpty ? r.vendor : r.name

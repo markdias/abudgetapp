@@ -51,7 +51,23 @@ public struct Account: Identifiable, Codable, Hashable {
     public var monthlyBaselineMonth: String?
     
     public var formattedBalance: String {
-        return "£\(String(format: "%.2f", abs(balance)))"
+        let amount: Double = {
+            if isCredit {
+                return -abs(balance)
+            }
+            return balance
+        }()
+        let absolute = String(format: "%.2f", abs(amount))
+        return amount < 0 ? "-£\(absolute)" : "£\(absolute)"
+    }
+
+    public var availableCredit: Double? {
+        guard isCredit, let limit = credit_limit else { return nil }
+        if balance >= 0 {
+            return max(0, limit - balance)
+        } else {
+            return max(0, limit + balance)
+        }
     }
     
     public var isCredit: Bool {
@@ -198,6 +214,11 @@ public struct Expense: Identifiable, Codable, Hashable {
 }
 
 public struct TransactionRecord: Identifiable, Codable, Hashable {
+    public enum Kind: String, Codable, Hashable {
+        case scheduled
+        case creditCardCharge = "credit_card_charge"
+    }
+
     public let id: Int
     public let name: String
     public let vendor: String
@@ -207,8 +228,22 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     public let toAccountId: Int
     public let toPotName: String?
     public let paymentType: String? // "direct_debit" or "card"
+    public let linkedCreditAccountId: Int?
+    public let kind: Kind
 
-    public init(id: Int, name: String, vendor: String, amount: Double, date: String, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil, paymentType: String? = nil) {
+    public init(
+        id: Int,
+        name: String,
+        vendor: String,
+        amount: Double,
+        date: String,
+        fromAccountId: Int? = nil,
+        toAccountId: Int,
+        toPotName: String? = nil,
+        paymentType: String? = nil,
+        linkedCreditAccountId: Int? = nil,
+        kind: Kind = .scheduled
+    ) {
         self.id = id
         self.name = name
         self.vendor = vendor
@@ -218,6 +253,52 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         self.toAccountId = toAccountId
         self.toPotName = toPotName
         self.paymentType = paymentType
+        self.linkedCreditAccountId = linkedCreditAccountId
+        self.kind = kind
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case vendor
+        case amount
+        case date
+        case fromAccountId
+        case toAccountId
+        case toPotName
+        case paymentType
+        case linkedCreditAccountId
+        case kind
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        vendor = try container.decode(String.self, forKey: .vendor)
+        amount = try container.decode(Double.self, forKey: .amount)
+        date = try container.decode(String.self, forKey: .date)
+        fromAccountId = try container.decodeIfPresent(Int.self, forKey: .fromAccountId)
+        toAccountId = try container.decode(Int.self, forKey: .toAccountId)
+        toPotName = try container.decodeIfPresent(String.self, forKey: .toPotName)
+        paymentType = try container.decodeIfPresent(String.self, forKey: .paymentType)
+        linkedCreditAccountId = try container.decodeIfPresent(Int.self, forKey: .linkedCreditAccountId)
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .scheduled
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(vendor, forKey: .vendor)
+        try container.encode(amount, forKey: .amount)
+        try container.encode(date, forKey: .date)
+        try container.encodeIfPresent(fromAccountId, forKey: .fromAccountId)
+        try container.encode(toAccountId, forKey: .toAccountId)
+        try container.encodeIfPresent(toPotName, forKey: .toPotName)
+        try container.encodeIfPresent(paymentType, forKey: .paymentType)
+        try container.encodeIfPresent(linkedCreditAccountId, forKey: .linkedCreditAccountId)
+        try container.encode(kind, forKey: .kind)
     }
 
     public static func == (lhs: TransactionRecord, rhs: TransactionRecord) -> Bool {
@@ -593,8 +674,19 @@ public struct TransactionSubmission: Codable {
     public let toAccountId: Int
     public var toPotName: String?
     public var paymentType: String?
+    public var linkedCreditAccountId: Int?
 
-    public init(name: String, vendor: String, amount: Double, date: String? = nil, fromAccountId: Int? = nil, toAccountId: Int, toPotName: String? = nil, paymentType: String? = nil) {
+    public init(
+        name: String,
+        vendor: String,
+        amount: Double,
+        date: String? = nil,
+        fromAccountId: Int? = nil,
+        toAccountId: Int,
+        toPotName: String? = nil,
+        paymentType: String? = nil,
+        linkedCreditAccountId: Int? = nil
+    ) {
         self.name = name
         self.vendor = vendor
         self.amount = amount
@@ -603,6 +695,7 @@ public struct TransactionSubmission: Codable {
         self.toAccountId = toAccountId
         self.toPotName = toPotName
         self.paymentType = paymentType
+        self.linkedCreditAccountId = linkedCreditAccountId
     }
 }
 

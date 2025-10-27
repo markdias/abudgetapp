@@ -20,7 +20,7 @@ struct SalarySorterView: View {
     private var destinationAccounts: [Account] {
         accountsStore.accounts.filter { account in
             let hasBudgets = accountsStore.targets.contains { $0.accountId == account.id }
-            let hasTx = accountsStore.transactions.contains { $0.toAccountId == account.id }
+            let hasTx = accountsStore.transactions.contains { $0.kind == .scheduled && $0.toAccountId == account.id }
             return hasBudgets || hasTx
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
@@ -288,7 +288,9 @@ struct SalarySorterView: View {
     @MainActor
     private func entriesForDestination(accountId: Int, potName: String?) -> [DestEntry] {
         let potKey = potName ?? ""
-        let filteredTx = accountsStore.transactions.filter { $0.toAccountId == accountId && ($0.toPotName ?? "") == potKey }
+        let filteredTx = accountsStore.transactions.filter {
+            $0.kind == .scheduled && $0.toAccountId == accountId && ($0.toPotName ?? "") == potKey
+        }
         let tx: [DestEntry] = filteredTx.map { r in
             let title = r.name.isEmpty ? r.vendor : r.name
             return DestEntry(id: "t-\(r.id)", title: title, amount: r.amount, kind: .transaction, method: r.paymentType)

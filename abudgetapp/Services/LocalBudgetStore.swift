@@ -348,7 +348,8 @@ actor LocalBudgetStore {
             fromAccountId: submission.fromAccountId,
             toAccountId: submission.toAccountId,
             toPotName: submission.toPotName,
-            paymentType: submission.paymentType
+            paymentType: submission.paymentType,
+            linkedCreditAccountId: submission.linkedCreditAccountId
         )
         state.nextTransactionId += 1
         state.transactions.append(record)
@@ -443,6 +444,7 @@ actor LocalBudgetStore {
             throw StoreError.notFound("Transaction #\(id) not found")
         }
 
+        let existing = state.transactions[index]
         let updated = TransactionRecord(
             id: id,
             name: submission.name,
@@ -452,7 +454,9 @@ actor LocalBudgetStore {
             fromAccountId: submission.fromAccountId,
             toAccountId: submission.toAccountId,
             toPotName: submission.toPotName,
-            paymentType: submission.paymentType
+            paymentType: submission.paymentType,
+            linkedCreditAccountId: submission.linkedCreditAccountId,
+            kind: existing.kind
         )
 
         state.transactions[index] = updated
@@ -518,7 +522,10 @@ actor LocalBudgetStore {
 
         var remainingPerPot: [PotKey: Double] = [:]
 
-        for transaction in state.transactions {
+        let scheduledTransactions = state.transactions
+
+        for transaction in scheduledTransactions {
+            if transaction.kind != .scheduled { continue }
             guard LocalBudgetStore.isDayString(transaction.date),
                   let scheduledDay = LocalBudgetStore.scheduledDay(from: transaction.date) else {
                 continue
@@ -530,6 +537,22 @@ actor LocalBudgetStore {
             guard let accountIndex = state.accounts.firstIndex(where: { $0.id == transaction.toAccountId }) else {
                 skipped.append(ProcessedTransactionSkip(paymentId: transaction.id, accountId: transaction.toAccountId, potName: transaction.toPotName, reason: "Account not found"))
                 continue
+            }
+
+            var creditAccountIndex: Int? = nil
+            if let linkedCreditId = transaction.linkedCreditAccountId {
+                guard let foundIndex = state.accounts.firstIndex(where: { $0.id == linkedCreditId }) else {
+                    skipped.append(
+                        ProcessedTransactionSkip(
+                            paymentId: transaction.id,
+                            accountId: transaction.toAccountId,
+                            potName: transaction.toPotName,
+                            reason: "Linked credit card not found"
+                        )
+                    )
+                    continue
+                }
+                creditAccountIndex = foundIndex
             }
 
             var account = state.accounts[accountIndex]
@@ -554,6 +577,29 @@ actor LocalBudgetStore {
                 account.pots = pots
             }
             state.accounts[accountIndex] = account
+
+            if let creditIndex = creditAccountIndex {
+                var creditAccount = state.accounts[creditIndex]
+                creditAccount.balance -= transaction.amount
+                state.accounts[creditIndex] = creditAccount
+
+                let chargeRecord = TransactionRecord(
+                    id: state.nextTransactionId,
+                    name: transaction.name,
+                    vendor: transaction.vendor,
+                    amount: transaction.amount,
+                    date: String(scheduledDay),
+                    fromAccountId: nil,
+                    toAccountId: creditAccount.id,
+                    toPotName: nil,
+                    paymentType: "credit_card_charge",
+                    linkedCreditAccountId: nil,
+                    kind: .creditCardCharge
+                )
+                state.nextTransactionId += 1
+                state.transactions.append(chargeRecord)
+                didMutate = true
+            }
 
             let logId = state.nextProcessedTransactionLogId
             state.nextProcessedTransactionLogId += 1
@@ -795,6 +841,10 @@ actor LocalBudgetStore {
         var newLogs: [BalanceReductionLog] = []
         for index in state.accounts.indices {
             var account = state.accounts[index]
+            if account.type.lowercased() == "credit" {
+                state.accounts[index] = account
+                continue
+            }
             if account.excludeFromReset == true {
                 state.accounts[index] = account
                 continue

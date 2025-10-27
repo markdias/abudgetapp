@@ -447,7 +447,12 @@ struct ActivitiesPanelSection: View {
                 ?? (r.fromAccountId.flatMap { id in accounts.first(where: { $0.id == id })?.name } ?? "Unknown")
             let typeSuffix: String? = {
                 guard let pt = r.paymentType else { return nil }
-                return pt == "direct_debit" ? "Direct Debit" : "Card"
+                switch pt {
+                case "direct_debit": return "Direct Debit"
+                case "credit_card_charge": return "Credit Card Charge"
+                case "card": return "Card"
+                default: return pt.capitalized
+                }
             }()
             list.append(Item(
                 kind: .transaction,
@@ -752,9 +757,15 @@ private struct ActivityListItemRow: View {
         case .income:
             return .green.opacity(0.85)
         case .transaction:
-            // Card vs Direct Debit coloring: purple for card, blue for DD
-            if let t = item.metadata["paymentType"], t == "card" { return .purple.opacity(0.85) }
-            if let t = item.metadata["paymentType"], t == "direct_debit" { return .blue.opacity(0.85) }
+            // Color by payment type to aid scanning
+            if let t = item.metadata["paymentType"] {
+                switch t {
+                case "card": return .purple.opacity(0.85)
+                case "credit_card_charge": return .indigo.opacity(0.85)
+                case "direct_debit": return .blue.opacity(0.85)
+                default: break
+                }
+            }
             return .blue.opacity(0.85)
         case .target:
             return .orange.opacity(0.85)
@@ -1011,6 +1022,7 @@ private struct EditTransactionSheet: View {
     @State private var amount: String = ""
     @State private var paymentType: String = "direct_debit" // "card" or "direct_debit"
     @State private var dayOfMonth: String = ""
+    @State private var linkedCreditAccountId: Int? = nil
     @State private var didPreload = false
     @State private var pendingSubmission: TransactionSubmission? = nil
     @State private var changeSummary: [ChangeSummaryField] = []
@@ -1020,6 +1032,9 @@ private struct EditTransactionSheet: View {
 
     private var record: TransactionRecord? { accountsStore.transaction(for: transactionId) }
     private var toAccount: Account? { toAccountId.flatMap { accountsStore.account(for: $0) } }
+    private var creditAccounts: [Account] {
+        accountsStore.accounts.filter { $0.type == "credit" }
+    }
 
     private var canSave: Bool {
         guard let _ = toAccountId, let money = Double(amount), money > 0 else { return false }
@@ -1035,21 +1050,32 @@ private struct EditTransactionSheet: View {
                         Text("Select Account").tag(nil as Int?)
                         ForEach(accountsStore.accounts) { account in
                             Text(account.name).tag(account.id as Int?)
-                        }
-                    }
-                    if let pots = toAccount?.pots, !pots.isEmpty {
-                        Picker("Pot", selection: $selectedPot) {
-                            Text("None").tag(nil as String?)
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name as String?)
-                            }
-                        }
+                }
+            }
+            if let pots = toAccount?.pots, !pots.isEmpty {
+                Picker("Pot", selection: $selectedPot) {
+                    Text("None").tag(nil as String?)
+                    ForEach(pots, id: \.name) { pot in
+                        Text(pot.name).tag(pot.name as String?)
                     }
                 }
+            }
+        }
+        if !creditAccounts.isEmpty {
+            Section("Credit Card Link") {
+                Picker("Linked Card", selection: $linkedCreditAccountId) {
+                    Text("None").tag(nil as Int?)
+                    ForEach(creditAccounts) { account in
+                        Text(account.name).tag(account.id as Int?)
+                    }
+                }
+            }
+        }
                 Section("Details") {
                     Picker("Payment Type", selection: $paymentType) {
                         Text("Card").tag("card")
                         Text("Direct Debit").tag("direct_debit")
+                        Text("Credit Card Charge").tag("credit_card_charge").disabled(true)
                     }
                     .pickerStyle(.navigationLink)
                     TextField("Name", text: $name)
@@ -1113,7 +1139,9 @@ private struct EditTransactionSheet: View {
         amount = String(format: "%.2f", record.amount)
         paymentType = record.paymentType ?? "direct_debit"
         dayOfMonth = record.date
+        linkedCreditAccountId = record.linkedCreditAccountId
         didPreload = true
+        sanitizeLinkedCreditCardSelection()
     }
 
     private func handleAccountChange(_ newValue: Int?) {
@@ -1137,6 +1165,13 @@ private struct EditTransactionSheet: View {
             selectedPot = initialPotName
         } else {
             selectedPot = nil
+        }
+    }
+
+    private func sanitizeLinkedCreditCardSelection() {
+        guard let linkedId = linkedCreditAccountId else { return }
+        if !creditAccounts.contains(where: { $0.id == linkedId }) {
+            linkedCreditAccountId = nil
         }
     }
 
@@ -1190,7 +1225,8 @@ private struct EditTransactionSheet: View {
             fromAccountId: record.fromAccountId,
             toAccountId: toAccountId,
             toPotName: selectedPot,
-            paymentType: paymentType
+            paymentType: paymentType,
+            linkedCreditAccountId: linkedCreditAccountId
         )
     }
 
@@ -1203,7 +1239,8 @@ private struct EditTransactionSheet: View {
             toAccountId: record.toAccountId,
             potName: record.toPotName,
             paymentType: record.paymentType,
-            fromAccountId: record.fromAccountId
+            fromAccountId: record.fromAccountId,
+            linkedCreditAccountId: record.linkedCreditAccountId
         )
     }
 
@@ -1217,7 +1254,8 @@ private struct EditTransactionSheet: View {
             toAccountId: submission.toAccountId,
             potName: submission.toPotName,
             paymentType: submission.paymentType,
-            fromAccountId: submission.fromAccountId
+            fromAccountId: submission.fromAccountId,
+            linkedCreditAccountId: submission.linkedCreditAccountId
         )
     }
 
@@ -1229,7 +1267,8 @@ private struct EditTransactionSheet: View {
         toAccountId: Int,
         potName: String?,
         paymentType: String?,
-        fromAccountId: Int?
+        fromAccountId: Int?,
+        linkedCreditAccountId: Int?
     ) -> [DetailSnapshot] {
         [
             DetailSnapshot(label: "Name", value: name.isEmpty ? "—" : name),
@@ -1241,6 +1280,10 @@ private struct EditTransactionSheet: View {
             DetailSnapshot(label: "Pot", value: potDescription(potName)),
             DetailSnapshot(label: "From Account", value: {
                 guard let id = fromAccountId else { return "None" }
+                return accountName(for: id)
+            }()),
+            DetailSnapshot(label: "Linked Credit Card", value: {
+                guard let id = linkedCreditAccountId else { return "None" }
                 return accountName(for: id)
             }())
         ]
@@ -1254,6 +1297,7 @@ private struct EditTransactionSheet: View {
         switch value {
         case "card": return "Card"
         case "direct_debit": return "Direct Debit"
+        case "credit_card_charge": return "Credit Card Charge"
         case .some(let value) where !value.isEmpty: return value.capitalized
         default: return "—"
         }
@@ -1542,10 +1586,15 @@ private struct AddTransactionSheet: View {
     @State private var company: String = ""
     @State private var amount: String = ""
     @State private var dayOfMonth: String = ""
+    @State private var linkedCreditAccountId: Int? = nil
 
     private var toAccount: Account? {
         guard let id = toAccountId else { return nil }
         return accountsStore.account(for: id)
+    }
+
+    private var creditAccounts: [Account] {
+        accountsStore.accounts.filter { $0.type == "credit" }
     }
 
     private var canSave: Bool {
@@ -1571,14 +1620,24 @@ private struct AddTransactionSheet: View {
                             ForEach(pots, id: \.name) { pot in
                                 Text(pot.name).tag(pot.name as String?)
                             }
+                }
+                }
+            }
+            if !creditAccounts.isEmpty {
+                Section("Credit Card Link") {
+                    Picker("Linked Card", selection: $linkedCreditAccountId) {
+                        Text("None").tag(nil as Int?)
+                        ForEach(creditAccounts) { account in
+                            Text(account.name).tag(account.id as Int?)
                         }
                     }
                 }
+            }
 
-                Section("Transaction") {
-                    Picker("Payment Type", selection: $paymentType) {
-                        Text("Card").tag("card")
-                        Text("Direct Debit").tag("direct_debit")
+            Section("Transaction") {
+                Picker("Payment Type", selection: $paymentType) {
+                    Text("Card").tag("card")
+                    Text("Direct Debit").tag("direct_debit")
                     }
                     .pickerStyle(.navigationLink)
                     TextField("Name", text: $type)
@@ -1595,15 +1654,34 @@ private struct AddTransactionSheet: View {
             .onAppear {
                 toAccountId = presetAccountId ?? accountsStore.accounts.first?.id
                 potName = presetPotName
+                sanitizeLinkedCardSelection()
             }
+            .onChange(of: accountsStore.accounts) { _, _ in sanitizeLinkedCardSelection() }
         }
     }
 
     private func save() async {
         guard let toAccountId, let money = Double(amount) else { return }
-        let submission = TransactionSubmission(name: type, vendor: company, amount: abs(money), date: dayOfMonth, fromAccountId: nil, toAccountId: toAccountId, toPotName: potName, paymentType: paymentType)
+        let submission = TransactionSubmission(
+            name: type,
+            vendor: company,
+            amount: abs(money),
+            date: dayOfMonth,
+            fromAccountId: nil,
+            toAccountId: toAccountId,
+            toPotName: potName,
+            paymentType: paymentType,
+            linkedCreditAccountId: linkedCreditAccountId
+        )
         await accountsStore.addTransaction(submission)
         isPresented = false
+    }
+
+    private func sanitizeLinkedCardSelection() {
+        guard let linkedId = linkedCreditAccountId else { return }
+        if !creditAccounts.contains(where: { $0.id == linkedId }) {
+            linkedCreditAccountId = nil
+        }
     }
 }
 
@@ -1779,7 +1857,7 @@ private struct AccountCardView: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("£\(String(format: "%.2f", account.balance))")
+                    Text(account.formattedBalance)
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.white)
                     Text("Balance")
@@ -1795,10 +1873,17 @@ private struct AccountCardView: View {
 
                 Spacer()
 
-                if let limit = account.credit_limit, account.type == "credit" {
-                    Text("Limit £\(String(format: "%.0f", limit))")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.85))
+                if account.isCredit, let limit = account.credit_limit {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Limit £\(String(format: "%.0f", limit))")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.85))
+                        if let available = account.availableCredit {
+                            Text("Available £\(String(format: "%.2f", available))")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    }
                 }
             }
         }
@@ -2444,6 +2529,7 @@ private struct TransactionPreviewSheet: View {
         switch record.paymentType {
         case "card": return "Card"
         case "direct_debit": return "Direct Debit"
+        case "credit_card_charge": return "Credit Card Charge"
         case .some(let value) where !value.isEmpty: return value.capitalized
         default: return "—"
         }
@@ -2454,6 +2540,14 @@ private struct TransactionPreviewSheet: View {
             return pot
         }
         return "None"
+    }
+
+    private var linkedCreditAccountName: String {
+        guard let id = record.linkedCreditAccountId,
+              let account = accounts.first(where: { $0.id == id }) else {
+            return "None"
+        }
+        return account.name
     }
 
     private var dayDescription: String {
@@ -2480,6 +2574,7 @@ private struct TransactionPreviewSheet: View {
                         LabeledContent("From Account", value: fromAccountName)
                     }
                     LabeledContent("Pot", value: potDescription)
+                    LabeledContent("Linked Credit Card", value: linkedCreditAccountName)
                 }
 
                 Section("Identifiers") {
@@ -2867,6 +2962,8 @@ private struct TransactionActivityEditorView: View {
     @State private var vendor: String = ""
     @State private var amount: String = ""
     @State private var dayOfMonth: String = ""
+    @State private var paymentType: String = "card"
+    @State private var linkedCreditAccountId: Int? = nil
     @State private var didLoad: Bool = false
     @State private var didPreload = false
 
@@ -2878,6 +2975,10 @@ private struct TransactionActivityEditorView: View {
     private var toAccount: Account? {
         guard let toAccountId else { return nil }
         return accountsStore.account(for: toAccountId)
+    }
+
+    private var creditAccounts: [Account] {
+        accountsStore.accounts.filter { $0.type == "credit" }
     }
 
     var body: some View {
@@ -2900,16 +3001,35 @@ private struct TransactionActivityEditorView: View {
                     }
                 }
 
+                if !creditAccounts.isEmpty {
+                    Section("Credit Card Link") {
+                        Picker("Linked Card", selection: $linkedCreditAccountId) {
+                            Text("None").tag(nil as Int?)
+                            ForEach(creditAccounts) { account in
+                                Text(account.name).tag(account.id as Int?)
+                            }
+                        }
+                    }
+                }
+
                 Section("Details") {
                     Picker("Payment Type", selection: $paymentType) {
                         Text("Card").tag("card")
                         Text("Direct Debit").tag("direct_debit")
+                        Text("Credit Card Charge").tag("credit_card_charge").disabled(true)
                     }
                     .pickerStyle(.navigationLink)
                     // Show current selection as a subtle hint
-                    Text(paymentType == "card" ? "Selected: Card" : "Selected: Direct Debit")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Text({
+                        switch paymentType {
+                        case "card": return "Selected: Card"
+                        case "direct_debit": return "Selected: Direct Debit"
+                        case "credit_card_charge": return "Selected: Credit Card Charge"
+                        default: return "Selected: \(paymentType.capitalized)"
+                        }
+                    }())
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                     TextField("Name", text: $name)
                     TextField("Vendor", text: $vendor)
                     TextField("Amount", text: $amount).keyboardType(.decimalPad)
@@ -2924,8 +3044,14 @@ private struct TransactionActivityEditorView: View {
                     Button(role: .destructive) { Task { await deleteItem() } } label: { Text("Delete") }
                 }
             }
-            .onAppear { preloadIfNeeded() }
-            .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
+            .onAppear {
+                preloadIfNeeded()
+                sanitizeLinkedCardSelection()
+            }
+            .onChange(of: accountsStore.accounts) { _, _ in
+                preloadIfNeeded()
+                sanitizeLinkedCardSelection()
+            }
             .onChange(of: accountsStore.transactions) { _, _ in preloadIfNeeded() }
             .onChange(of: toAccountId) { _, _ in selectedPot = nil }
         }
@@ -2946,6 +3072,7 @@ private struct TransactionActivityEditorView: View {
             vendor = record.vendor
             amount = String(format: "%.2f", record.amount)
             paymentType = record.paymentType ?? "card"
+            linkedCreditAccountId = record.linkedCreditAccountId
             if let day = Int(record.date) {
                 dayOfMonth = String(day)
             } else {
@@ -2964,6 +3091,7 @@ private struct TransactionActivityEditorView: View {
             if let company = activity.company, company == "Direct Debit" { paymentType = "direct_debit" } else { paymentType = "card" }
             amount = String(format: "%.2f", abs(activity.amount))
             dayOfMonth = String(Calendar.current.component(.day, from: activity.date))
+            linkedCreditAccountId = activity.metadata["linkedCreditAccountId"].flatMap { Int($0) }
             didPreload = true
         }
     }
@@ -2982,7 +3110,8 @@ private struct TransactionActivityEditorView: View {
             fromAccountId: nil,
             toAccountId: toAccountId,
             toPotName: selectedPot,
-            paymentType: paymentType
+            paymentType: paymentType,
+            linkedCreditAccountId: linkedCreditAccountId
         )
         await accountsStore.updateTransaction(id: recordId, submission: submission)
         dismiss()
@@ -2992,6 +3121,13 @@ private struct TransactionActivityEditorView: View {
         guard let recordId = transactionId else { return }
         await accountsStore.deleteTransaction(id: recordId)
         dismiss()
+    }
+
+    private func sanitizeLinkedCardSelection() {
+        guard let linkedId = linkedCreditAccountId else { return }
+        if !creditAccounts.contains(where: { $0.id == linkedId }) {
+            linkedCreditAccountId = nil
+        }
     }
 }
 

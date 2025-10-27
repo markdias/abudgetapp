@@ -57,23 +57,25 @@ struct ProcessedTransactionsView: View {
         let accountsById = Dictionary(uniqueKeysWithValues: accountsStore.accounts.map { ($0.id, $0) })
         let lookup = logsLookup
 
-        return accountsStore.transactions.compactMap { transaction in
-            guard let day = ProcessedTransactionsView.dayValue(from: transaction.date),
-                  let account = accountsById[transaction.toAccountId] else {
-                return nil
+        return accountsStore.transactions
+            .filter { $0.kind == .scheduled }
+            .compactMap { transaction in
+                guard let day = ProcessedTransactionsView.dayValue(from: transaction.date),
+                      let account = accountsById[transaction.toAccountId] else {
+                    return nil
+                }
+                let log = lookup[transaction.id]
+                let processedAt = log.flatMap { ProcessedTransactionsView.isoFormatter.date(from: $0.processedAt) }
+                return ScheduledItem(
+                    transaction: transaction,
+                    accountName: account.name,
+                    potName: transaction.toPotName,
+                    scheduledDay: day,
+                    processedAt: processedAt,
+                    log: log
+                )
             }
-            let log = lookup[transaction.id]
-            let processedAt = log.flatMap { ProcessedTransactionsView.isoFormatter.date(from: $0.processedAt) }
-            return ScheduledItem(
-                transaction: transaction,
-                accountName: account.name,
-                potName: transaction.toPotName,
-                scheduledDay: day,
-                processedAt: processedAt,
-                log: log
-            )
-        }
-        .sorted {
+            .sorted {
             if $0.scheduledDay == $1.scheduledDay {
                 return $0.transaction.name < $1.transaction.name
             }
