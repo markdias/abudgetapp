@@ -3,23 +3,41 @@ import SwiftUI
 struct ManageTransferSchedulesView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var transferStore: TransferSchedulesStore
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    ManageButton(title: "Add Transfer Schedules", color: .blue, destination: { AddTransferSchedulesScreen() })
-                    ManageButton(title: "Execute Transfer Schedules", color: .purple, destination: { ExecuteTransferSchedulesScreen() })
-                    ManageButton(title: "Completed Transfers", color: .gray, destination: { CompletedTransfersScreen() }, disabled: transferStore.schedules.allSatisfy { !$0.isCompleted })
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        ManageButton(title: "Add Transfer Schedules", icon: "plus.circle.fill", gradient: [ModernTheme.primaryAccent, Color(red: 0.32, green: 0.72, blue: 1.0)]) {
+                            AddTransferSchedulesScreen()
+                        }
+                        ManageButton(title: "Execute Transfer Schedules", icon: "play.circle.fill", gradient: [ModernTheme.secondaryAccent, ModernTheme.primaryAccent]) {
+                            ExecuteTransferSchedulesScreen()
+                        }
+                        ManageButton(
+                            title: "Completed Transfers",
+                            icon: "checkmark.seal.fill",
+                            gradient: [Color(red: 0.76, green: 0.38, blue: 0.98), ModernTheme.tertiaryAccent],
+                            destination:  {
+                                CompletedTransfersScreen()
+                            }, disabled: transferStore.schedules.allSatisfy { !$0.isCompleted })
+                    }
+                    .frame(maxWidth: 500)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
                 }
-                .frame(maxWidth: 420)
-                .padding()
             }
             .navigationTitle("Transfer Schedules")
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } } }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
             .task { await transferStore.load() }
-            .background(Color(.systemGroupedBackground))
         }
     }
 
@@ -28,23 +46,67 @@ struct ManageTransferSchedulesView: View {
 // MARK: - Hub Button
 private struct ManageButton<Destination: View>: View {
     let title: String
-    let color: Color
+    let icon: String
+    let gradient: [Color]
     @ViewBuilder let destination: () -> Destination
+    @Environment(\.colorScheme) private var colorScheme
     var disabled: Bool = false
 
     var body: some View {
         NavigationLink {
             destination()
         } label: {
-            Text(title)
-                .font(.headline)
-                .fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .foregroundStyle(.white)
-                .background(color.opacity(disabled ? 0.4 : 1.0))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: color.opacity(0.18), radius: 8, x: 0, y: 4)
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    gradient.first?.opacity(disabled ? 0.4 : 1.0) ?? ModernTheme.primaryAccent,
+                                    gradient.last?.opacity(disabled ? 0.25 : 0.7) ?? ModernTheme.secondaryAccent
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 50, height: 50)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                        )
+                    Image(systemName: icon)
+                        .foregroundStyle(.white)
+                        .font(.title3)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Text("Open workflow")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: ModernTheme.cardCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: gradient.map { $0.opacity(disabled ? 0.35 : 0.9) } + [Color.white.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ModernTheme.cardCornerRadius, style: .continuous)
+                            .stroke(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.14), lineWidth: 0.8)
+                    )
+            )
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 22, x: 0, y: 16)
         }
         .disabled(disabled)
         .buttonStyle(.plain)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct MyBudgetApp: App {
@@ -22,6 +23,7 @@ struct MyBudgetApp: App {
         _incomeSchedulesStore = StateObject(wrappedValue: incomeStore)
         let transferStore = TransferSchedulesStore(accountsStore: accounts)
         _transferSchedulesStore = StateObject(wrappedValue: transferStore)
+        configureAppearance()
     }
 
     var body: some Scene {
@@ -56,6 +58,46 @@ struct MyBudgetApp: App {
 
 // MARK: - Appearance mapping used by App
 private extension MyBudgetApp {
+    func configureAppearance() {
+        let navAppearance = UINavigationBarAppearance()
+        navAppearance.configureWithTransparentBackground()
+        navAppearance.backgroundEffect = UIBlurEffect(style: .systemThinMaterial)
+        navAppearance.backgroundColor = UIColor.clear
+        navAppearance.titleTextAttributes = [
+            .foregroundColor: UIColor.label,
+            .font: UIFont.systemFont(ofSize: 18, weight: .semibold)
+        ]
+        navAppearance.largeTitleTextAttributes = [
+            .foregroundColor: UIColor.label,
+            .font: UIFont.systemFont(ofSize: 30, weight: .bold)
+        ]
+        UINavigationBar.appearance().standardAppearance = navAppearance
+        UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+        UINavigationBar.appearance().compactAppearance = navAppearance
+        UINavigationBar.appearance().tintColor = UIColor(ModernTheme.primaryAccent)
+
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithTransparentBackground()
+        tabAppearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+        tabAppearance.backgroundColor = UIColor.clear
+        tabAppearance.inlineLayoutAppearance.normal.iconColor = UIColor.secondaryLabel
+        tabAppearance.inlineLayoutAppearance.selected.iconColor = UIColor(ModernTheme.primaryAccent)
+        tabAppearance.inlineLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor.secondaryLabel]
+        tabAppearance.inlineLayoutAppearance.selected.titleTextAttributes = [
+            .foregroundColor: UIColor(ModernTheme.primaryAccent)
+        ]
+        tabAppearance.stackedLayoutAppearance = tabAppearance.inlineLayoutAppearance
+        tabAppearance.compactInlineLayoutAppearance = tabAppearance.inlineLayoutAppearance
+        UITabBar.appearance().standardAppearance = tabAppearance
+        if #available(iOS 15.0, *) {
+            UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+        }
+        UITabBar.appearance().tintColor = UIColor(ModernTheme.primaryAccent)
+
+        UITableView.appearance().backgroundColor = .clear
+        UITableViewCell.appearance().backgroundColor = .clear
+    }
+
     var mappedColorScheme: ColorScheme? {
         guard let pref = AppAppearance(rawValue: appAppearanceRaw) else { return nil }
         switch pref {

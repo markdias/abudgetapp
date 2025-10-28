@@ -10,37 +10,42 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("autoProcessTransactionsEnabled") private var autoProcessingEnabled = false
     @AppStorage("autoReduceBalancesEnabled") private var autoReduceEnabled = false
     @State private var selectedTab = 0
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeView(selectedTab: $selectedTab)
-                .tabItem {
-                    Label("Home", systemImage: "house.fill")
-                }
-                .tag(0)
+        ZStack {
+            ModernTheme.background(for: colorScheme)
+                .ignoresSafeArea()
+            TabView(selection: $selectedTab) {
+                HomeView(selectedTab: $selectedTab)
+                    .tabItem {
+                        Label("Home", systemImage: selectedTab == 0 ? "house.fill" : "house")
+                    }
+                    .tag(0)
 
-            ActivitiesView()
-                .tabItem {
-                    Label("Activity", systemImage: "list.bullet")
-                }
-                .tag(1)
+                ActivitiesView()
+                    .tabItem {
+                        Label("Activity", systemImage: selectedTab == 1 ? "chart.bar.doc.horizontal.fill" : "chart.bar.doc.horizontal")
+                    }
+                    .tag(1)
 
-            TransfersView()
-                .tabItem {
-                    Label("Transfers", systemImage: "arrow.left.arrow.right")
-                }
-                .tag(2)
+                TransfersView()
+                    .tabItem {
+                        Label("Transfers", systemImage: selectedTab == 2 ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath.circle")
+                    }
+                    .tag(2)
 
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gear")
-                }
-                .tag(3)
+                SettingsView()
+                    .tabItem {
+                        Label("Settings", systemImage: selectedTab == 3 ? "slider.horizontal.3" : "slider.horizontal.3")
+                    }
+                    .tag(3)
+            }
+            .tint(ModernTheme.primaryAccent)
         }
-        .tint(.purple)
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             guard autoProcessingEnabled || autoReduceEnabled else { return }

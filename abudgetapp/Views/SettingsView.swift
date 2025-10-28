@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("autoProcessTransactionsEnabled") private var autoProcessTransactionsEnabled = false
     @AppStorage("autoReduceBalancesEnabled") private var autoReduceBalancesEnabled = false
@@ -18,77 +19,22 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Appearance") {
-                    Picker("Appearance", selection: $appAppearanceRaw) {
-                        Text("Always Light").tag(AppAppearance.light.rawValue)
-                        Text("Always Dark").tag(AppAppearance.dark.rawValue)
-                        Text("System Settings").tag(AppAppearance.system.rawValue)
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        appearanceCard
+                        activitiesCard
+                        automationCard
+                        storageCard
+                        dataManagementCard
+                        diagnosticsCard
+                        aboutCard
                     }
-                }
-                Section("Activities") {
-                    Picker("Sort By", selection: activitiesSortBinding) {
-                        Text("Name").tag("name")
-                        Text("Day").tag("day")
-                        Text("Type").tag("type")
-                        Text("Value").tag("value")
-                    }
-                    Stepper(value: activitiesMaxItemsBinding, in: 1...50) {
-                        HStack {
-                            Text("Items on Home")
-                            Spacer()
-                            Text("\(activitiesMaxItems)")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Section("Automation") {
-                    Toggle("Process Transactions Automatically", isOn: $autoProcessTransactionsEnabled)
-                    Text("When enabled, scheduled transactions are processed whenever the app launches.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Toggle("Reduce Balances Automatically", isOn: $autoReduceBalancesEnabled)
-                    Text("When enabled, account balances reduce in line with the month whenever the app becomes active.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Section("Local Storage") {
-                    Label("Data is stored securely on this device and synced between views automatically.", systemImage: "internaldrive")
-                        .foregroundStyle(.secondary)
-                        .font(.footnote)
-                        .padding(.vertical, 4)
-                    if let status = storageStatus {
-                        Label(status, systemImage: storageStatusIsSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundColor(storageStatusIsSuccess ? .green : .orange)
-                            .font(.caption)
-                    }
-                }
-
-                Section("Data Management") {
-                    Menu {
-                        Button("Reload Data") { refreshAll() }
-                        Button("Import Data (JSON)") { showingImporter = true }
-                        Button("Export Data (JSON)") { Task { await exportAllData() } }
-                        Button("Delete All Data", role: .destructive) { showingDeleteAllConfirm = true }
-                            .disabled(accountsStore.accounts.isEmpty)
-                    } label: {
-                        Label("Manage Data", systemImage: "gearshape.2")
-                    }
-                }
-
-                Section("Diagnostics") {
-                    Button("Run Diagnostics") { showingDiagnostics = true }
-                    Button("Reorder Cards") { showingCardReorder = true }
-                }
-
-                Section("About") {
-                    VStack(alignment: .leading) {
-                        Text("The Budget App")
-                            .font(.headline)
-                        Text("Version 1.0")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
                 }
             }
             .navigationTitle("Settings")
@@ -105,6 +51,8 @@ struct SettingsView: View {
             } message: {
                 Text("This will permanently erase all accounts, pots, and schedules. This cannot be undone.")
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
         }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
             switch result {
@@ -148,6 +96,249 @@ struct SettingsView: View {
                 storageStatusIsSuccess = true
             }
         }
+    }
+
+    private var appearanceCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Appearance")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.primaryAccent.opacity(0.45), ModernTheme.secondaryAccent.opacity(0.55)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 60, height: 4)
+                    .opacity(0.7)
+            }
+            Picker("App Appearance", selection: $appAppearanceRaw) {
+                Text("Always Light").tag(AppAppearance.light.rawValue)
+                Text("Always Dark").tag(AppAppearance.dark.rawValue)
+                Text("System Settings").tag(AppAppearance.system.rawValue)
+            }
+            .pickerStyle(.segmented)
+        }
+        .glassCard()
+    }
+
+    private var activitiesCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Activities")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.45), ModernTheme.primaryAccent.opacity(0.55)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 64, height: 4)
+                    .opacity(0.7)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Sort By", selection: activitiesSortBinding) {
+                    Text("Name").tag("name")
+                    Text("Day").tag("day")
+                    Text("Type").tag("type")
+                    Text("Value").tag("value")
+                }
+                .pickerStyle(.menu)
+                Stepper(value: activitiesMaxItemsBinding, in: 1...50) {
+                    HStack {
+                        Text("Items on Home")
+                        Spacer()
+                        Text("\(activitiesMaxItems)")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .glassCard()
+    }
+
+    private var automationCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Automation")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.tertiaryAccent.opacity(0.45), ModernTheme.primaryAccent.opacity(0.5)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 68, height: 4)
+                    .opacity(0.7)
+            }
+            Toggle(isOn: $autoProcessTransactionsEnabled) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Process Transactions Automatically")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    Text("Runs whenever the app launches.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Toggle(isOn: $autoReduceBalancesEnabled) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Reduce Balances Automatically")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    Text("Adjusts balances when the app becomes active.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .glassCard()
+    }
+
+    private var storageCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Local Storage")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.45), ModernTheme.primaryAccent.opacity(0.5)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 72, height: 4)
+                    .opacity(0.7)
+            }
+            Label("Data is stored securely on this device and synced automatically.", systemImage: "internaldrive")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let status = storageStatus {
+                Label(status, systemImage: storageStatusIsSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(storageStatusIsSuccess ? Color.green : Color.orange)
+                    .font(.caption)
+            }
+        }
+        .glassCard()
+    }
+
+    private var dataManagementCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Data Management")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.primaryAccent.opacity(0.45), ModernTheme.tertiaryAccent.opacity(0.45)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 72, height: 4)
+                    .opacity(0.7)
+            }
+            Menu {
+                Button("Reload Data") { refreshAll() }
+                Button("Import Data (JSON)") { showingImporter = true }
+                Button("Export Data (JSON)") { Task { await exportAllData() } }
+                Button("Delete All Data", role: .destructive) { showingDeleteAllConfirm = true }
+                    .disabled(accountsStore.accounts.isEmpty)
+            } label: {
+                Label("Manage Data", systemImage: "gearshape.2")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
+                    )
+            }
+        }
+        .glassCard()
+    }
+
+    private var diagnosticsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Utilities")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.45), ModernTheme.primaryAccent.opacity(0.45)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 60, height: 4)
+                    .opacity(0.7)
+            }
+            Button {
+                showingDiagnostics = true
+            } label: {
+                Label("Run Diagnostics", systemImage: "stethoscope.circle.fill")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
+                    )
+            }
+            Button {
+                showingCardReorder = true
+            } label: {
+                Label("Reorder Cards", systemImage: "rectangle.3.group.bubble")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
+                    )
+            }
+        }
+        .glassCard()
+    }
+
+    private var aboutCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("The Budget App")
+                .font(.system(.title3, design: .rounded, weight: .semibold))
+            Text("Version 1.0")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Crafted to give you complete control of your money, now with a clean Monzo-inspired glow.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .glassCard()
     }
 
     // MARK: - Preferences

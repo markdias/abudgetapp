@@ -4,6 +4,7 @@ struct TransfersView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var incomeSchedulesStore: IncomeSchedulesStore
     @EnvironmentObject private var transferSchedulesStore: TransferSchedulesStore
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingIncomeSchedules = false
     @State private var showingTransferSchedules = false
     @State private var showingProcessedTransactions = false
@@ -14,31 +15,37 @@ struct TransfersView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
-                    VStack(spacing: 16) {
-                        LargeActionButton(title: "Transfer Schedules", color: .blue) { showingTransferSchedules = true }
-                        LargeActionButton(title: "Income Schedules", color: .green) {
-                            showingIncomeSchedules = true
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        VStack(spacing: 18) {
+                            LargeActionButton(title: "Transfer Schedules", icon: "arrow.left.arrow.right.circle.fill", gradient: [ModernTheme.primaryAccent, Color(red: 0.32, green: 0.72, blue: 1.0)]) { showingTransferSchedules = true }
+                            LargeActionButton(title: "Income Schedules", icon: "calendar.badge.clock", gradient: [ModernTheme.secondaryAccent, Color(red: 0.39, green: 0.95, blue: 0.82)]) {
+                                showingIncomeSchedules = true
+                            }
+                            LargeActionButton(title: "Processed Transactions", icon: "checklist.checked", gradient: [Color(red: 0.27, green: 0.85, blue: 0.96), ModernTheme.primaryAccent]) {
+                                showingProcessedTransactions = true
+                            }
+                            LargeActionButton(title: "Salary Sorter", icon: "chart.pie.fill", gradient: [Color(red: 0.76, green: 0.38, blue: 0.98), ModernTheme.tertiaryAccent]) { showingSalarySorter = true }
+                            LargeActionButton(title: "Balance Reduction", icon: "chart.line.downtrend.xyaxis", gradient: [Color(red: 0.19, green: 0.65, blue: 0.98), ModernTheme.secondaryAccent]) {
+                                showingBalanceHistory = true
+                            }
+                            LargeActionButton(title: "Reset Balance", icon: "arrow.counterclockwise.circle.fill", gradient: [Color(red: 1.0, green: 0.44, blue: 0.56), Color(red: 1.0, green: 0.68, blue: 0.41)]) {
+                                showingResetConfirm = true
+                            }
                         }
-                        LargeActionButton(title: "Processed Transactions", color: .teal) {
-                            showingProcessedTransactions = true
-                        }
-                        LargeActionButton(title: "Salary Sorter", color: .purple) { showingSalarySorter = true }
-                        LargeActionButton(title: "Balance Reduction", color: .indigo) {
-                            showingBalanceHistory = true
-                        }
-                        LargeActionButton(title: "Reset Balance", color: .red) {
-                            showingResetConfirm = true
-                        }
+                        .frame(maxWidth: 480)
                     }
-                    .frame(maxWidth: 420)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
                 }
-                .padding(.vertical, 24)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Transfers")
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
             .sheet(isPresented: $showingIncomeSchedules) {
                 ManageIncomeSchedulesView(isPresented: $showingIncomeSchedules)
             }
@@ -76,22 +83,70 @@ struct TransfersView: View {
 }
 
 private struct LargeActionButton: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
-    let color: Color
+    let icon: String
+    let gradient: [Color]
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.headline)
-                .fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    gradient.first ?? ModernTheme.primaryAccent,
+                                    gradient.last ?? ModernTheme.secondaryAccent
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 48, height: 48)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                        )
+                    Image(systemName: icon)
+                        .foregroundColor(.white)
+                        .font(.title3)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    Text("Open workflow")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: ModernTheme.cardCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: gradient.map { $0.opacity(0.85) } + [Color.white.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ModernTheme.cardCornerRadius, style: .continuous)
+                            .stroke(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.16), lineWidth: 0.8)
+                    )
+            )
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 22, x: 0, y: 16)
         }
-        .foregroundStyle(.white)
-        .background(color)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: color.opacity(0.18), radius: 8, x: 0, y: 4)
+        .buttonStyle(.plain)
         .accessibilityAddTraits(.isButton)
     }
 }

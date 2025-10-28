@@ -4,6 +4,7 @@ struct SalarySorterView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
     @EnvironmentObject private var transferStore: TransferSchedulesStore
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool
 
     // Show incomes even if executed (include all active incomes)
@@ -37,74 +38,144 @@ struct SalarySorterView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    incomeHeader
-                    Divider()
-                    Text("Scheduled Transfers").font(.headline)
-                    if destinationAccounts.isEmpty {
-                        Text("No pending transfer schedules").foregroundStyle(.secondary)
-                    } else {
-                        VStack(spacing: 12) {
-                            ForEach(destinationAccounts, id: \.id) { account in
-                                destinationGroup(for: account)
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        incomeHeader
+
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("Scheduled Transfers")
+                                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                                Spacer()
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [ModernTheme.secondaryAccent.opacity(0.45), ModernTheme.primaryAccent.opacity(0.55)],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: 80, height: 4)
+                                    .opacity(0.7)
+                            }
+
+                            if destinationAccounts.isEmpty {
+                                ContentUnavailableView(
+                                    "No pending transfer schedules",
+                                    systemImage: "tray",
+                                    description: Text("Create transfer schedules to see their allocations here.")
+                                )
+                                .glassCard()
+                            } else {
+                                VStack(spacing: 18) {
+                                    ForEach(destinationAccounts, id: \.id) { account in
+                                        destinationGroup(for: account)
+                                    }
+                                }
                             }
                         }
+
+                        remainingFooter
                     }
-                    Spacer(minLength: 8)
-                    remainingFooter
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
+                    .frame(maxWidth: 620)
                 }
-                .padding()
-                .frame(maxWidth: 520)
-                .frame(maxWidth: .infinity)
             }
             .navigationTitle("Salary Sorter")
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } } }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
             .task {
                 await incomeStore.load()
                 await transferStore.load()
                 await accountsStore.loadAccounts()
             }
-            .background(Color(.systemGroupedBackground))
         }
     }
 
     private var incomeHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Income")
-                    .font(.subheadline).fontWeight(.semibold)
-                Spacer()
-                Text(formatCurrency(incomeTotal))
-                    .font(.headline)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.green.opacity(0.2))
-                    .foregroundColor(.green)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            if pendingIncomes.isEmpty {
-                Text("No incomes").font(.caption).foregroundStyle(.secondary)
-            } else {
                 VStack(alignment: .leading, spacing: 6) {
+                    Text("Income Overview")
+                        .font(.system(.title3, design: .rounded, weight: .semibold))
+                    Text(pendingIncomes.isEmpty ? "No incomes scheduled" : "Active income schedules ready to distribute")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("Total Incoming")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(formatCurrency(incomeTotal))
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [ModernTheme.primaryAccent, ModernTheme.secondaryAccent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                }
+            }
+
+            if !pendingIncomes.isEmpty {
+                VStack(spacing: 10) {
                     ForEach(pendingIncomes, id: \.id) { inc in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(inc.description).font(.caption)
-                                Text(inc.company).font(.caption2).foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [ModernTheme.primaryAccent.opacity(0.75), ModernTheme.secondaryAccent.opacity(0.45)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    Image(systemName: "banknote")
+                                        .foregroundStyle(.white)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                                )
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(inc.description)
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                Text(inc.company)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
+
                             Spacer()
-                            Text(formatCurrency(inc.amount)).font(.caption).foregroundStyle(.secondary)
+
+                            Text(formatCurrency(inc.amount))
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .foregroundStyle(ModernTheme.secondaryAccent)
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                                )
+                        )
                     }
                 }
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .glassCard()
     }
     
     private func destinationGroup(for account: Account) -> some View {
@@ -122,20 +193,28 @@ struct SalarySorterView: View {
         let mainTransfers = included.filter { ($0.toPotName ?? "").isEmpty }
         let groupTotal = included.reduce(0.0) { $0 + $1.amount }
 
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text(account.name)
-                    .font(.subheadline).fontWeight(.semibold)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
                 Spacer()
                 Text(formatCurrency(groupTotal))
-                    .font(.caption)
-                    .padding(.horizontal, 8)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.15))
-                    .foregroundColor(.blue)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [ModernTheme.secondaryAccent.opacity(0.25), ModernTheme.primaryAccent.opacity(0.45)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                    )
+                    .foregroundStyle(ModernTheme.secondaryAccent)
             }
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 // Pot groups (each collapsible)
                 let potNames = Array(potMap.keys).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
                 ForEach(potNames, id: \.self) { potName in
@@ -143,10 +222,16 @@ struct SalarySorterView: View {
                     let key = "acct-\(account.id)-pot-\(potName)"
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text(potName).font(.caption).fontWeight(.semibold)
+                            Text(potName)
+                                .font(.caption.bold())
                             Spacer()
-                            Text(formatCurrency(items.reduce(0) { $0 + $1.amount })).font(.caption).foregroundStyle(.secondary)
-                            Button { togglePot(key) } label: { Image(systemName: expandedPotKeys.contains(key) ? "chevron.up" : "chevron.down").foregroundStyle(.secondary) }
+                            Text(formatCurrency(items.reduce(0) { $0 + $1.amount }))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button { togglePot(key) } label: {
+                                Image(systemName: expandedPotKeys.contains(key) ? "chevron.up" : "chevron.down")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         
                         // Show transactions and budgets when expanded
@@ -154,27 +239,36 @@ struct SalarySorterView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 ForEach(entriesForDestination(accountId: account.id, potName: potName), id: \.id) { entry in
                                     HStack {
-                                        Text(entry.title).font(.caption2)
+                                        Text(entry.title)
+                                            .font(.caption2)
                                         if entry.kind == .transaction, let method = entry.method, !method.isEmpty {
                                             let isCard = method == "card"
                                             Text(isCard ? "CARD" : "DD")
                                                 .font(.caption2)
                                                 .padding(.horizontal, 4)
                                                 .padding(.vertical, 2)
-                                                .background((isCard ? Color.purple : Color.blue).opacity(0.15))
-                                                .foregroundColor(isCard ? .purple : .blue)
+                                                .background((isCard ? ModernTheme.primaryAccent : ModernTheme.secondaryAccent).opacity(0.18))
+                                                .foregroundColor(isCard ? ModernTheme.primaryAccent : ModernTheme.secondaryAccent)
                                                 .clipShape(Capsule())
                                         }
                                         Spacer()
-                                        Text(formatCurrency(entry.amount)).font(.caption2).foregroundStyle(.secondary)
+                                        Text(formatCurrency(entry.amount))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
                             }
                         }
                     }
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
+                    )
                 }
 
                 // Main account transfers (collapsible)
@@ -182,10 +276,16 @@ struct SalarySorterView: View {
                     let key = account.id
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Main Account").font(.caption).fontWeight(.semibold)
+                            Text("Main Account")
+                                .font(.caption.bold())
                             Spacer()
-                            Text(formatCurrency(mainTransfers.reduce(0) { $0 + $1.amount })).font(.caption).foregroundStyle(.secondary)
-                            Button { toggleMain(key) } label: { Image(systemName: expandedMainAccounts.contains(key) ? "chevron.up" : "chevron.down").foregroundStyle(.secondary) }
+                            Text(formatCurrency(mainTransfers.reduce(0) { $0 + $1.amount }))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button { toggleMain(key) } label: {
+                                Image(systemName: expandedMainAccounts.contains(key) ? "chevron.up" : "chevron.down")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         
                         // Show transactions and budgets when expanded
@@ -193,77 +293,110 @@ struct SalarySorterView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 ForEach(entriesForDestination(accountId: account.id, potName: nil), id: \.id) { entry in
                                     HStack {
-                                        Text(entry.title).font(.caption2)
+                                        Text(entry.title)
+                                            .font(.caption2)
                                         if entry.kind == .transaction, let method = entry.method, !method.isEmpty {
                                             let isCard = method == "card"
                                             Text(isCard ? "CARD" : "DD")
                                                 .font(.caption2)
                                                 .padding(.horizontal, 4)
                                                 .padding(.vertical, 2)
-                                                .background((isCard ? Color.purple : Color.blue).opacity(0.15))
-                                                .foregroundColor(isCard ? .purple : .blue)
+                                                .background((isCard ? ModernTheme.primaryAccent : ModernTheme.secondaryAccent).opacity(0.18))
+                                                .foregroundColor(isCard ? ModernTheme.primaryAccent : ModernTheme.secondaryAccent)
                                                 .clipShape(Capsule())
                                         }
                                         Spacer()
-                                        Text(formatCurrency(entry.amount)).font(.caption2).foregroundStyle(.secondary)
+                                        Text(formatCurrency(entry.amount))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
                             }
                         }
                     }
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
+                    )
                 }
 
                 // Internal transfers (shown but not counted; highlighted)
                 if !internalPotToPot.isEmpty {
                     HStack {
-                        Text("Internal Transfers").font(.caption).fontWeight(.semibold)
+                        Text("Internal Transfers")
+                            .font(.caption.bold())
                         Spacer()
                         Text(formatCurrency(internalPotToPot.reduce(0) { $0 + $1.amount }))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(10)
-                    .background(Color.yellow.opacity(0.2))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.yellow.opacity(colorScheme == .dark ? 0.18 : 0.28))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.18), lineWidth: 0.8)
+                            )
+                    )
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(internalPotToPot, id: \.id) { s in
                             HStack {
                                 let fromLabel = s.fromPotName ?? ""
                                 let toLabel = s.toPotName ?? ""
-                                Text("\(fromLabel) → \(toLabel)").font(.caption)
+                                Text("\(fromLabel) → \(toLabel)")
+                                    .font(.caption)
                                 Spacer()
-                                Text(formatCurrency(s.amount)).font(.caption).foregroundStyle(.secondary)
+                                Text(formatCurrency(s.amount))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .glassCard()
     }
 
     private var remainingFooter: some View {
-        HStack {
-            Text("Remaining")
-                .font(.subheadline).fontWeight(.semibold)
-            Spacer()
-            Text(formatCurrency(remaining))
-                .font(.headline)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.blue.opacity(0.15))
-                .foregroundColor(.blue)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Remaining To Allocate")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.primaryAccent.opacity(0.45), ModernTheme.secondaryAccent.opacity(0.5)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 72, height: 4)
+                    .opacity(0.7)
+            }
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(remaining >= 0 ? "Ready to distribute" : "Overscheduled")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Including active transfers and budgets")
+                        .font(.caption2)
+                        .foregroundStyle(Color.secondary.opacity(0.7))
+                }
+                Spacer()
+                Text(formatCurrency(remaining))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(remaining >= 0 ? ModernTheme.secondaryAccent : ModernTheme.tertiaryAccent)
+            }
         }
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .glassCard()
     }
 
     private func formatCurrency(_ amount: Double) -> String {
