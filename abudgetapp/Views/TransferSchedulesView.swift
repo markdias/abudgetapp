@@ -81,9 +81,6 @@ private struct ManageButton<Destination: View>: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(title)
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    Text("Open workflow")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -117,32 +114,84 @@ private struct ManageButton<Destination: View>: View {
 private struct AddTransferSchedulesScreen: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var transferStore: TransferSchedulesStore
+    @Environment(\.colorScheme) private var colorScheme
     enum Source: Hashable, Identifiable { case none, account(Int), pot(Int, String); var id: String { switch self { case .none: return "none"; case .account(let id): return "a-\(id)"; case .pot(let id, let p): return "p-\(id)-\(p)" } } }
     @State private var source: Source = .none
     @State private var expandedCards: Set<String> = []
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Select Source").font(.subheadline).fontWeight(.semibold)
-                    Picker("Select source", selection: $source) {
-                        Text("None").tag(Source.none)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(Source.account(account.id))
-                            if let pots = account.pots {
-                                ForEach(pots, id: \.name) { pot in
-                                    Text("\(account.name) • \(pot.name)").tag(Source.pot(account.id, pot.name))
-                                }
-                            }
+        ZStack {
+            ModernTheme.background(for: colorScheme)
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    sourceSelectionCard
+                    potTransfersCard
+                    accountTransfersCard
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 40)
+                .frame(maxWidth: 600)
+            }
+        }
+        .navigationTitle("Add Transfers")
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
+    }
+
+    private var sourceSelectionCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Select Source")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.4), ModernTheme.primaryAccent.opacity(0.6)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 70, height: 4)
+                    .opacity(0.6)
+            }
+
+            Picker("Select source", selection: $source) {
+                Text("None").tag(Source.none)
+                ForEach(accountsStore.accounts) { account in
+                    Text(account.name).tag(Source.account(account.id))
+                    if let pots = account.pots {
+                        ForEach(pots, id: \.name) { pot in
+                            Text("\(account.name) • \(pot.name)").tag(Source.pot(account.id, pot.name))
                         }
                     }
-                    .pickerStyle(.menu)
                 }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity)
+        }
+        .glassCard()
+    }
 
-                Text("Available Transfers").font(.headline)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Pot Transfers").font(.subheadline).foregroundStyle(.secondary)
+    private var potTransfersCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Pot Transfers")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+            }
+
+            if potDestinations.isEmpty {
+                ContentUnavailableView(
+                    "No pot destinations",
+                    systemImage: "tray",
+                    description: Text("Create pots in your accounts to transfer funds to them.")
+                )
+            } else {
+                VStack(spacing: 12) {
                     ForEach(potDestinations, id: \.id) { dest in
                         let entries = entriesForDestination(accountId: dest.accountId, potName: dest.potName)
                         let total = entries.reduce(0.0) { $0 + $1.amount }
@@ -168,39 +217,47 @@ private struct AddTransferSchedulesScreen: View {
                         .disabled(source == .none || total <= 0)
                     }
                 }
+            }
+        }
+        .glassCard()
+    }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Account Transfers").font(.subheadline).foregroundStyle(.secondary)
-                    ForEach(accountDestinations, id: \.id) { dest in
-                        let entries = entriesForDestination(accountId: dest.accountId, potName: nil)
-                        let total = entries.reduce(0.0) { $0 + $1.amount }
-                        let existing = scheduleForDestination(accountId: dest.accountId, potName: nil)
-                        destinationCard(id: dest.id,
-                                        name: dest.title,
-                                        subtitle: dest.subtitle,
-                                        amount: total,
-                                        entries: entries,
-                                        buttonTitle: "Schedule Transfer (\(formatCurrency(total)))",
-                                        existingSchedule: existing,
-                                        onDelete: {
-                                            if let s = existing { Task { await transferStore.delete(schedule: s) } }
-                                        }) {
-                            let src: (Int, String?)
-                            switch source {
-                            case .none: return
-                            case .account(let id): src = (id, nil)
-                            case .pot(let id, let pot): src = (id, pot)
-                            }
-                            Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: nil, amount: total, description: dest.title) }
+    private var accountTransfersCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Account Transfers")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+            }
+
+            VStack(spacing: 12) {
+                ForEach(accountDestinations, id: \.id) { dest in
+                    let entries = entriesForDestination(accountId: dest.accountId, potName: nil)
+                    let total = entries.reduce(0.0) { $0 + $1.amount }
+                    let existing = scheduleForDestination(accountId: dest.accountId, potName: nil)
+                    destinationCard(id: dest.id,
+                                    name: dest.title,
+                                    subtitle: dest.subtitle,
+                                    amount: total,
+                                    entries: entries,
+                                    buttonTitle: "Schedule Transfer (\(formatCurrency(total)))",
+                                    existingSchedule: existing,
+                                    onDelete: {
+                                        if let s = existing { Task { await transferStore.delete(schedule: s) } }
+                                    }) {
+                        let src: (Int, String?)
+                        switch source {
+                        case .none: return
+                        case .account(let id): src = (id, nil)
+                        case .pot(let id, let pot): src = (id, pot)
                         }
-                        .disabled(source == .none || total <= 0)
+                        Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: nil, amount: total, description: dest.title) }
                     }
+                    .disabled(source == .none || total <= 0)
                 }
             }
-            .padding()
         }
-        .navigationTitle("Add Transfers")
-        .background(Color(.systemGroupedBackground))
+        .glassCard()
     }
 
     // MARK: - Add helpers
@@ -253,78 +310,123 @@ private struct AddTransferSchedulesScreen: View {
     }
 
     private func destinationCard(id: String, name: String, subtitle: String, amount: Double, entries: [DestEntry], buttonTitle: String, existingSchedule: TransferSchedule?, onDelete: @escaping () -> Void, action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(name).font(.subheadline).fontWeight(.semibold)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.primaryAccent.opacity(0.75), ModernTheme.secondaryAccent.opacity(0.5)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .overlay(
+                        Image(systemName: "arrow.right.circle.fill")
+                            .foregroundStyle(.white)
+                            .font(.headline)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                    )
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(name)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
+
                 Spacer()
-                Text(formatCurrency(amount))
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Color.purple.opacity(0.15))
-                    .foregroundColor(.purple)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                Button(action: { toggleExpanded(id) }) {
-                    Image(systemName: isExpanded(id) ? "chevron.up" : "chevron.down").foregroundStyle(.secondary)
+
+                VStack(spacing: 4) {
+                    Text(formatCurrency(amount))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(ModernTheme.secondaryAccent)
+                    Button(action: { toggleExpanded(id) }) {
+                        Image(systemName: isExpanded(id) ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                            .foregroundStyle(ModernTheme.primaryAccent)
+                            .font(.caption)
+                    }
                 }
             }
+
             if isExpanded(id) && !entries.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(entries) { item in
                         HStack {
                             Text(item.title)
                                 .font(.caption)
                             if item.kind == .transaction, let method = item.method, !method.isEmpty {
                                 Text(method == "direct_debit" ? "DD" : "CARD")
-                                    .font(.caption2)
+                                    .font(.caption2.weight(.semibold))
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(method == "direct_debit" ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
-                                    .foregroundColor(method == "direct_debit" ? .purple : .secondary)
-                                    .clipShape(Capsule())
+                                    .background(
+                                        Capsule()
+                                            .fill(method == "direct_debit" ? ModernTheme.secondaryAccent.opacity(0.18) : Color.gray.opacity(0.18))
+                                    )
+                                    .foregroundStyle(method == "direct_debit" ? ModernTheme.secondaryAccent : .secondary)
                             }
                             Spacer()
                             Text(formatCurrency(item.amount))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                     }
                 }
+                .padding(.top, 4)
             }
+
             if let _ = existingSchedule {
-                HStack {
-                    scheduledBadge()
+                HStack(spacing: 12) {
+                    Text("Scheduled")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(ModernTheme.secondaryAccent.opacity(0.18))
+                        )
+                        .foregroundStyle(ModernTheme.secondaryAccent)
                     Spacer()
-                    Button("Delete", role: .destructive, action: onDelete).buttonStyle(.borderedProminent).tint(.red)
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Text("Delete")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ModernTheme.tertiaryAccent)
                 }
             } else {
-                Button(buttonTitle, action: action)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.purple)
+                Button {
+                    action()
+                } label: {
+                    Text(buttonTitle)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ModernTheme.primaryAccent)
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                )
+        )
     }
 
     private func formatCurrency(_ amount: Double) -> String { "£" + String(format: "%.2f", abs(amount)) }
-    private func scheduledBadge() -> some View {
-        Text("SCHEDULED")
-            .font(.caption2)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.gray.opacity(0.15))
-            .foregroundColor(.secondary)
-            .clipShape(Capsule())
-    }
     private func toggleExpanded(_ id: String) { if expandedCards.contains(id) { expandedCards.remove(id) } else { expandedCards.insert(id) } }
     private func isExpanded(_ id: String) -> Bool { expandedCards.contains(id) }
     private func scheduleForDestination(accountId: Int, potName: String?) -> TransferSchedule? {
@@ -337,34 +439,98 @@ private struct AddTransferSchedulesScreen: View {
 private struct ExecuteTransferSchedulesScreen: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var transferStore: TransferSchedulesStore
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                Button {
-                    Task { await transferStore.executeAll() }
-                } label: {
-                    Text("Execute All Transfer Schedules")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
-                .disabled(transferStore.schedules.allSatisfy { $0.isCompleted })
+        ZStack {
+            ModernTheme.background(for: colorScheme)
+                .ignoresSafeArea()
 
-                Text("By Destination").font(.headline)
-                groupedList
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    executeAllCard
+                    transfersByDestinationCard
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 40)
+                .frame(maxWidth: 600)
             }
-            .padding()
         }
         .navigationTitle("Execute Transfers")
-        .background(Color(.systemGroupedBackground))
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
+    }
+
+    private var executeAllCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Execute All Transfers")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.4), ModernTheme.primaryAccent.opacity(0.6)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 70, height: 4)
+                    .opacity(0.6)
+            }
+
+            Button {
+                Task { await transferStore.executeAll() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.circle.fill")
+                    Text("Execute All")
+                }
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [ModernTheme.primaryAccent, ModernTheme.secondaryAccent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+                .foregroundColor(.white)
+            }
+            .buttonStyle(.plain)
+            .disabled(transferStore.schedules.allSatisfy { $0.isCompleted })
+            .opacity(transferStore.schedules.allSatisfy { $0.isCompleted } ? 0.6 : 1)
+        }
+        .glassCard()
+    }
+
+    private var transfersByDestinationCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Transfers by Destination")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+            }
+
+            groupedList
+        }
+        .glassCard()
     }
 
     private var groupedList: some View {
         Group {
             if transferStore.schedules.isEmpty {
-                Text("No transfer schedules").foregroundStyle(.secondary)
+                ContentUnavailableView(
+                    "No transfer schedules",
+                    systemImage: "calendar",
+                    description: Text("Create transfer schedules to see them here.")
+                )
             } else {
                 let groups = Dictionary(grouping: transferStore.schedules.filter { $0.isActive }) { item in
                     return GroupKey(toAccountId: item.toAccountId, toPotName: item.toPotName ?? "")
@@ -373,53 +539,104 @@ private struct ExecuteTransferSchedulesScreen: View {
                     ForEach(groups.keys.sorted(by: { $0.displayName(accountsStore) < $1.displayName(accountsStore) }), id: \.self) { key in
                         let items = groups[key] ?? []
                         let total = items.reduce(0.0) { $0 + $1.amount }
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(key.displayName(accountsStore)).font(.subheadline).fontWeight(.semibold)
-                                    let hasCompleted = (items.first { $0.isCompleted } != nil)
-                                    Text("\(hasCompleted ? "Scheduled" : "Total pending"): £\(String(format: "%.2f", total))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 12)
-                                VStack(spacing: 8) {
-                                    let schedule = scheduleForDestination(accountId: key.toAccountId, potName: key.toPotName.isEmpty ? nil : key.toPotName)
-                                    let canExecute = (schedule != nil) && !(schedule!.isCompleted) && canExecuteSchedule(schedule!)
-                                    Button((schedule?.isCompleted ?? false) ? "Executed" : "Execute") {
-                                        Task { await transferStore.executeGroup(toAccountId: key.toAccountId, toPotName: key.toPotName.isEmpty ? nil : key.toPotName) }
-                                    }
-                                    .disabled(!(canExecute))
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.green)
-                                    if let schedule = schedule {
-                                        
-                                        Button("Delete", role: .destructive) { Task { await transferStore.delete(schedule: schedule) } }
-                                            .buttonStyle(.borderedProminent)
-                                            .tint(.red)
-                                    }
-                                }
-                            }
+                        let schedule = scheduleForDestination(accountId: key.toAccountId, potName: key.toPotName.isEmpty ? nil : key.toPotName)
+                        let isCompleted = schedule?.isCompleted ?? false
+                        let hasInsufficientFunds = schedule != nil && !isCompleted && !canExecuteSchedule(schedule!)
+
+                        HStack(alignment: .top, spacing: 16) {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            isCompleted ? Color.green.opacity(0.75) : hasInsufficientFunds ? ModernTheme.tertiaryAccent.opacity(0.75) : ModernTheme.primaryAccent.opacity(0.75),
+                                            isCompleted ? Color.green.opacity(0.35) : hasInsufficientFunds ? ModernTheme.tertiaryAccent.opacity(0.45) : ModernTheme.secondaryAccent.opacity(0.45)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 48, height: 48)
+                                .overlay(
+                                    Image(systemName: isCompleted ? "checkmark.seal.fill" : hasInsufficientFunds ? "exclamationmark.triangle.fill" : "arrow.triangle.2.circlepath")
+                                        .foregroundStyle(.white)
+                                        .font(.headline)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                                )
+
                             VStack(alignment: .leading, spacing: 6) {
+                                Text(key.displayName(accountsStore))
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                Text("£\(String(format: "%.2f", total))")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(ModernTheme.secondaryAccent)
+
+                                // Show sources
                                 ForEach(items, id: \.id) { item in
                                     HStack {
-                                        Text("From: \(sourceLabel(for: item))").font(.caption)
+                                        Text("From: \(sourceLabel(for: item))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                         Spacer()
-                                        Text(formatCurrency(item.amount)).font(.caption).foregroundStyle(.secondary)
                                         if item.isCompleted {
-                                            Text("Executed").font(.caption2).foregroundStyle(.green)
+                                            Text("Executed")
+                                                .font(.caption2.weight(.semibold))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 3)
+                                                .background(
+                                                    Capsule()
+                                                        .fill(Color.green.opacity(0.18))
+                                                )
+                                                .foregroundStyle(.green)
                                         } else if !canExecuteSchedule(item) {
-                                            Text("Insufficient funds").font(.caption2).foregroundStyle(.red)
+                                            Text("No Funds")
+                                                .font(.caption2.weight(.semibold))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 3)
+                                                .background(
+                                                    Capsule()
+                                                        .fill(ModernTheme.tertiaryAccent.opacity(0.18))
+                                                )
+                                                .foregroundStyle(ModernTheme.tertiaryAccent)
                                         }
                                     }
                                 }
                             }
+
+                            Spacer()
+
+                            VStack(spacing: 10) {
+                                let canExecute = (schedule != nil) && !(schedule!.isCompleted) && canExecuteSchedule(schedule!)
+                                Button(isCompleted ? "Executed" : "Execute") {
+                                    Task { await transferStore.executeGroup(toAccountId: key.toAccountId, toPotName: key.toPotName.isEmpty ? nil : key.toPotName) }
+                                }
+                                .disabled(!canExecute)
+                                .buttonStyle(.borderedProminent)
+                                .tint(isCompleted ? .gray : ModernTheme.secondaryAccent)
+
+                                if let schedule = schedule {
+                                    Button(role: .destructive) {
+                                        Task { await transferStore.delete(schedule: schedule) }
+                                    } label: {
+                                        Text("Delete")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(ModernTheme.tertiaryAccent)
+                                }
+                            }
                         }
-                        .padding(12)
-                        .background(Color(.systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06)))
-                        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 2)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                                )
+                        )
                     }
                 }
             }
@@ -465,6 +682,7 @@ struct CompletedTransfersScreen: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var transferStore: TransferSchedulesStore
     @EnvironmentObject private var incomeStore: IncomeSchedulesStore
+    @Environment(\.colorScheme) private var colorScheme
 
     // All completed transfers, sorted by execution time
     private var completedTransfers: [TransferSchedule] {
@@ -677,136 +895,207 @@ struct CompletedTransfersScreen: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 12) {
-                if sourceAccount == nil || (executedIncomes.isEmpty && flowSteps.isEmpty) {
-                    ContentUnavailableView(
-                        "No Completed Transfers",
-                        systemImage: "checkmark.seal",
-                        description: Text("Run executions to see history here.")
-                    )
-                } else {
-                    // 1. Income into source account
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Income into \(sourceAccountName)")
-                            .font(.headline)
+        ZStack {
+            ModernTheme.background(for: colorScheme)
+                .ignoresSafeArea()
 
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(sourceAccountName)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                Text("Total Executed Income")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("+\(formatCurrency(sourceIncomeTotal))")
-                                .font(.title3)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Color.green.opacity(0.17))
-                                .foregroundColor(.green)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        }
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    if sourceAccount == nil || (executedIncomes.isEmpty && flowSteps.isEmpty) {
+                        ContentUnavailableView(
+                            "No Completed Transfers",
+                            systemImage: "checkmark.seal",
+                            description: Text("Run executions to see history here.")
+                        )
+                    } else {
+                        incomeCard
+                        allocationFlowCard
                     }
-                    .padding(12)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 40)
+                .frame(maxWidth: 600)
+            }
+        }
+        .navigationTitle("Completed Transfers")
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
+    }
+
+    private var incomeCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Income into \(sourceAccountName)")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.green.opacity(0.4), Color.green.opacity(0.6)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 70, height: 4)
+                    .opacity(0.6)
+            }
+
+            HStack(spacing: 16) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.green.opacity(0.75), Color.green.opacity(0.5)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.black.opacity(0.06))
+                        Image(systemName: "banknote")
+                            .foregroundStyle(.white)
+                            .font(.headline)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
                     )
 
-                    // 2. Allocation Flow, item by item
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Allocation Flow")
-                            .font(.headline)
-                            .padding(.bottom, 8)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(sourceAccountName)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    Text("Total Executed Income")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-                        ForEach(annotatedSteps) { row in
-                            let step = row.step
+                Spacer()
 
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        Text(step.path)
-                                            .font(.subheadline)
-                                        if let tag = step.methodTag, !tag.isEmpty {
-                                            Text(tag)
-                                                .font(.caption2)
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(
-                                                    tag == "BUDGET"
-                                                    ? Color.gray.opacity(0.15)
-                                                    : Color.purple.opacity(0.15)
-                                                )
-                                                .foregroundColor(
-                                                    tag == "BUDGET"
-                                                    ? .secondary
-                                                    : .purple
-                                                )
-                                                .clipShape(Capsule())
-                                        }
-                                    }
+                Text("+\(formatCurrency(sourceIncomeTotal))")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.green)
+            }
+        }
+        .glassCard()
+    }
 
-                                    if !step.date.isEmpty {
-                                        Text(formattedDate(step.date))
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
+    private var allocationFlowCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Allocation Flow")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+            }
+
+            VStack(spacing: 12) {
+                ForEach(annotatedSteps) { row in
+                    let step = row.step
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text(step.path)
+                                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                                    if let tag = step.methodTag, !tag.isEmpty {
+                                        Text(tag)
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(
+                                                Capsule()
+                                                    .fill(
+                                                        tag == "BUDGET"
+                                                        ? Color.gray.opacity(0.18)
+                                                        : ModernTheme.secondaryAccent.opacity(0.18)
+                                                    )
+                                            )
+                                            .foregroundStyle(
+                                                tag == "BUDGET"
+                                                ? .secondary
+                                                : ModernTheme.secondaryAccent
+                                            )
                                     }
                                 }
 
-                                Spacer()
-
-                                Text("-\(formatCurrency(step.amount))")
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 6)
-                                    .background(Color.purple.opacity(0.15))
-                                    .foregroundColor(.purple)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                if !step.date.isEmpty {
+                                    Text(formattedDate(step.date))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
 
-                            HStack {
-                                Text("Remaining in \(sourceAccountName)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(formatCurrency(row.remainingAfter))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Divider()
-                                .padding(.vertical, 2)
-                        }
-
-                        // Final row
-                        HStack {
-                            Text("Final Balance in \(sourceAccountName)")
-                                .font(.headline)
                             Spacer()
-                            Text(formatCurrency(finalRemaining))
-                                .font(.headline)
-                                .foregroundColor(.blue)
+
+                            Text("-\(formatCurrency(step.amount))")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(ModernTheme.tertiaryAccent.opacity(0.15))
+                                )
+                                .foregroundStyle(ModernTheme.tertiaryAccent)
                         }
-                        .padding(.top, 10)
+
+                        HStack {
+                            Text("Remaining in \(sourceAccountName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(formatCurrency(row.remainingAfter))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(ModernTheme.primaryAccent)
+                        }
+                        .padding(.horizontal, 8)
                     }
-                    .padding(12)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.black.opacity(0.06))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
                     )
                 }
+
+                // Final balance
+                HStack(spacing: 16) {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [ModernTheme.primaryAccent.opacity(0.75), ModernTheme.secondaryAccent.opacity(0.5)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 48, height: 48)
+                        .overlay(
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.white)
+                                .font(.headline)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                        )
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Final Balance in \(sourceAccountName)")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        Text(formatCurrency(finalRemaining))
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(ModernTheme.secondaryAccent)
+                    }
+
+                    Spacer()
+                }
+                .padding(.top, 8)
             }
-            .padding()
         }
-        .navigationTitle("Completed Transfers")
-        .background(Color(.systemGroupedBackground))
+        .glassCard()
     }
 }
 

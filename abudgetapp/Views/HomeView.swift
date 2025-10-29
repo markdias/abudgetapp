@@ -222,7 +222,6 @@ struct HomeView: View {
             }
             // Activity editor removed
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarBackground(.hidden, for: .tabBar)
             .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
         }
     }
@@ -933,7 +932,10 @@ private struct EditIncomeSheet: View {
                     )
                 }
             }
-            .onAppear { preloadIfNeeded() }
+            .task {
+                await accountsStore.load()
+                preloadIfNeeded()
+            }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
             .onChange(of: showSaveReview) { _, isPresented in
                 if !isPresented {
@@ -1186,7 +1188,10 @@ private struct EditTransactionSheet: View {
                     )
                 }
             }
-            .onAppear { preloadIfNeeded() }
+            .task {
+                await accountsStore.load()
+                preloadIfNeeded()
+            }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
             .onChange(of: accountsStore.transactions) { _, _ in preloadIfNeeded() }
             .onChange(of: toAccountId) { _, newValue in handleAccountChange(newValue) }
@@ -1459,7 +1464,10 @@ private struct EditTargetSheet: View {
                     )
                 }
             }
-            .onAppear { preloadIfNeeded() }
+            .task {
+                await accountsStore.load()
+                preloadIfNeeded()
+            }
             .onChange(of: accountsStore.targets) { _, _ in preloadIfNeeded() }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
             .onChange(of: showSaveReview) { _, isPresented in
@@ -2083,6 +2091,9 @@ private struct QuickActionButton: View {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(minHeight: 32, alignment: .top)
                 Capsule()
                     .fill(
                         LinearGradient(
