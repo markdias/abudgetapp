@@ -212,7 +212,10 @@ private struct AddTransferSchedulesScreen: View {
                             case .account(let id): src = (id, nil)
                             case .pot(let id, let pot): src = (id, pot)
                             }
-                            Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: dest.potName, amount: total, description: dest.title) }
+                            // Check if destination account is a credit card
+                            let isCreditCard = accountsStore.accounts.first(where: { $0.id == dest.accountId })?.isCredit ?? false
+                            let linkedCreditId = isCreditCard ? dest.accountId : nil
+                            Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: dest.potName, amount: total, description: dest.title, linkedCreditAccountId: linkedCreditId) }
                         }
                         .disabled(source == .none || total <= 0)
                     }
@@ -251,7 +254,10 @@ private struct AddTransferSchedulesScreen: View {
                         case .account(let id): src = (id, nil)
                         case .pot(let id, let pot): src = (id, pot)
                         }
-                        Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: nil, amount: total, description: dest.title) }
+                        // Check if destination account is a credit card
+                        let isCreditCard = accountsStore.accounts.first(where: { $0.id == dest.accountId })?.isCredit ?? false
+                        let linkedCreditId = isCreditCard ? dest.accountId : nil
+                        Task { await transferStore.addSchedule(from: src.0, fromPotName: src.1, to: dest.accountId, toPotName: nil, amount: total, description: dest.title, linkedCreditAccountId: linkedCreditId) }
                     }
                     .disabled(source == .none || total <= 0)
                 }
@@ -274,7 +280,8 @@ private struct AddTransferSchedulesScreen: View {
                 let ddCount = txEntries.filter { ($0.method ?? "") == "direct_debit" }.count
                 let cardCount = txEntries.filter { ($0.method ?? "").contains("card") }.count
                 let bdgCount = entries.filter { $0.kind == .budget }.count
-                let subtitle = "\(account.accountType ?? account.type.capitalized)\n\(ddCount) Direct Debits, \(cardCount) Card Payments, \(bdgCount) Budgets"
+                let creditIndicator = account.isCredit ? " • Credit Card" : ""
+                let subtitle = "\(account.accountType ?? account.type.capitalized)\(creditIndicator)\n\(ddCount) Direct Debits, \(cardCount) Card Payments, \(bdgCount) Budgets"
                 return Destination(id: "pot-\(account.id)-\(pot.id)", accountId: account.id, potName: pot.name, title: pot.name, subtitle: subtitle)
             }
         }
@@ -287,7 +294,8 @@ private struct AddTransferSchedulesScreen: View {
             let ddCount = txEntries.filter { ($0.method ?? "") == "direct_debit" }.count
             let cardCount = txEntries.filter { ($0.method ?? "").contains("card") }.count
             let bdgCount = entries.filter { $0.kind == .budget }.count
-            let subtitle = "\(account.accountType ?? account.type.capitalized)\n\(ddCount) Direct Debits, \(cardCount) Card Payments, \(bdgCount) Budgets"
+            let creditIndicator = account.isCredit ? " • Credit Card" : ""
+            let subtitle = "\(account.accountType ?? account.type.capitalized)\(creditIndicator)\n\(ddCount) Direct Debits, \(cardCount) Card Payments, \(bdgCount) Budgets"
             return Destination(id: "acct-\(account.id)", accountId: account.id, potName: nil, title: account.name, subtitle: subtitle)
         }
     }

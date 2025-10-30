@@ -265,6 +265,22 @@ final class AccountsStore: ObservableObject {
         }
     }
 
+    func deleteTransactionEvent(transactionId: Int, eventId: Int) async {
+        do {
+            _ = try await store.deleteTransactionEvent(transactionId: transactionId, eventId: eventId)
+            transactions = await store.currentTransactions()
+            statusMessage = StatusMessage(title: "Event Deleted", message: "Execution event removed", kind: .warning)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Event Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Event Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
     func transaction(for id: Int) -> TransactionRecord? {
         transactions.first { $0.id == id }
     }
