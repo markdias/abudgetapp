@@ -34,6 +34,10 @@ All stores broadcast updates so dependent views remain in sync without ad-hoc re
 
 Budget data is saved locally on the device. A bundled sample dataset seeds the app on first launch, and you can restore it at any time from **Settings → Local Storage → Restore Sample Dataset**. Data lives in the app's Application Support directory and no network connectivity is required.
 
+## Credit Card Execution Events
+
+Scheduled transactions that are linked to a credit card now keep a single aggregated charge record. Each monthly run appends an **execution event** that captures the run number, execution day, posted amount, and timestamp. The transaction detail sheet lists these events, lets you remove individual executions, and automatically rolls the credit card balance back for the deleted event. When an event is removed, the associated processed log entry is cleared so the schedule can be re-run if needed, ensuring history and balances stay aligned.
+
 ## Running the App
 
 1. Launch the app to load the bundled sample dataset (or restore it from Settings if you have existing data).

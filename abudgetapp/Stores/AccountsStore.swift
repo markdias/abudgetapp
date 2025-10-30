@@ -269,6 +269,28 @@ final class AccountsStore: ObservableObject {
         transactions.first { $0.id == id }
     }
 
+    func removeTransactionEvent(transactionId: Int, eventId: UUID) async {
+        do {
+            let updatedRecord = try await store.removeTransactionEvent(transactionId: transactionId, eventId: eventId)
+            accounts = await store.currentAccounts()
+            transactions = await store.currentTransactions()
+            processedTransactionLogs = await store.currentProcessedTransactions()
+            if updatedRecord == nil {
+                statusMessage = StatusMessage(title: "Event Removed", message: "All executions cleared", kind: .warning)
+            } else {
+                statusMessage = StatusMessage(title: "Event Removed", message: "Execution event deleted", kind: .warning)
+            }
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Remove Event Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Remove Event Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
     @discardableResult
     func processScheduledTransactions(forceManual: Bool = false) async -> ProcessTransactionsResult? {
         do {

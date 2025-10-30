@@ -349,7 +349,10 @@ actor LocalBudgetStore {
             toAccountId: submission.toAccountId,
             toPotName: submission.toPotName,
             paymentType: submission.paymentType,
-            linkedCreditAccountId: submission.linkedCreditAccountId
+            linkedCreditAccountId: submission.linkedCreditAccountId,
+            kind: .scheduled,
+            originatingTransactionId: nil,
+            events: []
         )
         state.nextTransactionId += 1
         state.transactions.append(record)
@@ -456,7 +459,9 @@ actor LocalBudgetStore {
             toPotName: submission.toPotName,
             paymentType: submission.paymentType,
             linkedCreditAccountId: submission.linkedCreditAccountId,
-            kind: existing.kind
+            kind: existing.kind,
+            originatingTransactionId: existing.originatingTransactionId,
+            events: existing.events
         )
 
         state.transactions[index] = updated
@@ -470,6 +475,67 @@ actor LocalBudgetStore {
         }
         _ = state.transactions.remove(at: index)
         try persist()
+    }
+
+    func removeTransactionEvent(transactionId: Int, eventId: UUID) throws -> TransactionRecord? {
+        guard let transactionIndex = state.transactions.firstIndex(where: { $0.id == transactionId }) else {
+            throw StoreError.notFound("Transaction #\(transactionId) not found")
+        }
+
+        var record = state.transactions[transactionIndex]
+        guard record.kind == .creditCardCharge else {
+            throw StoreError.invalidOperation("Only credit card charges support event removal")
+        }
+
+        var events = record.events
+        guard let removalIndex = events.firstIndex(where: { $0.id == eventId }) else {
+            throw StoreError.notFound("Event not found")
+        }
+
+        let event = events.remove(at: removalIndex)
+
+        guard let creditAccountIndex = state.accounts.firstIndex(where: { $0.id == record.toAccountId }) else {
+            throw StoreError.notFound("Account #\(record.toAccountId) not found")
+        }
+
+        var creditAccount = state.accounts[creditAccountIndex]
+        creditAccount.balance += event.amount
+        state.accounts[creditAccountIndex] = creditAccount
+
+        if let originId = record.originatingTransactionId {
+            state.processedTransactionLogs.removeAll {
+                $0.paymentId == originId && $0.period == event.period
+            }
+        }
+
+        events = renumberEvents(events)
+
+        if events.isEmpty {
+            state.transactions.remove(at: transactionIndex)
+            try persist()
+            return nil
+        }
+
+        let totalAmount = events.reduce(0) { $0 + $1.amount }
+        let lastEventDay = events.last?.day ?? record.date
+        let updatedRecord = TransactionRecord(
+            id: record.id,
+            name: record.name,
+            vendor: record.vendor,
+            amount: totalAmount,
+            date: lastEventDay,
+            fromAccountId: record.fromAccountId,
+            toAccountId: record.toAccountId,
+            toPotName: record.toPotName,
+            paymentType: record.paymentType,
+            linkedCreditAccountId: record.linkedCreditAccountId,
+            kind: record.kind,
+            originatingTransactionId: record.originatingTransactionId,
+            events: events
+        )
+        state.transactions[transactionIndex] = updatedRecord
+        try persist()
+        return updatedRecord
     }
 
     // MARK: - Scheduled Transaction Processing
@@ -583,21 +649,58 @@ actor LocalBudgetStore {
                 creditAccount.balance -= transaction.amount
                 state.accounts[creditIndex] = creditAccount
 
-                let chargeRecord = TransactionRecord(
-                    id: state.nextTransactionId,
-                    name: transaction.name,
-                    vendor: transaction.vendor,
+                let existingIndex = state.transactions.firstIndex { $0.kind == .creditCardCharge && $0.originatingTransactionId == transaction.id }
+                let newEvent = TransactionExecutionEvent(
+                    sequence: 0,
+                    day: String(scheduledDay),
                     amount: transaction.amount,
-                    date: String(scheduledDay),
-                    fromAccountId: nil,
-                    toAccountId: creditAccount.id,
-                    toPotName: nil,
-                    paymentType: "credit_card_charge",
-                    linkedCreditAccountId: nil,
-                    kind: .creditCardCharge
+                    loggedAt: isoNow,
+                    period: period
                 )
-                state.nextTransactionId += 1
-                state.transactions.append(chargeRecord)
+
+                if let existingIndex {
+                    let existing = state.transactions[existingIndex]
+                    var updatedEvents = existing.events
+                    updatedEvents.append(newEvent)
+                    let normalizedEvents = renumberEvents(updatedEvents)
+                    let totalAmount = normalizedEvents.reduce(0) { $0 + $1.amount }
+                    let updatedRecord = TransactionRecord(
+                        id: existing.id,
+                        name: existing.name,
+                        vendor: existing.vendor,
+                        amount: totalAmount,
+                        date: normalizedEvents.last?.day ?? newEvent.day,
+                        fromAccountId: existing.fromAccountId,
+                        toAccountId: existing.toAccountId,
+                        toPotName: existing.toPotName,
+                        paymentType: existing.paymentType,
+                        linkedCreditAccountId: existing.linkedCreditAccountId,
+                        kind: existing.kind,
+                        originatingTransactionId: existing.originatingTransactionId,
+                        events: normalizedEvents
+                    )
+                    state.transactions[existingIndex] = updatedRecord
+                } else {
+                    let normalizedEvents = renumberEvents([newEvent])
+                    let totalAmount = normalizedEvents.reduce(0) { $0 + $1.amount }
+                    let chargeRecord = TransactionRecord(
+                        id: state.nextTransactionId,
+                        name: transaction.name,
+                        vendor: transaction.vendor,
+                        amount: totalAmount,
+                        date: normalizedEvents.last?.day ?? newEvent.day,
+                        fromAccountId: nil,
+                        toAccountId: creditAccount.id,
+                        toPotName: nil,
+                        paymentType: "credit_card_charge",
+                        linkedCreditAccountId: nil,
+                        kind: .creditCardCharge,
+                        originatingTransactionId: transaction.id,
+                        events: normalizedEvents
+                    )
+                    state.nextTransactionId += 1
+                    state.transactions.append(chargeRecord)
+                }
                 didMutate = true
             }
 
@@ -1194,6 +1297,24 @@ actor LocalBudgetStore {
         }
 
         state.accounts[toIndex] = toAccount
+    }
+
+    private func renumberEvents(_ events: [TransactionExecutionEvent]) -> [TransactionExecutionEvent] {
+        guard !events.isEmpty else { return [] }
+        let sorted = events.sorted { lhs, rhs in
+            if lhs.loggedAt == rhs.loggedAt { return lhs.id.uuidString < rhs.id.uuidString }
+            return lhs.loggedAt < rhs.loggedAt
+        }
+        return sorted.enumerated().map { index, event in
+            TransactionExecutionEvent(
+                id: event.id,
+                sequence: index + 1,
+                day: event.day,
+                amount: event.amount,
+                loggedAt: event.loggedAt,
+                period: event.period
+            )
+        }
     }
 
     private static func makePersistenceURL() -> URL {

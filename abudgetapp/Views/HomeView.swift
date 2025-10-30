@@ -2740,23 +2740,44 @@ private struct TargetPreviewContext: Identifiable {
 
 private struct TransactionPreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var accountsStore: AccountsStore
 
-    let record: TransactionRecord
+    let initialRecord: TransactionRecord
     let accounts: [Account]
 
+    @State private var events: [TransactionExecutionEvent]
+    @State private var removingEventId: UUID? = nil
+
+    init(record: TransactionRecord, accounts: [Account]) {
+        self.initialRecord = record
+        self.accounts = accounts
+        _events = State(initialValue: record.events)
+    }
+
+    private var displayedRecord: TransactionRecord {
+        accountsStore.transaction(for: initialRecord.id) ?? initialRecord
+    }
+
     private var toAccountName: String {
-        accounts.first(where: { $0.id == record.toAccountId })?.name ?? "Unknown"
+        accounts.first(where: { $0.id == displayedRecord.toAccountId })?.name ?? "Unknown"
     }
 
     private var fromAccountName: String? {
-        guard let id = record.fromAccountId else { return nil }
+        guard let id = displayedRecord.fromAccountId else { return nil }
         return accounts.first(where: { $0.id == id })?.name
     }
 
-    private var formattedAmount: String { "£" + String(format: "%.2f", record.amount) }
+    private var displayedAmount: Double {
+        if !events.isEmpty {
+            return events.reduce(0) { $0 + $1.amount }
+        }
+        return displayedRecord.amount
+    }
+
+    private var formattedAmount: String { "£" + String(format: "%.2f", displayedAmount) }
 
     private var paymentTypeDescription: String {
-        switch record.paymentType {
+        switch displayedRecord.paymentType {
         case "card": return "Card"
         case "direct_debit": return "Direct Debit"
         case "credit_card_charge": return "Credit Card Charge"
@@ -2766,14 +2787,14 @@ private struct TransactionPreviewSheet: View {
     }
 
     private var potDescription: String {
-        if let pot = record.toPotName, !pot.isEmpty {
+        if let pot = displayedRecord.toPotName, !pot.isEmpty {
             return pot
         }
         return "None"
     }
 
     private var linkedCreditAccountName: String {
-        guard let id = record.linkedCreditAccountId,
+        guard let id = displayedRecord.linkedCreditAccountId,
               let account = accounts.first(where: { $0.id == id }) else {
             return "None"
         }
@@ -2781,18 +2802,29 @@ private struct TransactionPreviewSheet: View {
     }
 
     private var dayDescription: String {
-        if let day = Int(record.date), (1...31).contains(day) {
+        if let day = Int(displayedRecord.date), (1...31).contains(day) {
             return "\(day)"
         }
-        return record.date.isEmpty ? "—" : record.date
+        return displayedRecord.date.isEmpty ? "—" : displayedRecord.date
+    }
+
+    private var sortedEvents: [TransactionExecutionEvent] {
+        events.sorted { lhs, rhs in
+            if lhs.sequence == rhs.sequence { return lhs.loggedAt < rhs.loggedAt }
+            return lhs.sequence < rhs.sequence
+        }
+    }
+
+    private var canManageEvents: Bool {
+        displayedRecord.kind == .creditCardCharge
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Transaction") {
-                    LabeledContent("Name", value: record.name.isEmpty ? "—" : record.name)
-                    LabeledContent("Vendor", value: record.vendor.isEmpty ? "—" : record.vendor)
+                    LabeledContent("Name", value: displayedRecord.name.isEmpty ? "—" : displayedRecord.name)
+                    LabeledContent("Vendor", value: displayedRecord.vendor.isEmpty ? "—" : displayedRecord.vendor)
                     LabeledContent("Amount", value: formattedAmount)
                     LabeledContent("Day", value: dayDescription)
                     LabeledContent("Payment Type", value: paymentTypeDescription)
@@ -2807,8 +2839,21 @@ private struct TransactionPreviewSheet: View {
                     LabeledContent("Linked Credit Card", value: linkedCreditAccountName)
                 }
 
+                if canManageEvents {
+                    Section("Execution Events") {
+                        if sortedEvents.isEmpty {
+                            Text("No events recorded yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(sortedEvents) { event in
+                                eventRow(for: event)
+                            }
+                        }
+                    }
+                }
+
                 Section("Identifiers") {
-                    LabeledContent("Transaction ID", value: "\(record.id)")
+                    LabeledContent("Transaction ID", value: "\(displayedRecord.id)")
                 }
             }
             .navigationTitle("Transaction Details")
@@ -2817,8 +2862,100 @@ private struct TransactionPreviewSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .onChange(of: accountsStore.transactions) { _ in
+                refreshEventsFromStore()
+            }
         }
     }
+
+    @ViewBuilder
+    private func eventRow(for event: TransactionExecutionEvent) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Execution #\(event.sequence)")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text(dayText(for: event.day))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let loggedDate = Self.isoFormatter.date(from: event.loggedAt) {
+                    Text("Logged \(Self.displayFormatter.string(from: loggedDate))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("£" + String(format: "%.2f", event.amount))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text(event.period)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) { remove(event: event) } label: {
+                Label("Remove", systemImage: "trash")
+            }
+            .disabled(removingEventId != nil)
+        }
+        .overlay {
+            if removingEventId == event.id {
+                ProgressView()
+                    .progressViewStyle(.circular)
+            }
+        }
+    }
+
+    private func dayText(for value: String) -> String {
+        if let number = Int(value), (1...31).contains(number) {
+            if let ordinal = Self.ordinalFormatter.string(from: NSNumber(value: number)) {
+                return "Executed on the \(ordinal)"
+            }
+            return "Executed on day \(number)"
+        }
+        return value.isEmpty ? "Execution day unknown" : "Executed on \(value)"
+    }
+
+    private func refreshEventsFromStore() {
+        if let updated = accountsStore.transaction(for: initialRecord.id) {
+            events = updated.events
+        } else {
+            dismiss()
+        }
+    }
+
+    private func remove(event: TransactionExecutionEvent) {
+        removingEventId = event.id
+        Task {
+            await accountsStore.removeTransactionEvent(transactionId: initialRecord.id, eventId: event.id)
+            await MainActor.run {
+                removingEventId = nil
+                refreshEventsFromStore()
+            }
+        }
+    }
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let displayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private static let ordinalFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .ordinal
+        return formatter
+    }()
 }
 
 private struct IncomePreviewSheet: View {

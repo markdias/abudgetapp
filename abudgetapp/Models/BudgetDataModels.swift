@@ -213,6 +213,24 @@ public struct Expense: Identifiable, Codable, Hashable {
     }
 }
 
+public struct TransactionExecutionEvent: Identifiable, Codable, Hashable {
+    public let id: UUID
+    public let sequence: Int
+    public let day: String
+    public let amount: Double
+    public let loggedAt: String
+    public let period: String
+
+    public init(id: UUID = UUID(), sequence: Int, day: String, amount: Double, loggedAt: String, period: String) {
+        self.id = id
+        self.sequence = sequence
+        self.day = day
+        self.amount = amount
+        self.loggedAt = loggedAt
+        self.period = period
+    }
+}
+
 public struct TransactionRecord: Identifiable, Codable, Hashable {
     public enum Kind: String, Codable, Hashable {
         case scheduled
@@ -229,6 +247,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     public let toPotName: String?
     public let paymentType: String? // "direct_debit" or "card"
     public let linkedCreditAccountId: Int?
+    public let originatingTransactionId: Int?
+    public let events: [TransactionExecutionEvent]
     public let kind: Kind
 
     public init(
@@ -242,7 +262,9 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         toPotName: String? = nil,
         paymentType: String? = nil,
         linkedCreditAccountId: Int? = nil,
-        kind: Kind = .scheduled
+        kind: Kind = .scheduled,
+        originatingTransactionId: Int? = nil,
+        events: [TransactionExecutionEvent] = []
     ) {
         self.id = id
         self.name = name
@@ -255,6 +277,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         self.paymentType = paymentType
         self.linkedCreditAccountId = linkedCreditAccountId
         self.kind = kind
+        self.originatingTransactionId = originatingTransactionId
+        self.events = events
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -269,6 +293,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         case paymentType
         case linkedCreditAccountId
         case kind
+        case originatingTransactionId
+        case events
     }
 
     public init(from decoder: Decoder) throws {
@@ -284,6 +310,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         paymentType = try container.decodeIfPresent(String.self, forKey: .paymentType)
         linkedCreditAccountId = try container.decodeIfPresent(Int.self, forKey: .linkedCreditAccountId)
         kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .scheduled
+        originatingTransactionId = try container.decodeIfPresent(Int.self, forKey: .originatingTransactionId)
+        events = try container.decodeIfPresent([TransactionExecutionEvent].self, forKey: .events) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -299,6 +327,10 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         try container.encodeIfPresent(paymentType, forKey: .paymentType)
         try container.encodeIfPresent(linkedCreditAccountId, forKey: .linkedCreditAccountId)
         try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(originatingTransactionId, forKey: .originatingTransactionId)
+        if !events.isEmpty {
+            try container.encode(events, forKey: .events)
+        }
     }
 
     public static func == (lhs: TransactionRecord, rhs: TransactionRecord) -> Bool {
