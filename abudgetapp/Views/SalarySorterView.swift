@@ -18,6 +18,10 @@ struct SalarySorterView: View {
     @State private var expandedMainAccounts: Set<Int> = []
     @State private var expandedPotKeys: Set<String> = [] // key: "acct-<id>-pot-<name>"
 
+    // Toast notification for copy feedback
+    @State private var showToast = false
+    @State private var toastMessage = ""
+
     private var destinationAccounts: [Account] {
         accountsStore.accounts.filter { account in
             let hasBudgets = accountsStore.targets.contains { $0.accountId == account.id }
@@ -85,6 +89,32 @@ struct SalarySorterView: View {
                     .padding(.bottom, 40)
                     .frame(maxWidth: 620)
                 }
+
+                // Toast notification
+                VStack {
+                    if showToast {
+                        Text(toastMessage)
+                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [ModernTheme.primaryAccent, ModernTheme.secondaryAccent],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
+                            )
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .padding(.top, 8)
+                    }
+                    Spacer()
+                }
+                .animation(.spring(response: 0.4, dampingFraction: 0.7), value: showToast)
             }
             .navigationTitle("Salary Sorter")
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } } }
@@ -122,6 +152,9 @@ struct SalarySorterView: View {
                                 endPoint: .trailing
                             )
                         )
+                        .onTapGesture {
+                            copyToClipboard(incomeTotal)
+                        }
                 }
             }
 
@@ -160,6 +193,9 @@ struct SalarySorterView: View {
                             Text(formatCurrency(inc.amount))
                                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                                 .foregroundStyle(ModernTheme.secondaryAccent)
+                                .onTapGesture {
+                                    copyToClipboard(inc.amount)
+                                }
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
@@ -213,6 +249,9 @@ struct SalarySorterView: View {
                             )
                     )
                     .foregroundStyle(ModernTheme.secondaryAccent)
+                    .onTapGesture {
+                        copyToClipboard(groupTotal)
+                    }
             }
             VStack(spacing: 12) {
                 // Pot groups (each collapsible)
@@ -228,6 +267,9 @@ struct SalarySorterView: View {
                             Text(formatCurrency(items.reduce(0) { $0 + $1.amount }))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .onTapGesture {
+                                    copyToClipboard(items.reduce(0) { $0 + $1.amount })
+                                }
                             Button { togglePot(key) } label: {
                                 Image(systemName: expandedPotKeys.contains(key) ? "chevron.up" : "chevron.down")
                                     .foregroundStyle(.secondary)
@@ -255,6 +297,9 @@ struct SalarySorterView: View {
                                         Text(formatCurrency(entry.amount))
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
+                                            .onTapGesture {
+                                                copyToClipboard(entry.amount)
+                                            }
                                     }
                                 }
                             }
@@ -282,6 +327,9 @@ struct SalarySorterView: View {
                             Text(formatCurrency(mainTransfers.reduce(0) { $0 + $1.amount }))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .onTapGesture {
+                                    copyToClipboard(mainTransfers.reduce(0) { $0 + $1.amount })
+                                }
                             Button { toggleMain(key) } label: {
                                 Image(systemName: expandedMainAccounts.contains(key) ? "chevron.up" : "chevron.down")
                                     .foregroundStyle(.secondary)
@@ -309,6 +357,9 @@ struct SalarySorterView: View {
                                         Text(formatCurrency(entry.amount))
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
+                                            .onTapGesture {
+                                                copyToClipboard(entry.amount)
+                                            }
                                     }
                                 }
                             }
@@ -334,6 +385,9 @@ struct SalarySorterView: View {
                         Text(formatCurrency(internalPotToPot.reduce(0) { $0 + $1.amount }))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .onTapGesture {
+                                copyToClipboard(internalPotToPot.reduce(0) { $0 + $1.amount })
+                            }
                     }
                     .padding(12)
                     .background(
@@ -355,6 +409,9 @@ struct SalarySorterView: View {
                                 Text(formatCurrency(s.amount))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .onTapGesture {
+                                        copyToClipboard(s.amount)
+                                    }
                             }
                         }
                     }
@@ -394,6 +451,9 @@ struct SalarySorterView: View {
                 Text(formatCurrency(remaining))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(remaining >= 0 ? ModernTheme.secondaryAccent : ModernTheme.tertiaryAccent)
+                    .onTapGesture {
+                        copyToClipboard(remaining)
+                    }
             }
         }
         .glassCard()
@@ -401,6 +461,30 @@ struct SalarySorterView: View {
 
     private func formatCurrency(_ amount: Double) -> String {
         "£" + String(format: "%.2f", abs(amount))
+    }
+
+    private func copyToClipboard(_ amount: Double) {
+        // Copy only the numeric value (without £ symbol)
+        let numericValue = String(format: "%.2f", abs(amount))
+        UIPasteboard.general.string = numericValue
+
+        // Show toast with formatted value (with £ symbol for display)
+        let formattedValue = formatCurrency(amount)
+        toastMessage = "Copied \(formattedValue)"
+        withAnimation {
+            showToast = true
+        }
+
+        // Haptic feedback to indicate successful copy
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+
+        // Auto-dismiss toast after 2 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation {
+                showToast = false
+            }
+        }
     }
 
     // Helpers
