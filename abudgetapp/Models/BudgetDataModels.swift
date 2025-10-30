@@ -213,10 +213,35 @@ public struct Expense: Identifiable, Codable, Hashable {
     }
 }
 
+public struct TransactionEvent: Identifiable, Codable, Hashable {
+    public let id: Int
+    public let executedAt: String  // ISO8601 timestamp
+    public let amount: Double
+
+    public init(
+        id: Int,
+        executedAt: String,
+        amount: Double
+    ) {
+        self.id = id
+        self.executedAt = executedAt
+        self.amount = amount
+    }
+
+    public static func == (lhs: TransactionEvent, rhs: TransactionEvent) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
 public struct TransactionRecord: Identifiable, Codable, Hashable {
     public enum Kind: String, Codable, Hashable {
         case scheduled
         case creditCardCharge = "credit_card_charge"
+        case creditCardPayment = "credit_card_payment"
     }
 
     public let id: Int
@@ -230,6 +255,12 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     public let paymentType: String? // "direct_debit" or "card"
     public let linkedCreditAccountId: Int?
     public let kind: Kind
+    public var transferScheduleId: Int?
+    public var events: [TransactionEvent]?
+
+    public var executionCount: Int {
+        return events?.count ?? 0
+    }
 
     public init(
         id: Int,
@@ -242,7 +273,9 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         toPotName: String? = nil,
         paymentType: String? = nil,
         linkedCreditAccountId: Int? = nil,
-        kind: Kind = .scheduled
+        kind: Kind = .scheduled,
+        transferScheduleId: Int? = nil,
+        events: [TransactionEvent]? = nil
     ) {
         self.id = id
         self.name = name
@@ -255,6 +288,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         self.paymentType = paymentType
         self.linkedCreditAccountId = linkedCreditAccountId
         self.kind = kind
+        self.transferScheduleId = transferScheduleId
+        self.events = events
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -269,6 +304,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         case paymentType
         case linkedCreditAccountId
         case kind
+        case transferScheduleId
+        case events
     }
 
     public init(from decoder: Decoder) throws {
@@ -284,6 +321,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         paymentType = try container.decodeIfPresent(String.self, forKey: .paymentType)
         linkedCreditAccountId = try container.decodeIfPresent(Int.self, forKey: .linkedCreditAccountId)
         kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .scheduled
+        transferScheduleId = try container.decodeIfPresent(Int.self, forKey: .transferScheduleId)
+        events = try container.decodeIfPresent([TransactionEvent].self, forKey: .events)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -299,6 +338,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         try container.encodeIfPresent(paymentType, forKey: .paymentType)
         try container.encodeIfPresent(linkedCreditAccountId, forKey: .linkedCreditAccountId)
         try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(transferScheduleId, forKey: .transferScheduleId)
+        try container.encodeIfPresent(events, forKey: .events)
     }
 
     public static func == (lhs: TransactionRecord, rhs: TransactionRecord) -> Bool {
@@ -575,9 +616,11 @@ public struct TransferSchedule: Identifiable, Codable, Hashable {
     public let isActive: Bool
     public var isCompleted: Bool
     public var lastExecuted: String?
+    public var linkedCreditAccountId: Int?
+    public var linkedTransactionId: Int?
 
     public init(id: Int, fromAccountId: Int, fromPotName: String? = nil, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String,
-                isActive: Bool, isCompleted: Bool, lastExecuted: String? = nil) {
+                isActive: Bool, isCompleted: Bool, lastExecuted: String? = nil, linkedCreditAccountId: Int? = nil, linkedTransactionId: Int? = nil) {
         self.id = id
         self.fromAccountId = fromAccountId
         self.fromPotName = fromPotName
@@ -588,6 +631,8 @@ public struct TransferSchedule: Identifiable, Codable, Hashable {
         self.isActive = isActive
         self.isCompleted = isCompleted
         self.lastExecuted = lastExecuted
+        self.linkedCreditAccountId = linkedCreditAccountId
+        self.linkedTransactionId = linkedTransactionId
     }
 
     public static func == (lhs: TransferSchedule, rhs: TransferSchedule) -> Bool { lhs.id == rhs.id }
@@ -757,13 +802,15 @@ public struct TransferScheduleSubmission: Codable {
     public var toPotName: String?
     public let amount: Double
     public let description: String
+    public var linkedCreditAccountId: Int?
 
-    public init(fromAccountId: Int, fromPotName: String? = nil, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String) {
+    public init(fromAccountId: Int, fromPotName: String? = nil, toAccountId: Int, toPotName: String? = nil, amount: Double, description: String, linkedCreditAccountId: Int? = nil) {
         self.fromAccountId = fromAccountId
         self.fromPotName = fromPotName
         self.toAccountId = toAccountId
         self.toPotName = toPotName
         self.amount = amount
         self.description = description
+        self.linkedCreditAccountId = linkedCreditAccountId
     }
 }

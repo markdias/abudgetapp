@@ -381,7 +381,9 @@ actor LocalBudgetStore {
             description: submission.description,
             isActive: true,
             isCompleted: false,
-            lastExecuted: nil
+            lastExecuted: nil,
+            linkedCreditAccountId: submission.linkedCreditAccountId,
+            linkedTransactionId: nil
         )
         state.nextTransferScheduleId += 1
         state.transferSchedules.append(schedule)
@@ -398,8 +400,59 @@ actor LocalBudgetStore {
         try applyTransfer(schedule: schedule)
         let now = Date()
         let stamp = LocalBudgetStore.isoFormatter.string(from: now)
-        schedule.isCompleted = true
-        schedule.lastExecuted = stamp
+
+        // Handle credit card payment tracking
+        if let creditAccountId = schedule.linkedCreditAccountId {
+            print("DEBUG: Executing credit card transfer schedule \(schedule.id), linkedTransactionId: \(schedule.linkedTransactionId ?? -1)")
+            // Create new event for this execution
+            let event = TransactionEvent(
+                id: state.nextTransactionEventId,
+                executedAt: stamp,
+                amount: schedule.amount
+            )
+            state.nextTransactionEventId += 1
+
+            if let linkedTxId = schedule.linkedTransactionId,
+               let txIndex = state.transactions.firstIndex(where: { $0.id == linkedTxId }) {
+                // Update existing transaction - add event
+                print("DEBUG: Adding event to existing transaction \(linkedTxId) for schedule \(schedule.id)")
+                var transaction = state.transactions[txIndex]
+                var events = transaction.events ?? []
+                events.append(event)
+                transaction.events = events
+                state.transactions[txIndex] = transaction
+            } else {
+                // Create new transaction for first execution
+                print("DEBUG: Creating new credit card payment transaction for schedule \(schedule.id)")
+                let newTransaction = TransactionRecord(
+                    id: state.nextTransactionId,
+                    name: schedule.description.isEmpty ? "Credit Card Payment" : schedule.description,
+                    vendor: "Transfer Payment",
+                    amount: schedule.amount,
+                    date: stamp,
+                    fromAccountId: schedule.fromAccountId,
+                    toAccountId: creditAccountId,
+                    toPotName: schedule.toPotName,
+                    paymentType: "credit_card_payment",
+                    linkedCreditAccountId: nil,
+                    kind: .creditCardPayment,
+                    transferScheduleId: schedule.id,
+                    events: [event]
+                )
+                state.transactions.append(newTransaction)
+                schedule.linkedTransactionId = state.nextTransactionId
+                print("DEBUG: Set linkedTransactionId to \(state.nextTransactionId) for schedule \(schedule.id)")
+                state.nextTransactionId += 1
+            }
+
+            // Don't mark as completed for credit card payments (allow re-execution)
+            schedule.lastExecuted = stamp
+        } else {
+            // Regular transfer - mark as completed
+            schedule.isCompleted = true
+            schedule.lastExecuted = stamp
+        }
+
         state.transferSchedules[index] = schedule
         state.lastTransfersExecutedAt = stamp
         try persist()
@@ -412,11 +465,59 @@ actor LocalBudgetStore {
         let stamp = LocalBudgetStore.isoFormatter.string(from: now)
         for index in state.transferSchedules.indices {
             if state.transferSchedules[index].isActive && !state.transferSchedules[index].isCompleted {
-                let schedule = state.transferSchedules[index]
+                var schedule = state.transferSchedules[index]
                 do {
                     try applyTransfer(schedule: schedule)
-                    state.transferSchedules[index].isCompleted = true
-                    state.transferSchedules[index].lastExecuted = stamp
+
+                    // Handle credit card payment tracking
+                    if let creditAccountId = schedule.linkedCreditAccountId {
+                        // Create new event for this execution
+                        let event = TransactionEvent(
+                            id: state.nextTransactionEventId,
+                            executedAt: stamp,
+                            amount: schedule.amount
+                        )
+                        state.nextTransactionEventId += 1
+
+                        if let linkedTxId = schedule.linkedTransactionId,
+                           let txIndex = state.transactions.firstIndex(where: { $0.id == linkedTxId }) {
+                            // Update existing transaction - add event
+                            var transaction = state.transactions[txIndex]
+                            var events = transaction.events ?? []
+                            events.append(event)
+                            transaction.events = events
+                            state.transactions[txIndex] = transaction
+                        } else {
+                            // Create new transaction for first execution
+                            let newTransaction = TransactionRecord(
+                                id: state.nextTransactionId,
+                                name: schedule.description.isEmpty ? "Credit Card Payment" : schedule.description,
+                                vendor: "Transfer Payment",
+                                amount: schedule.amount,
+                                date: stamp,
+                                fromAccountId: schedule.fromAccountId,
+                                toAccountId: creditAccountId,
+                                toPotName: schedule.toPotName,
+                                paymentType: "credit_card_payment",
+                                linkedCreditAccountId: nil,
+                                kind: .creditCardPayment,
+                                transferScheduleId: schedule.id,
+                                events: [event]
+                            )
+                            state.transactions.append(newTransaction)
+                            schedule.linkedTransactionId = state.nextTransactionId
+                            state.nextTransactionId += 1
+                        }
+
+                        // Don't mark as completed for credit card payments (allow re-execution)
+                        schedule.lastExecuted = stamp
+                    } else {
+                        // Regular transfer - mark as completed
+                        schedule.isCompleted = true
+                        schedule.lastExecuted = stamp
+                    }
+
+                    state.transferSchedules[index] = schedule
                     executed += 1
                 } catch {
                     // Skip schedules that cannot be executed (e.g., insufficient funds)
@@ -437,6 +538,38 @@ actor LocalBudgetStore {
         }
         state.transferSchedules.remove(at: index)
         try persist()
+    }
+
+    func deleteTransactionEvent(transactionId: Int, eventId: Int) throws -> MessageResponse {
+        guard let txIndex = state.transactions.firstIndex(where: { $0.id == transactionId }) else {
+            throw StoreError.notFound("Transaction #\(transactionId) not found")
+        }
+        var transaction = state.transactions[txIndex]
+        guard var events = transaction.events else {
+            throw StoreError.notFound("Transaction has no events")
+        }
+        guard let eventIndex = events.firstIndex(where: { $0.id == eventId }) else {
+            throw StoreError.notFound("Event #\(eventId) not found")
+        }
+
+        // Remove the event
+        events.remove(at: eventIndex)
+
+        // If no events left, optionally delete the entire transaction
+        if events.isEmpty {
+            state.transactions.remove(at: txIndex)
+            // Also clear the linkedTransactionId from the transfer schedule
+            if let transferId = transaction.transferScheduleId,
+               let scheduleIndex = state.transferSchedules.firstIndex(where: { $0.id == transferId }) {
+                state.transferSchedules[scheduleIndex].linkedTransactionId = nil
+            }
+        } else {
+            transaction.events = events
+            state.transactions[txIndex] = transaction
+        }
+
+        try persist()
+        return MessageResponse(message: "Event deleted successfully")
     }
 
     func updateTransaction(id: Int, submission: TransactionSubmission) throws -> TransactionRecord {
@@ -583,21 +716,44 @@ actor LocalBudgetStore {
                 creditAccount.balance -= transaction.amount
                 state.accounts[creditIndex] = creditAccount
 
-                let chargeRecord = TransactionRecord(
-                    id: state.nextTransactionId,
-                    name: transaction.name,
-                    vendor: transaction.vendor,
-                    amount: transaction.amount,
-                    date: String(scheduledDay),
-                    fromAccountId: nil,
-                    toAccountId: creditAccount.id,
-                    toPotName: nil,
-                    paymentType: "credit_card_charge",
-                    linkedCreditAccountId: nil,
-                    kind: .creditCardCharge
+                // Create or update credit card charge transaction with events
+                let event = TransactionEvent(
+                    id: state.nextTransactionEventId,
+                    executedAt: isoNow,
+                    amount: transaction.amount
                 )
-                state.nextTransactionId += 1
-                state.transactions.append(chargeRecord)
+                state.nextTransactionEventId += 1
+
+                // Check if transaction record already exists for this scheduled transaction
+                if let existingTxIndex = state.transactions.firstIndex(where: {
+                    $0.kind == .creditCardCharge && $0.name == transaction.name && $0.toAccountId == creditAccount.id
+                }) {
+                    // Update existing transaction - add event
+                    var existingTx = state.transactions[existingTxIndex]
+                    var events = existingTx.events ?? []
+                    events.append(event)
+                    existingTx.events = events
+                    state.transactions[existingTxIndex] = existingTx
+                } else {
+                    // Create new transaction for first processing
+                    let chargeRecord = TransactionRecord(
+                        id: state.nextTransactionId,
+                        name: transaction.name,
+                        vendor: transaction.vendor,
+                        amount: transaction.amount,
+                        date: String(scheduledDay),
+                        fromAccountId: nil,
+                        toAccountId: creditAccount.id,
+                        toPotName: nil,
+                        paymentType: "credit_card_charge",
+                        linkedCreditAccountId: nil,
+                        kind: .creditCardCharge,
+                        transferScheduleId: nil,
+                        events: [event]
+                    )
+                    state.nextTransactionId += 1
+                    state.transactions.append(chargeRecord)
+                }
                 didMutate = true
             }
 
@@ -1229,6 +1385,7 @@ private struct BudgetState: Codable {
     var nextTransferScheduleId: Int
     var nextProcessedTransactionLogId: Int
     var nextBalanceReductionLogId: Int
+    var nextTransactionEventId: Int
 
     init(
         accounts: [Account],
@@ -1250,7 +1407,8 @@ private struct BudgetState: Codable {
         nextIncomeScheduleId: Int,
         nextTransferScheduleId: Int,
         nextProcessedTransactionLogId: Int,
-        nextBalanceReductionLogId: Int
+        nextBalanceReductionLogId: Int,
+        nextTransactionEventId: Int
     ) {
         self.accounts = accounts
         self.incomeSchedules = incomeSchedules
@@ -1272,6 +1430,7 @@ private struct BudgetState: Codable {
         self.nextTransferScheduleId = nextTransferScheduleId
         self.nextProcessedTransactionLogId = nextProcessedTransactionLogId
         self.nextBalanceReductionLogId = nextBalanceReductionLogId
+        self.nextTransactionEventId = nextTransactionEventId
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1295,6 +1454,7 @@ private struct BudgetState: Codable {
         case nextTransferScheduleId
         case nextProcessedTransactionLogId
         case nextBalanceReductionLogId = "next_balance_reduction_log_id"
+        case nextTransactionEventId
     }
 
     private enum LegacyKeys: String, CodingKey {
@@ -1318,6 +1478,7 @@ private struct BudgetState: Codable {
         case nextTransferScheduleId
         case nextProcessedTransactionLogId
         case nextBalanceReductionLogId
+        case nextTransactionEventId
     }
 
     init(from decoder: Decoder) throws {
@@ -1342,6 +1503,7 @@ private struct BudgetState: Codable {
             nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
             nextProcessedTransactionLogId = try container.decodeIfPresent(Int.self, forKey: .nextProcessedTransactionLogId) ?? 1
             nextBalanceReductionLogId = try container.decodeIfPresent(Int.self, forKey: .nextBalanceReductionLogId) ?? 1
+            nextTransactionEventId = try container.decodeIfPresent(Int.self, forKey: .nextTransactionEventId) ?? 1
             return
         }
 
@@ -1366,6 +1528,7 @@ private struct BudgetState: Codable {
         nextTransferScheduleId = try container.decodeIfPresent(Int.self, forKey: .nextTransferScheduleId) ?? 1
         nextProcessedTransactionLogId = try container.decodeIfPresent(Int.self, forKey: .nextProcessedTransactionLogId) ?? 1
         nextBalanceReductionLogId = try container.decodeIfPresent(Int.self, forKey: .nextBalanceReductionLogId) ?? 1
+        nextTransactionEventId = try container.decodeIfPresent(Int.self, forKey: .nextTransactionEventId) ?? 1
     }
 
     func normalized() -> BudgetState {
@@ -1411,6 +1574,9 @@ private struct BudgetState: Codable {
         let reductionLogMax = balanceReductionLogs.map { $0.id }.max() ?? 0
         normalizedState.nextBalanceReductionLogId = max(nextBalanceReductionLogId, reductionLogMax + 1)
 
+        let eventMax = transactions.compactMap { $0.events?.map { $0.id }.max() }.max() ?? 0
+        normalizedState.nextTransactionEventId = max(nextTransactionEventId, eventMax + 1)
+
         return normalizedState
     }
 
@@ -1435,7 +1601,8 @@ private struct BudgetState: Codable {
             nextIncomeScheduleId: 1,
             nextTransferScheduleId: 1,
             nextProcessedTransactionLogId: 1,
-            nextBalanceReductionLogId: 1
+            nextBalanceReductionLogId: 1,
+            nextTransactionEventId: 1
         )
     }
 
@@ -1560,7 +1727,8 @@ private struct BudgetState: Codable {
             nextIncomeScheduleId: 2,
             nextTransferScheduleId: 1,
             nextProcessedTransactionLogId: 1,
-            nextBalanceReductionLogId: 1
+            nextBalanceReductionLogId: 1,
+            nextTransactionEventId: 1
         )
     }
 }

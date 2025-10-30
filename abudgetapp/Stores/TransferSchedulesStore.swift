@@ -27,7 +27,7 @@ final class TransferSchedulesStore: ObservableObject {
         schedules = items
     }
 
-    func addSchedule(from fromAccountId: Int, fromPotName: String?, to toAccountId: Int, toPotName: String?, amount: Double, description: String) async {
+    func addSchedule(from fromAccountId: Int, fromPotName: String?, to toAccountId: Int, toPotName: String?, amount: Double, description: String, linkedCreditAccountId: Int? = nil) async {
         do {
             // Prevent duplicate pending schedule for same destination
             let destPot = toPotName ?? ""
@@ -41,7 +41,8 @@ final class TransferSchedulesStore: ObservableObject {
                 toAccountId: toAccountId,
                 toPotName: toPotName,
                 amount: amount,
-                description: description
+                description: description,
+                linkedCreditAccountId: linkedCreditAccountId
             )
             _ = try await store.addTransferSchedule(submission)
             schedules = await store.currentTransferSchedules()

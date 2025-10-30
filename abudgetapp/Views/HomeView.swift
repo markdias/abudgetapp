@@ -507,6 +507,7 @@ struct ActivitiesPanelSection: View {
                 switch pt {
                 case "direct_debit": return "Direct Debit"
                 case "credit_card_charge": return "Credit Card Charge"
+                case "credit_card_payment": return "Credit Card Payment"
                 case "card": return "Card"
                 default: return pt.capitalized
                 }
@@ -836,6 +837,7 @@ private struct ActivityListItemRow: View {
                 switch t {
                 case "card": return .purple.opacity(0.85)
                 case "credit_card_charge": return .indigo.opacity(0.85)
+                case "credit_card_payment": return .cyan.opacity(0.85)
                 case "direct_debit": return .blue.opacity(0.85)
                 default: break
                 }
@@ -2740,6 +2742,9 @@ private struct TargetPreviewContext: Identifiable {
 
 private struct TransactionPreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var accountsStore: AccountsStore
+    @State private var showDeleteConfirm = false
+    @State private var deletingEventId: Int?
 
     let record: TransactionRecord
     let accounts: [Account]
@@ -2760,6 +2765,7 @@ private struct TransactionPreviewSheet: View {
         case "card": return "Card"
         case "direct_debit": return "Direct Debit"
         case "credit_card_charge": return "Credit Card Charge"
+        case "credit_card_payment": return "Credit Card Payment"
         case .some(let value) where !value.isEmpty: return value.capitalized
         default: return "—"
         }
@@ -2787,6 +2793,30 @@ private struct TransactionPreviewSheet: View {
         return record.date.isEmpty ? "—" : record.date
     }
 
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let displayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private func formattedDate(for timestamp: String) -> String {
+        guard let date = TransactionPreviewSheet.isoFormatter.date(from: timestamp) else {
+            return timestamp
+        }
+        return TransactionPreviewSheet.displayFormatter.string(from: date)
+    }
+
+    private func formatEventAmount(_ amount: Double) -> String {
+        return "£" + String(format: "%.2f", amount)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -2796,6 +2826,9 @@ private struct TransactionPreviewSheet: View {
                     LabeledContent("Amount", value: formattedAmount)
                     LabeledContent("Day", value: dayDescription)
                     LabeledContent("Payment Type", value: paymentTypeDescription)
+                    if record.executionCount > 0 {
+                        LabeledContent("Executions", value: "\(record.executionCount)")
+                    }
                 }
 
                 Section("Accounts") {
@@ -2807,6 +2840,31 @@ private struct TransactionPreviewSheet: View {
                     LabeledContent("Linked Credit Card", value: linkedCreditAccountName)
                 }
 
+                if let events = record.events, !events.isEmpty {
+                    Section("Execution History") {
+                        ForEach(events.sorted(by: { $0.executedAt > $1.executedAt })) { event in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(formattedDate(for: event.executedAt))
+                                        .font(.subheadline)
+                                    Text(formatEventAmount(event.amount))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button(role: .destructive) {
+                                    deletingEventId = event.id
+                                    showDeleteConfirm = true
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
                 Section("Identifiers") {
                     LabeledContent("Transaction ID", value: "\(record.id)")
                 }
@@ -2816,6 +2874,21 @@ private struct TransactionPreviewSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .alert("Delete Event?", isPresented: $showDeleteConfirm) {
+                Button("Delete", role: .destructive) {
+                    if let eventId = deletingEventId {
+                        Task {
+                            await accountsStore.deleteTransactionEvent(transactionId: record.id, eventId: eventId)
+                            dismiss()
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    deletingEventId = nil
+                }
+            } message: {
+                Text("This will remove this execution event. If it's the last event, the entire transaction will be deleted.")
             }
         }
     }
