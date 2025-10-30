@@ -8,6 +8,7 @@ struct HomeView: View {
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
     @EnvironmentObject private var incomeSchedulesStore: IncomeSchedulesStore
     @EnvironmentObject private var transferSchedulesStore: TransferSchedulesStore
+    @Environment(\.colorScheme) private var colorScheme
 
     @Binding var selectedTab: Int
 
@@ -38,7 +39,7 @@ struct HomeView: View {
     @State private var editingAccount: Account? = nil
     // Removed transaction destination context
 
-    private let cardSpacing: CGFloat = 72
+    private let cardSpacing: CGFloat = 64
 
     private var filteredAccounts: [Account] { accountsStore.accounts }
 
@@ -58,10 +59,13 @@ struct HomeView: View {
 
     // Activity feed removed
 
-    var body: some View {
-        NavigationStack {
+    private var mainContent: some View {
+        ZStack(alignment: .top) {
+            ModernTheme.background(for: colorScheme)
+                .ignoresSafeArea()
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: 24) {
+
                     if reorderableAccounts.isEmpty {
                         ContentUnavailableView(
                             "No Accounts",
@@ -69,6 +73,7 @@ struct HomeView: View {
                             description: Text("Use the add menu to create your first account.")
                         )
                         .frame(maxWidth: .infinity)
+                        .glassCard()
                     } else {
                         StackedAccountDeck(
                             accounts: reorderableAccounts,
@@ -82,6 +87,7 @@ struct HomeView: View {
                             }
                         )
                     }
+
                     ActivitiesPanelSection(
                         accounts: accountsStore.accounts,
                         transactions: accountsStore.transactions,
@@ -114,10 +120,16 @@ struct HomeView: View {
 
                     BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 16)
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 40)
             }
-            .background(Color(.systemGroupedBackground))
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            mainContent
             .navigationTitle("Dashboard")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -213,6 +225,8 @@ struct HomeView: View {
                 Text("This will set all non-excluded card and pot balances to 0 and re-enable all scheduled incomes for execution.")
             }
             // Activity editor removed
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
         }
     }
 
@@ -248,31 +262,71 @@ private struct BalanceSummaryCard: View {
     let todaysSpending: Double
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Current Balance")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Current Balance")
+                    .font(.footnote.smallCaps())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.6), ModernTheme.primaryAccent.opacity(0.9)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 82, height: 3)
+                    .opacity(0.7)
+            }
 
             Text("£\(String(format: "%.2f", totalBalance))")
-                .font(.system(size: 36, weight: .bold))
+                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [ModernTheme.primaryAccent, ModernTheme.secondaryAccent],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
 
-            HStack {
-                Label("Spent today", systemImage: "sun.max")
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label {
+                        Text("Spent today")
+                    } icon: {
+                        Image(systemName: "sun.and.horizon.fill")
+                    }
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                Spacer()
-
                 Text("£\(String(format: "%.2f", todaysSpending))")
-                    .font(.caption)
-                    .foregroundColor(.red)
+                    .font(.headline)
+                    .foregroundColor(todaysSpending == 0 ? Color.secondary : .red)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(totalBalance >= 0 ? "On track" : "Overdrawn")
+                        .font(.caption2)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(ModernTheme.secondaryAccent.opacity(totalBalance >= 0 ? 0.18 : 0.1))
+                        )
+                        .foregroundStyle(totalBalance >= 0 ? ModernTheme.secondaryAccent : ModernTheme.tertiaryAccent)
+                    Text(Date.now, style: .date)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 6)
+        .glassCard()
+        .overlay(alignment: .topTrailing) {
+            Image(systemName: "sparkles")
+                .font(.title3)
+                .foregroundStyle(ModernTheme.primaryAccent.opacity(0.4))
+                .padding(18)
+        }
     }
 }
 
@@ -329,7 +383,7 @@ private struct StackedAccountDeck: View {
             }
         }
         // Reserve vertical space for the stacked offsets so content below doesn't overlap
-        .frame(height: 160 + CGFloat(max((selectedAccountId == nil ? accounts.count : 1) - 1, 0)) * spacing, alignment: .top)
+        .frame(height: 148 + CGFloat(max((selectedAccountId == nil ? accounts.count : 1) - 1, 0)) * spacing, alignment: .top)
         // Keep small top padding so the deck sits closer to the balance card
         .padding(.top, 10)
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: draggingAccount?.id)
@@ -620,10 +674,7 @@ struct ActivitiesPanelSection: View {
                 }
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .glassCard()
         // Edit sheets
         .sheet(isPresented: $showEditIncome) {
             if let ctx = editingIncome {
@@ -681,6 +732,7 @@ struct ActivitiesPanelSection: View {
 }
 
 private struct ActivityListItemRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let item: ActivitiesPanelSection.Item
 
     private var formattedAmount: String { "£" + String(format: "%.2f", item.amount) }
@@ -710,17 +762,29 @@ private struct ActivityListItemRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(color)
-                .frame(width: 44, height: 44)
-                .overlay(Image(systemName: icon).foregroundColor(.white))
-
+        HStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.85), color.opacity(0.45)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                    )
+                Image(systemName: icon)
+                    .foregroundColor(.white)
+                    .font(.headline)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                HStack(spacing: 6) {
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                HStack(spacing: 4) {
                     Text(item.accountName)
                     if let pot = item.potName, !pot.isEmpty {
                         Text("·")
@@ -732,7 +796,7 @@ private struct ActivityListItemRow: View {
                 if let company = item.company, !company.isEmpty {
                     Text(company)
                         .font(.caption2)
-                        .foregroundStyle(Color(.tertiaryLabel))
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -740,17 +804,24 @@ private struct ActivityListItemRow: View {
 
             VStack(alignment: .trailing, spacing: 4) {
                 Text(formattedAmount)
-                    .font(.subheadline)
-                    .foregroundColor(isIncome ? .green : .primary)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(isIncome ? ModernTheme.secondaryAccent : .primary)
                 Text(dayOfMonthText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.06 : 0.55))
+                .overlay(
+                    RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.18 : 0.16), lineWidth: 0.8)
+                )
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.12), radius: 18, x: 0, y: 12)
     }
 
     private var isIncome: Bool { item.kind == .income }
@@ -815,25 +886,29 @@ private struct EditIncomeSheet: View {
         return true
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                if let account { HStack { Text("Account"); Spacer(); Text(account.name).foregroundStyle(.secondary) } }
-                Section("Income") {
-                    TextField("Name", text: $name)
-                    TextField("Company", text: $company)
-                    TextField("Value", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
-                    if let pots = account?.pots, !pots.isEmpty {
-                        Picker("Pot", selection: $selectedPot) {
-                            Text("None").tag(nil as String?)
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name as String?)
-                            }
+    private var formContent: some View {
+        Form {
+            if let account { HStack { Text("Account"); Spacer(); Text(account.name).foregroundStyle(.secondary) } }
+            Section("Income") {
+                TextField("Name", text: $name)
+                TextField("Company", text: $company)
+                TextField("Value", text: $amount).keyboardType(.decimalPad)
+                TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                if let pots = account?.pots, !pots.isEmpty {
+                    Picker("Pot", selection: $selectedPot) {
+                        Text("None").tag(nil as String?)
+                        ForEach(pots, id: \.name) { pot in
+                            Text(pot.name).tag(pot.name as String?)
                         }
                     }
                 }
             }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            formContent
             .navigationTitle("Edit Income")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
@@ -865,7 +940,10 @@ private struct EditIncomeSheet: View {
                     )
                 }
             }
-            .onAppear { preloadIfNeeded() }
+            .task {
+                await accountsStore.loadAccounts()
+                preloadIfNeeded()
+            }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
             .onChange(of: showSaveReview) { _, isPresented in
                 if !isPresented {
@@ -1045,48 +1123,52 @@ private struct EditTransactionSheet: View {
         return true
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("To") {
-                    Picker("Account", selection: $toAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
-                }
-            }
-            if let pots = toAccount?.pots, !pots.isEmpty {
-                Picker("Pot", selection: $selectedPot) {
-                    Text("None").tag(nil as String?)
-                    ForEach(pots, id: \.name) { pot in
-                        Text(pot.name).tag(pot.name as String?)
-                    }
-                }
-            }
-        }
-        if !creditAccounts.isEmpty {
-            Section("Credit Card Link") {
-                Picker("Linked Card", selection: $linkedCreditAccountId) {
-                    Text("None").tag(nil as Int?)
-                    ForEach(creditAccounts) { account in
+    private var formContent: some View {
+        Form {
+            Section("To") {
+                Picker("Account", selection: $toAccountId) {
+                    Text("Select Account").tag(nil as Int?)
+                    ForEach(accountsStore.accounts) { account in
                         Text(account.name).tag(account.id as Int?)
                     }
                 }
-            }
-        }
-                Section("Details") {
-                    Picker("Payment Type", selection: $paymentType) {
-                        Text("Card").tag("card")
-                        Text("Direct Debit").tag("direct_debit")
-                        Text("Credit Card Charge").tag("credit_card_charge").disabled(true)
+                if let pots = toAccount?.pots, !pots.isEmpty {
+                    Picker("Pot", selection: $selectedPot) {
+                        Text("None").tag(nil as String?)
+                        ForEach(pots, id: \.name) { pot in
+                            Text(pot.name).tag(pot.name as String?)
+                        }
                     }
-                    .pickerStyle(.navigationLink)
-                    TextField("Name", text: $name)
-                    TextField("Vendor", text: $vendor)
-                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
                 }
             }
+            if !creditAccounts.isEmpty {
+                Section("Credit Card Link") {
+                    Picker("Linked Card", selection: $linkedCreditAccountId) {
+                        Text("None").tag(nil as Int?)
+                        ForEach(creditAccounts) { account in
+                            Text(account.name).tag(account.id as Int?)
+                        }
+                    }
+                }
+            }
+            Section("Details") {
+                Picker("Payment Type", selection: $paymentType) {
+                    Text("Card").tag("card")
+                    Text("Direct Debit").tag("direct_debit")
+                    Text("Credit Card Charge").tag("credit_card_charge").disabled(true)
+                }
+                .pickerStyle(.navigationLink)
+                TextField("Name", text: $name)
+                TextField("Vendor", text: $vendor)
+                TextField("Amount", text: $amount).keyboardType(.decimalPad)
+                TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            formContent
             .navigationTitle("Edit Transaction")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
@@ -1118,7 +1200,10 @@ private struct EditTransactionSheet: View {
                     )
                 }
             }
-            .onAppear { preloadIfNeeded() }
+            .task {
+                await accountsStore.loadAccounts()
+                preloadIfNeeded()
+            }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
             .onChange(of: accountsStore.transactions) { _, _ in preloadIfNeeded() }
             .onChange(of: toAccountId) { _, newValue in handleAccountChange(newValue) }
@@ -1348,18 +1433,35 @@ private struct EditTargetSheet: View {
         return true
     }
 
+    private var formContent: some View {
+        Form {
+            if !accountName.isEmpty {
+                HStack { Text("Account"); Spacer(); Text(accountName).foregroundStyle(.secondary) }
+            }
+            Section("Budget") {
+                TextField("Name", text: $name)
+                TextField("Amount", text: $amount).keyboardType(.decimalPad)
+                TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+            }
+        }
+    }
+
+    private var deleteButton: some View {
+        VStack {
+            Button(role: .destructive) { showDeleteConfirmation = true } label: {
+                Text("Delete Budget")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .padding()
+        }
+        .background(.ultraThinMaterial)
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                if !accountName.isEmpty {
-                    HStack { Text("Account"); Spacer(); Text(accountName).foregroundStyle(.secondary) }
-                }
-                Section("Budget") {
-                    TextField("Name", text: $name)
-                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
-                }
-            }
+            formContent
             .navigationTitle("Edit Budget")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
@@ -1368,16 +1470,7 @@ private struct EditTargetSheet: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                VStack {
-                    Button(role: .destructive) { showDeleteConfirmation = true } label: {
-                        Text("Delete Budget")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .padding()
-                }
-                .background(.ultraThinMaterial)
+                deleteButton
             }
             .sheet(isPresented: $showSaveReview) {
                 if let submission = pendingSubmission {
@@ -1391,7 +1484,10 @@ private struct EditTargetSheet: View {
                     )
                 }
             }
-            .onAppear { preloadIfNeeded() }
+            .task {
+                await accountsStore.loadAccounts()
+                preloadIfNeeded()
+            }
             .onChange(of: accountsStore.targets) { _, _ in preloadIfNeeded() }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
             .onChange(of: showSaveReview) { _, isPresented in
@@ -1825,24 +1921,41 @@ private struct AccountCardView: View {
     var onTap: (() -> Void)? = nil
     var onManage: (() -> Void)? = nil
 
-    private var gradient: LinearGradient {
-        let start: Color
-        let end: Color
+    private var gradientColors: [Color] {
         switch account.type {
         case "credit":
-            start = Color.blue
-            end = Color.indigo
+            return [
+                Color(red: 0.95, green: 0.35, blue: 0.64),
+                ModernTheme.tertiaryAccent,
+                Color(red: 0.51, green: 0.35, blue: 0.98)
+            ]
         case "current":
-            start = Color.red
-            end = Color.orange
+            return [
+                ModernTheme.primaryAccent,
+                Color(red: 0.34, green: 0.47, blue: 0.99),
+                ModernTheme.secondaryAccent
+            ]
         case "savings":
-            start = Color.green
-            end = Color.mint
+            return [
+                Color(red: 0.32, green: 0.83, blue: 0.74),
+                ModernTheme.secondaryAccent,
+                Color(red: 0.26, green: 0.52, blue: 0.98)
+            ]
         default:
-            start = Color.purple
-            end = Color.indigo
+            return [
+                ModernTheme.primaryAccent,
+                ModernTheme.tertiaryAccent,
+                Color(red: 0.28, green: 0.21, blue: 0.59)
+            ]
         }
-        return LinearGradient(colors: [start, end], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var gradient: LinearGradient {
+        LinearGradient(
+            colors: gradientColors,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     var body: some View {
@@ -1850,10 +1963,10 @@ private struct AccountCardView: View {
             HStack(alignment: .top) {
                 Label {
                     Text(account.name)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
                 } icon: {
-                    Image(systemName: "person.fill")
-                        .foregroundColor(.white.opacity(0.95))
+                    Image(systemName: icon)
+                        .foregroundColor(.white.opacity(0.9))
                 }
                 .foregroundColor(.white)
 
@@ -1861,7 +1974,7 @@ private struct AccountCardView: View {
 
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(account.formattedBalance)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                     Text("Balance")
                         .font(.caption2)
@@ -1890,17 +2003,33 @@ private struct AccountCardView: View {
                 }
             }
         }
-        .padding(.top, 0)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 14)
-        .frame(maxWidth: .infinity, minHeight: 160, alignment: .leading)
-        .background(gradient)
+        .padding(20)
+        .frame(maxWidth: .infinity, minHeight: 140, alignment: .leading)
+        .background(
+            ZStack {
+                AngularGradient(
+                    gradient: Gradient(colors: [gradientColors.first ?? .clear, ModernTheme.secondaryAccent, gradientColors.last ?? .clear]),
+                    center: .center
+                )
+                .opacity(0.18)
+                gradient
+            }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                .stroke(Color.white.opacity(0.25), lineWidth: 0.8)
         )
         .onTapGesture { onTap?() }
+    }
+
+    private var icon: String {
+        switch account.type {
+        case "credit": return "creditcard.fill"
+        case "savings": return "lock.shield"
+        case "investment": return "chart.line.uptrend.xyaxis"
+        default: return "circle.dashed.inset.filled"
+        }
     }
 }
 
@@ -1919,26 +2048,40 @@ private struct QuickActionsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Shortcuts")
-                .font(.headline)
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                QuickActionButton(icon: "arrow.left.arrow.right", title: "Transfer Schedules", tint: .blue, action: onTransferSchedules)
-                QuickActionButton(icon: "calendar.badge.clock", title: "Income Schedules", tint: .green, action: onIncomeSchedules)
-                QuickActionButton(icon: "chart.pie.fill", title: "Salary Sorter", tint: .purple, action: onSalarySorter)
-                QuickActionButton(icon: "chart.line.downtrend.xyaxis", title: "Balance Reduction", tint: .teal, action: onShowBalanceHistory)
-                QuickActionButton(icon: "arrow.counterclockwise", title: "Reset Balances", tint: .red, action: onResetBalances)
-                QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", tint: .orange, action: onDiagnostics)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Shortcuts")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.3), ModernTheme.primaryAccent.opacity(0.55)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 60, height: 4)
+                    .opacity(0.7)
+            }
+            Text("One-tap access to the workflows you use most.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                QuickActionButton(icon: "arrow.left.arrow.right", title: "Transfer Schedules", tint: ModernTheme.primaryAccent, action: onTransferSchedules)
+                QuickActionButton(icon: "calendar.badge.clock", title: "Income Schedules", tint: ModernTheme.secondaryAccent, action: onIncomeSchedules)
+                QuickActionButton(icon: "chart.pie.fill", title: "Salary Sorter", tint: Color(red: 0.76, green: 0.38, blue: 0.98), action: onSalarySorter)
+                QuickActionButton(icon: "chart.line.downtrend.xyaxis", title: "Balance Reduction", tint: Color(red: 0.27, green: 0.85, blue: 0.96), action: onShowBalanceHistory)
+                QuickActionButton(icon: "arrow.counterclockwise", title: "Reset Balances", tint: Color(red: 1.0, green: 0.44, blue: 0.56), action: onResetBalances)
+                QuickActionButton(icon: "wrench.and.screwdriver", title: "Diagnostics", tint: Color(red: 1.0, green: 0.72, blue: 0.33), action: onDiagnostics)
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .glassCard()
     }
 }
 
 private struct QuickActionButton: View {
+    @Environment(\.colorScheme) private var colorScheme
     let icon: String
     let title: String
     let tint: Color
@@ -1946,18 +2089,54 @@ private struct QuickActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundColor(.white)
-                    .frame(width: 50, height: 50)
-                    .background(tint)
-                    .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [tint.opacity(0.9), tint.opacity(0.5)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                        )
+                    Image(systemName: icon)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                }
                 Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(minHeight: 32, alignment: .top)
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [tint.opacity(0.55), tint.opacity(0.1)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 4)
+                    .opacity(0.7)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
+            .background(
+                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.06 : 0.55))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .stroke(Color.white.opacity(colorScheme == .dark ? 0.22 : 0.14), lineWidth: 0.8)
+                    )
+            )
         }
         .buttonStyle(.plain)
     }
@@ -2252,6 +2431,7 @@ private struct PotEditContext: Identifiable, Hashable {
 }
 
 private struct PotsPanelSection: View {
+    @Environment(\.colorScheme) private var colorScheme
     let accounts: [Account]
     let potsByAccount: [Int: [Pot]]
     var selectedAccountId: Int? = nil
@@ -2300,13 +2480,25 @@ private struct PotsPanelSection: View {
                     .font(.headline)
                 Spacer()
                 if let onManagePots {
-                    Button("Manage") { onManagePots() }
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.blue.opacity(0.12))
-                        .foregroundColor(.blue)
-                        .clipShape(Capsule())
+                    Button(action: onManagePots) {
+                        Label("Manage", systemImage: "slider.horizontal.3")
+                            .labelStyle(.titleOnly)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(.white)
+                            .background(
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [ModernTheme.secondaryAccent, ModernTheme.primaryAccent],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -2367,9 +2559,15 @@ private struct PotsPanelSection: View {
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                .fill(Color.white.opacity(colorScheme == .dark ? 0.06 : 0.55))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.12), lineWidth: 0.8)
+                                )
+                        )
+                        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.12), radius: 18, x: 0, y: 12)
                     }
                 }
             }
@@ -2465,19 +2663,34 @@ private struct PotEditorSheet: View {
 }
 
 private struct PotRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let pot: Pot
     let accountName: String
 
     var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.purple.opacity(0.2))
-                .frame(width: 44, height: 44)
-                .overlay(Image(systemName: "tray.fill").foregroundColor(.purple))
+        HStack(spacing: 16) {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [ModernTheme.primaryAccent.opacity(0.75), ModernTheme.tertiaryAccent.opacity(0.45)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 48, height: 48)
+                .overlay(
+                    Image(systemName: "tray.fill")
+                        .foregroundStyle(.white)
+                        .font(.headline)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(pot.name)
-                    .font(.subheadline).fontWeight(.medium)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                 Text(accountName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -2487,15 +2700,29 @@ private struct PotRow: View {
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text("£\(String(format: "%.2f", pot.balance))")
-                    .font(.subheadline).foregroundColor(.primary)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent, ModernTheme.primaryAccent],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
                 Text("Balance")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                )
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.12), radius: 16, x: 0, y: 10)
     }
 }
 

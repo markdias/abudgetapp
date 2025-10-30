@@ -4,6 +4,7 @@ struct TransfersView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @EnvironmentObject private var incomeSchedulesStore: IncomeSchedulesStore
     @EnvironmentObject private var transferSchedulesStore: TransferSchedulesStore
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingIncomeSchedules = false
     @State private var showingTransferSchedules = false
     @State private var showingProcessedTransactions = false
@@ -14,31 +15,37 @@ struct TransfersView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
-                    VStack(spacing: 16) {
-                        LargeActionButton(title: "Transfer Schedules", color: .blue) { showingTransferSchedules = true }
-                        LargeActionButton(title: "Income Schedules", color: .green) {
-                            showingIncomeSchedules = true
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        VStack(spacing: 18) {
+                            LargeActionButton(title: "Transfer Schedules", icon: "arrow.left.arrow.right.circle.fill", gradient: [ModernTheme.primaryAccent, Color(red: 0.32, green: 0.72, blue: 1.0)]) { showingTransferSchedules = true }
+                            LargeActionButton(title: "Income Schedules", icon: "calendar.badge.clock", gradient: [ModernTheme.secondaryAccent, Color(red: 0.39, green: 0.95, blue: 0.82)]) {
+                                showingIncomeSchedules = true
+                            }
+                            LargeActionButton(title: "Processed Transactions", icon: "checklist.checked", gradient: [Color(red: 0.27, green: 0.85, blue: 0.96), ModernTheme.primaryAccent]) {
+                                showingProcessedTransactions = true
+                            }
+                            LargeActionButton(title: "Salary Sorter", icon: "chart.pie.fill", gradient: [Color(red: 0.76, green: 0.38, blue: 0.98), ModernTheme.tertiaryAccent]) { showingSalarySorter = true }
+                            LargeActionButton(title: "Balance Reduction", icon: "chart.line.downtrend.xyaxis", gradient: [Color(red: 0.19, green: 0.65, blue: 0.98), ModernTheme.secondaryAccent]) {
+                                showingBalanceHistory = true
+                            }
+                            LargeActionButton(title: "Reset Balance", icon: "arrow.counterclockwise.circle.fill", gradient: [Color(red: 1.0, green: 0.44, blue: 0.56), Color(red: 1.0, green: 0.68, blue: 0.41)]) {
+                                showingResetConfirm = true
+                            }
                         }
-                        LargeActionButton(title: "Processed Transactions", color: .teal) {
-                            showingProcessedTransactions = true
-                        }
-                        LargeActionButton(title: "Salary Sorter", color: .purple) { showingSalarySorter = true }
-                        LargeActionButton(title: "Balance Reduction", color: .indigo) {
-                            showingBalanceHistory = true
-                        }
-                        LargeActionButton(title: "Reset Balance", color: .red) {
-                            showingResetConfirm = true
-                        }
+                        .frame(maxWidth: 480)
                     }
-                    .frame(maxWidth: 420)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
                 }
-                .padding(.vertical, 24)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle("Transfers")
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
             .sheet(isPresented: $showingIncomeSchedules) {
                 ManageIncomeSchedulesView(isPresented: $showingIncomeSchedules)
             }
@@ -76,28 +83,74 @@ struct TransfersView: View {
 }
 
 private struct LargeActionButton: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
-    let color: Color
+    let icon: String
+    let gradient: [Color]
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.headline)
-                .fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    gradient.first ?? ModernTheme.primaryAccent,
+                                    gradient.last ?? ModernTheme.secondaryAccent
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 48, height: 48)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                        )
+                    Image(systemName: icon)
+                        .foregroundColor(.white)
+                        .font(.title3)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: ModernTheme.cardCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: gradient.map { $0.opacity(0.85) } + [Color.white.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ModernTheme.cardCornerRadius, style: .continuous)
+                            .stroke(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.16), lineWidth: 0.8)
+                    )
+            )
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 22, x: 0, y: 16)
         }
-        .foregroundStyle(.white)
-        .background(color)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: color.opacity(0.18), radius: 8, x: 0, y: 4)
+        .buttonStyle(.plain)
         .accessibilityAddTraits(.isButton)
     }
 }
 
 struct BalanceReductionView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool
     @State private var isReducing = false
     @AppStorage("autoReduceBalancesEnabled") private var autoReduceEnabled = false
@@ -149,84 +202,169 @@ struct BalanceReductionView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Button {
-                        Task { await runManualReduction() }
-                    } label: {
-                        HStack(spacing: 12) {
-                            if isReducing {
-                                ProgressView()
-                            } else {
-                                Image(systemName: "play.circle.fill")
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            Text(isReducing ? "Reducing…" : "Reduce Now")
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .disabled(isReducing)
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(
-                            autoReduceEnabled
-                                ? "Automatic reduction runs when the app becomes active."
-                                : "Automatic reduction is off.",
-                            systemImage: autoReduceEnabled ? "bolt.badge.clock" : "bolt.slash"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                        if let summary = lastRunSummary {
-                            Text(summary)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let message = lastManualMessage {
-                            Text(message)
-                                .font(.footnote)
-                                .foregroundColor(.teal)
-                        }
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        reduceNowCard
+                        reductionRunsCard
                     }
-                    .padding(.vertical, 4)
-                }
-
-                Section("Reduction Runs") {
-                    if groupedRuns.isEmpty {
-                        ContentUnavailableView(
-                            "No Reductions Logged",
-                            systemImage: "chart.line.downtrend.xyaxis",
-                            description: Text("Run the reduction workflow to see a breakdown of changes.")
-                        )
-                        .listRowBackground(Color.clear)
-                    } else {
-                        ForEach(groupedRuns) { run in
-                            runRow(for: run)
-                        }
-                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
+                    .frame(maxWidth: 600)
                 }
             }
-            .listStyle(.insetGrouped)
             .navigationTitle("Balance Reduction")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { isPresented = false }
                 }
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
         }
+    }
+
+    private var reduceNowCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Reduce Balances")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.19, green: 0.65, blue: 0.98).opacity(0.4), ModernTheme.secondaryAccent.opacity(0.6)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 70, height: 4)
+                    .opacity(0.6)
+            }
+
+            Button {
+                Task { await runManualReduction() }
+            } label: {
+                HStack(spacing: 6) {
+                    if isReducing {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "play.circle.fill")
+                    }
+                    Text(isReducing ? "Reducing…" : "Reduce Now")
+                }
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(red: 0.19, green: 0.65, blue: 0.98), ModernTheme.secondaryAccent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+                .foregroundColor(.white)
+            }
+            .buttonStyle(.plain)
+            .disabled(isReducing)
+            .opacity(isReducing ? 0.6 : 1)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    autoReduceEnabled
+                        ? "Automatic reduction runs when the app becomes active."
+                        : "Automatic reduction is off.",
+                    systemImage: autoReduceEnabled ? "bolt.badge.clock" : "bolt.slash"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let summary = lastRunSummary {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let message = lastManualMessage {
+                    Text(message)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(red: 0.19, green: 0.65, blue: 0.98))
+                }
+            }
+        }
+        .glassCard()
+    }
+
+    private var reductionRunsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Reduction History")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+            }
+
+            if groupedRuns.isEmpty {
+                ContentUnavailableView(
+                    "No Reductions Logged",
+                    systemImage: "chart.line.downtrend.xyaxis",
+                    description: Text("Run the reduction workflow to see a breakdown of changes.")
+                )
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(groupedRuns) { run in
+                        runRow(for: run)
+                    }
+                }
+            }
+        }
+        .glassCard()
     }
 
     @ViewBuilder
     private func runRow(for run: RunGroup) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(formattedHeader(for: run))
-                    .font(.subheadline.weight(.semibold))
+        let total = run.totalReduction
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                total > 0 ? Color(red: 0.19, green: 0.65, blue: 0.98).opacity(0.75) : Color.gray.opacity(0.5),
+                                total > 0 ? ModernTheme.secondaryAccent.opacity(0.5) : Color.gray.opacity(0.3)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .overlay(
+                        Image(systemName: total > 0 ? "chart.line.downtrend.xyaxis" : "minus.circle")
+                            .foregroundStyle(.white)
+                            .font(.headline)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                    )
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(formattedHeader(for: run))
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    Text(total > 0 ? "Reduced by \(formatCurrency(total))" : "No change")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(total > 0 ? Color(red: 0.19, green: 0.65, blue: 0.98) : .secondary)
+                }
+
                 Spacer()
-                let total = run.totalReduction
-                Text(total > 0 ? "-\(formatCurrency(total))" : "No change")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(total > 0 ? .teal : .secondary)
             }
 
             VStack(spacing: 8) {
@@ -235,30 +373,43 @@ struct BalanceReductionView: View {
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                )
+        )
     }
 
     @ViewBuilder
     private func entryRow(for entry: BalanceReductionLog) -> some View {
         let reduction = max(entry.reductionAmount, 0)
 
-        HStack(alignment: .firstTextBaseline) {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.accountName)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.caption.weight(.semibold))
                 Text("\(formatCurrency(entry.baselineBalance)) → \(formatCurrency(entry.resultingBalance))")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             Text(reduction > 0 ? "-\(formatCurrency(reduction))" : "No change")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(reduction > 0 ? .teal : .secondary)
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(reduction > 0 ? Color(red: 0.19, green: 0.65, blue: 0.98).opacity(0.18) : Color.gray.opacity(0.18))
+                )
+                .foregroundStyle(reduction > 0 ? Color(red: 0.19, green: 0.65, blue: 0.98) : .secondary)
         }
+        .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .padding(.horizontal, 12)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func formattedHeader(for run: RunGroup) -> String {

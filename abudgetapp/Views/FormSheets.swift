@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AccountFormView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool
 
     @State private var name = ""
@@ -16,23 +17,29 @@ struct AccountFormView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Details") {
-                    TextField("Name", text: $name)
-                    TextField("Starting Balance", text: $balance)
-                        .keyboardType(.decimalPad)
-                    Picker("Type", selection: $type) {
-                        ForEach(accountTypes, id: \.self) { value in
-                            Text(value.capitalized).tag(value)
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                Form {
+                    Section("Details") {
+                        TextField("Name", text: $name)
+                        TextField("Starting Balance", text: $balance)
+                            .keyboardType(.decimalPad)
+                        Picker("Type", selection: $type) {
+                            ForEach(accountTypes, id: \.self) { value in
+                                Text(value.capitalized).tag(value)
+                            }
+                        }
+                        TextField("Account Category", text: $accountType)
+                        if type == "credit" {
+                            TextField("Credit Limit", text: $creditLimit)
+                                .keyboardType(.decimalPad)
+                            Toggle("Exclude from Reset", isOn: $excludeFromReset)
                         }
                     }
-                    TextField("Account Category", text: $accountType)
-                    if type == "credit" {
-                        TextField("Credit Limit", text: $creditLimit)
-                            .keyboardType(.decimalPad)
-                        Toggle("Exclude from Reset", isOn: $excludeFromReset)
-                    }
                 }
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
             }
             .navigationTitle("Add Account")
             .toolbar {
@@ -79,6 +86,7 @@ struct AccountFormView: View {
 struct EditAccountFormView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     let account: Account
 
@@ -91,21 +99,27 @@ struct EditAccountFormView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Details") {
-                    TextField("Name", text: $name)
-                    TextField("Balance", text: $balance).keyboardType(.decimalPad)
-                    Picker("Type", selection: $type) {
-                        ForEach(["current", "credit", "savings", "investment"], id: \.self) { value in
-                            Text(value.capitalized).tag(value)
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                Form {
+                    Section("Details") {
+                        TextField("Name", text: $name)
+                        TextField("Balance", text: $balance).keyboardType(.decimalPad)
+                        Picker("Type", selection: $type) {
+                            ForEach(["current", "credit", "savings", "investment"], id: \.self) { value in
+                                Text(value.capitalized).tag(value)
+                            }
+                        }
+                        TextField("Account Category", text: $accountType)
+                        if type == "credit" {
+                            TextField("Credit Limit", text: $creditLimit).keyboardType(.decimalPad)
+                            Toggle("Exclude from Reset", isOn: $excludeFromReset)
                         }
                     }
-                    TextField("Account Category", text: $accountType)
-                    if type == "credit" {
-                        TextField("Credit Limit", text: $creditLimit).keyboardType(.decimalPad)
-                        Toggle("Exclude from Reset", isOn: $excludeFromReset)
-                    }
                 }
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
             }
             .navigationTitle("Edit Account")
             .toolbar {
@@ -156,6 +170,7 @@ struct EditAccountFormView: View {
 struct PotFormView: View {
     @EnvironmentObject private var potsStore: PotsStore
     @EnvironmentObject private var accountsStore: AccountsStore
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool
 
     @State private var selectedAccountId: Int?
@@ -164,20 +179,26 @@ struct PotFormView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Account") {
-                    Picker("Account", selection: $selectedAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                Form {
+                    Section("Account") {
+                        Picker("Account", selection: $selectedAccountId) {
+                            Text("Select Account").tag(nil as Int?)
+                            ForEach(accountsStore.accounts) { account in
+                                Text(account.name).tag(account.id as Int?)
+                            }
                         }
                     }
+                    Section("Details") {
+                        TextField("Name", text: $name)
+                        TextField("Balance", text: $balance)
+                            .keyboardType(.decimalPad)
+                    }
                 }
-                Section("Details") {
-                    TextField("Name", text: $name)
-                    TextField("Balance", text: $balance)
-                        .keyboardType(.decimalPad)
-                }
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
             }
             .navigationTitle("Add Pot")
             .toolbar {

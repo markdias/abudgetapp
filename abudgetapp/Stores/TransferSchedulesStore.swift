@@ -92,10 +92,35 @@ final class TransferSchedulesStore: ObservableObject {
 
     func executeAll() async {
         do {
-            _ = try await store.executeAllTransferSchedules()
+            let result = try await store.executeAllTransferSchedules()
             schedules = await store.currentTransferSchedules()
             await accountsStore?.loadAccounts()
-            statusMessage = StatusMessage(title: "Executed All", message: "Applied all active transfers", kind: .success)
+
+            let totalPending = schedules.filter { $0.isActive && !$0.isCompleted }.count
+            let executed = result.executed_count
+
+            if executed == 0 && totalPending > 0 {
+                // No transfers executed (all had insufficient funds or other errors)
+                statusMessage = StatusMessage(
+                    title: "No Transfers Executed",
+                    message: "All transfers skipped due to insufficient funds or errors",
+                    kind: .warning
+                )
+            } else if totalPending > 0 {
+                // Some transfers executed, but some are still pending
+                statusMessage = StatusMessage(
+                    title: "Partially Executed",
+                    message: "Executed \(executed) transfer(s), \(totalPending) remaining due to insufficient funds",
+                    kind: .warning
+                )
+            } else {
+                // All transfers executed successfully
+                statusMessage = StatusMessage(
+                    title: "Executed All",
+                    message: "Applied all \(executed) active transfer(s)",
+                    kind: .success
+                )
+            }
         } catch let error as LocalBudgetStore.StoreError {
             let dataError = error.asBudgetDataError
             lastError = dataError

@@ -4,6 +4,7 @@ struct ProcessedTransactionsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @AppStorage("autoProcessTransactionsEnabled") private var autoProcessingEnabled = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var isProcessing = false
     @State private var lastResult: ProcessTransactionsResult?
@@ -76,73 +77,29 @@ struct ProcessedTransactionsView: View {
                 )
             }
             .sorted {
-            if $0.scheduledDay == $1.scheduledDay {
-                return $0.transaction.name < $1.transaction.name
+                if $0.scheduledDay == $1.scheduledDay {
+                    return $0.transaction.name < $1.transaction.name
+                }
+                return $0.scheduledDay < $1.scheduledDay
             }
-            return $0.scheduledDay < $1.scheduledDay
-        }
     }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Button {
-                        Task { await runManualProcess() }
-                    } label: {
-                        HStack {
-                            if isProcessing {
-                                ProgressView()
-                            } else {
-                                Image(systemName: "play.circle.fill")
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            Text(isProcessing ? "Processing…" : "Process Transactions Now")
-                                .fontWeight(.semibold)
+            ZStack {
+                ModernTheme.background(for: colorScheme)
+                    .ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 24) {
+                        processingCard
+                        scheduledTransactionsCard
+                        if !processedLogsThisPeriod.isEmpty {
+                            processedLogsCard
                         }
                     }
-                    .disabled(isProcessing)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(
-                            autoProcessingEnabled ? "Automatic processing runs when the app opens." : "Automatic processing is off.",
-                            systemImage: autoProcessingEnabled ? "bolt.badge.clock" : "bolt.slash"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                        if let summary = summaryText {
-                            Text(summary)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                Section("Scheduled Transactions") {
-                    if scheduledItems.isEmpty {
-                        ContentUnavailableView(
-                            "No Scheduled Transactions",
-                            systemImage: "tray",
-                            description: Text("Add transactions in Home → Add Transaction to see them here.")
-                        )
-                    } else {
-                        ForEach(scheduledItems) { item in
-                            ScheduledItemRow(item: item)
-                        }
-                    }
-                }
-
-                if !processedLogsThisPeriod.isEmpty {
-                    Section("Processed This Month") {
-                        ForEach(processedLogsThisPeriod) { log in
-                            ProcessedLogRow(
-                                log: log,
-                                accountName: accountsStore.account(for: log.accountId)?.name ?? "Account #\(log.accountId)"
-                            )
-                        }
-                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 40)
                 }
             }
             .navigationTitle("Processed Transactions")
@@ -151,7 +108,142 @@ struct ProcessedTransactionsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
         }
+    }
+
+    private var processingCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Manual Processing")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.primaryAccent.opacity(0.45), ModernTheme.secondaryAccent.opacity(0.6)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 64, height: 4)
+                    .opacity(0.7)
+            }
+
+            Button {
+                Task { await runManualProcess() }
+            } label: {
+                HStack(spacing: 12) {
+                    if isProcessing {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title3)
+                    }
+                    Text(isProcessing ? "Processing…" : "Process Transactions Now")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: ModernTheme.cardCornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [ModernTheme.primaryAccent, ModernTheme.secondaryAccent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isProcessing)
+            .opacity(isProcessing ? 0.7 : 1)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Label(
+                    autoProcessingEnabled ? "Automatic processing runs when the app opens." : "Automatic processing is off.",
+                    systemImage: autoProcessingEnabled ? "bolt.badge.clock" : "bolt.slash"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let summary = summaryText {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .glassCard()
+    }
+
+    private var scheduledTransactionsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Scheduled Transactions")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.5), ModernTheme.primaryAccent.opacity(0.5)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 72, height: 4)
+                    .opacity(0.7)
+            }
+
+            if scheduledItems.isEmpty {
+                ContentUnavailableView(
+                    "No Scheduled Transactions",
+                    systemImage: "tray",
+                    description: Text("Add transactions in Home → Add Transaction to see them here.")
+                )
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(scheduledItems) { item in
+                        ScheduledItemRow(item: item)
+                    }
+                }
+            }
+        }
+        .glassCard()
+    }
+
+    private var processedLogsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Processed This Month")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.tertiaryAccent.opacity(0.45), ModernTheme.primaryAccent.opacity(0.4)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 80, height: 4)
+                    .opacity(0.7)
+            }
+
+            VStack(spacing: 12) {
+                ForEach(processedLogsThisPeriod) { log in
+                    ProcessedLogRow(
+                        log: log,
+                        accountName: accountsStore.account(for: log.accountId)?.name ?? "Account #\(log.accountId)"
+                    )
+                }
+            }
+        }
+        .glassCard()
     }
 
     private var summaryText: String? {
@@ -188,18 +280,35 @@ struct ProcessedTransactionsView: View {
     }
 
     private struct ScheduledItemRow: View {
+        @Environment(\.colorScheme) private var colorScheme
         let item: ScheduledItem
 
         var body: some View {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: item.isProcessed ? "checkmark.circle.fill" : "clock.badge.exclamationmark")
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(item.isProcessed ? .green : .orange)
-                    .font(.title3)
+            HStack(alignment: .center, spacing: 16) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: item.isProcessed
+                                ? [ModernTheme.secondaryAccent, Color.green.opacity(0.55)]
+                                : [ModernTheme.primaryAccent, ModernTheme.tertiaryAccent.opacity(0.55)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .overlay(
+                        Image(systemName: item.isProcessed ? "checkmark.circle.fill" : "clock.badge.exclamationmark")
+                            .foregroundStyle(.white)
+                            .font(.headline)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                    )
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.transaction.name)
-                        .font(.headline)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(item.transaction.name.isEmpty ? item.transaction.vendor : item.transaction.name)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
                     Text(destinationLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -208,15 +317,25 @@ struct ProcessedTransactionsView: View {
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 6) {
                     Text(currencyString(item.transaction.amount))
-                        .font(.headline)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(ModernTheme.secondaryAccent)
                     Text("Day \(item.scheduledDay)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                    )
+            )
         }
 
         private var destinationLine: String {
@@ -229,7 +348,7 @@ struct ProcessedTransactionsView: View {
         @ViewBuilder
         private var infoLine: some View {
             if let processedAt = item.processedAt {
-                Text("Processed \(ProcessedTransactionsView.displayDateFormatter.string(from: processedAt))")
+                Text(ProcessedTransactionsView.displayDateFormatter.string(from: processedAt))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else if let vendorLine = vendorLabel {
@@ -263,24 +382,58 @@ struct ProcessedTransactionsView: View {
     }
 
     private struct ProcessedLogRow: View {
+        @Environment(\.colorScheme) private var colorScheme
         let log: ProcessedTransactionLog
         let accountName: String
 
         var body: some View {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 16) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: log.wasManual
+                                ? [ModernTheme.tertiaryAccent, Color.orange.opacity(0.55)]
+                                : [ModernTheme.secondaryAccent, Color.green.opacity(0.55)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .overlay(
+                        Image(systemName: log.wasManual ? "hand.tap.fill" : "clock.fill")
+                            .foregroundStyle(.white)
+                            .font(.headline)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                    )
+
+                VStack(alignment: .leading, spacing: 6) {
                     Text(log.name)
-                        .font(.headline)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
                     Text(destinationLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     infoStack
                 }
+
                 Spacer()
+
                 Text(currencyString(log.amount))
-                    .font(.headline)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(ModernTheme.secondaryAccent)
             }
-            .padding(.vertical, 4)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                    )
+            )
         }
 
         private var destinationLine: String {
