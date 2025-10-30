@@ -59,73 +59,77 @@ struct HomeView: View {
 
     // Activity feed removed
 
+    private var mainContent: some View {
+        ZStack(alignment: .top) {
+            ModernTheme.background(for: colorScheme)
+                .ignoresSafeArea()
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+
+                    if reorderableAccounts.isEmpty {
+                        ContentUnavailableView(
+                            "No Accounts",
+                            systemImage: "creditcard",
+                            description: Text("Use the add menu to create your first account.")
+                        )
+                        .frame(maxWidth: .infinity)
+                        .glassCard()
+                    } else {
+                        StackedAccountDeck(
+                            accounts: reorderableAccounts,
+                            selectedAccountId: $selectedAccountId,
+                            spacing: cardSpacing,
+                            onReorder: handleReorder,
+                            onAddPot: { _ in showingAddPot = true },
+                            onEditAccount: { account in editingAccount = account },
+                            onDelete: { account in
+                                Task { await accountsStore.deleteAccount(id: account.id) }
+                            }
+                        )
+                    }
+
+                    ActivitiesPanelSection(
+                        accounts: accountsStore.accounts,
+                        transactions: accountsStore.transactions,
+                        targets: accountsStore.targets,
+                        selectedAccountId: selectedAccountId,
+                        searchText: searchText
+                    )
+
+                    PotsPanelSection(
+                        accounts: accountsStore.accounts,
+                        potsByAccount: potsStore.potsByAccount,
+                        selectedAccountId: selectedAccountId,
+                        onTapPot: { account, pot in
+                            selectedPotContext = PotEditContext(account: account, pot: pot)
+                        },
+                        onDeletePot: { account, pot in
+                            Task { await potsStore.deletePot(accountId: account.id, potName: pot.name) }
+                        },
+                        onManagePots: { showingPotsManager = true }
+                    )
+
+                    QuickActionsView(
+                        onTransferSchedules: { showingTransferSchedules = true },
+                        onIncomeSchedules: { showingIncomeSchedules = true },
+                        onSalarySorter: { showingSalarySorter = true },
+                        onShowBalanceHistory: { showingBalanceHistory = true },
+                        onResetBalances: { showingResetConfirm = true },
+                        onDiagnostics: { showingDiagnostics = true }
+                    )
+
+                    BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 40)
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                ModernTheme.background(for: colorScheme)
-                    .ignoresSafeArea()
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 24) {
-
-                        if reorderableAccounts.isEmpty {
-                            ContentUnavailableView(
-                                "No Accounts",
-                                systemImage: "creditcard",
-                                description: Text("Use the add menu to create your first account.")
-                            )
-                            .frame(maxWidth: .infinity)
-                            .glassCard()
-                        } else {
-                            StackedAccountDeck(
-                                accounts: reorderableAccounts,
-                                selectedAccountId: $selectedAccountId,
-                                spacing: cardSpacing,
-                                onReorder: handleReorder,
-                                onAddPot: { _ in showingAddPot = true },
-                                onEditAccount: { account in editingAccount = account },
-                                onDelete: { account in
-                                    Task { await accountsStore.deleteAccount(id: account.id) }
-                                }
-                            )
-                        }
-
-                        ActivitiesPanelSection(
-                            accounts: accountsStore.accounts,
-                            transactions: accountsStore.transactions,
-                            targets: accountsStore.targets,
-                            selectedAccountId: selectedAccountId,
-                            searchText: searchText
-                        )
-
-                        PotsPanelSection(
-                            accounts: accountsStore.accounts,
-                            potsByAccount: potsStore.potsByAccount,
-                            selectedAccountId: selectedAccountId,
-                            onTapPot: { account, pot in
-                                selectedPotContext = PotEditContext(account: account, pot: pot)
-                            },
-                            onDeletePot: { account, pot in
-                                Task { await potsStore.deletePot(accountId: account.id, potName: pot.name) }
-                            },
-                            onManagePots: { showingPotsManager = true }
-                        )
-
-                        QuickActionsView(
-                            onTransferSchedules: { showingTransferSchedules = true },
-                            onIncomeSchedules: { showingIncomeSchedules = true },
-                            onSalarySorter: { showingSalarySorter = true },
-                            onShowBalanceHistory: { showingBalanceHistory = true },
-                            onResetBalances: { showingResetConfirm = true },
-                            onDiagnostics: { showingDiagnostics = true }
-                        )
-
-                        BalanceSummaryCard(totalBalance: totalBalance, todaysSpending: todaysSpending)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
-                    .padding(.bottom, 40)
-                }
-            }
+            mainContent
             .navigationTitle("Dashboard")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -882,25 +886,29 @@ private struct EditIncomeSheet: View {
         return true
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                if let account { HStack { Text("Account"); Spacer(); Text(account.name).foregroundStyle(.secondary) } }
-                Section("Income") {
-                    TextField("Name", text: $name)
-                    TextField("Company", text: $company)
-                    TextField("Value", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
-                    if let pots = account?.pots, !pots.isEmpty {
-                        Picker("Pot", selection: $selectedPot) {
-                            Text("None").tag(nil as String?)
-                            ForEach(pots, id: \.name) { pot in
-                                Text(pot.name).tag(pot.name as String?)
-                            }
+    private var formContent: some View {
+        Form {
+            if let account { HStack { Text("Account"); Spacer(); Text(account.name).foregroundStyle(.secondary) } }
+            Section("Income") {
+                TextField("Name", text: $name)
+                TextField("Company", text: $company)
+                TextField("Value", text: $amount).keyboardType(.decimalPad)
+                TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                if let pots = account?.pots, !pots.isEmpty {
+                    Picker("Pot", selection: $selectedPot) {
+                        Text("None").tag(nil as String?)
+                        ForEach(pots, id: \.name) { pot in
+                            Text(pot.name).tag(pot.name as String?)
                         }
                     }
                 }
             }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            formContent
             .navigationTitle("Edit Income")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
@@ -933,7 +941,7 @@ private struct EditIncomeSheet: View {
                 }
             }
             .task {
-                await accountsStore.load()
+                await accountsStore.loadAccounts()
                 preloadIfNeeded()
             }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
@@ -1115,48 +1123,52 @@ private struct EditTransactionSheet: View {
         return true
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("To") {
-                    Picker("Account", selection: $toAccountId) {
-                        Text("Select Account").tag(nil as Int?)
-                        ForEach(accountsStore.accounts) { account in
-                            Text(account.name).tag(account.id as Int?)
-                }
-            }
-            if let pots = toAccount?.pots, !pots.isEmpty {
-                Picker("Pot", selection: $selectedPot) {
-                    Text("None").tag(nil as String?)
-                    ForEach(pots, id: \.name) { pot in
-                        Text(pot.name).tag(pot.name as String?)
-                    }
-                }
-            }
-        }
-        if !creditAccounts.isEmpty {
-            Section("Credit Card Link") {
-                Picker("Linked Card", selection: $linkedCreditAccountId) {
-                    Text("None").tag(nil as Int?)
-                    ForEach(creditAccounts) { account in
+    private var formContent: some View {
+        Form {
+            Section("To") {
+                Picker("Account", selection: $toAccountId) {
+                    Text("Select Account").tag(nil as Int?)
+                    ForEach(accountsStore.accounts) { account in
                         Text(account.name).tag(account.id as Int?)
                     }
                 }
-            }
-        }
-                Section("Details") {
-                    Picker("Payment Type", selection: $paymentType) {
-                        Text("Card").tag("card")
-                        Text("Direct Debit").tag("direct_debit")
-                        Text("Credit Card Charge").tag("credit_card_charge").disabled(true)
+                if let pots = toAccount?.pots, !pots.isEmpty {
+                    Picker("Pot", selection: $selectedPot) {
+                        Text("None").tag(nil as String?)
+                        ForEach(pots, id: \.name) { pot in
+                            Text(pot.name).tag(pot.name as String?)
+                        }
                     }
-                    .pickerStyle(.navigationLink)
-                    TextField("Name", text: $name)
-                    TextField("Vendor", text: $vendor)
-                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
                 }
             }
+            if !creditAccounts.isEmpty {
+                Section("Credit Card Link") {
+                    Picker("Linked Card", selection: $linkedCreditAccountId) {
+                        Text("None").tag(nil as Int?)
+                        ForEach(creditAccounts) { account in
+                            Text(account.name).tag(account.id as Int?)
+                        }
+                    }
+                }
+            }
+            Section("Details") {
+                Picker("Payment Type", selection: $paymentType) {
+                    Text("Card").tag("card")
+                    Text("Direct Debit").tag("direct_debit")
+                    Text("Credit Card Charge").tag("credit_card_charge").disabled(true)
+                }
+                .pickerStyle(.navigationLink)
+                TextField("Name", text: $name)
+                TextField("Vendor", text: $vendor)
+                TextField("Amount", text: $amount).keyboardType(.decimalPad)
+                TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            formContent
             .navigationTitle("Edit Transaction")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
@@ -1189,7 +1201,7 @@ private struct EditTransactionSheet: View {
                 }
             }
             .task {
-                await accountsStore.load()
+                await accountsStore.loadAccounts()
                 preloadIfNeeded()
             }
             .onChange(of: accountsStore.accounts) { _, _ in preloadIfNeeded() }
@@ -1421,18 +1433,35 @@ private struct EditTargetSheet: View {
         return true
     }
 
+    private var formContent: some View {
+        Form {
+            if !accountName.isEmpty {
+                HStack { Text("Account"); Spacer(); Text(accountName).foregroundStyle(.secondary) }
+            }
+            Section("Budget") {
+                TextField("Name", text: $name)
+                TextField("Amount", text: $amount).keyboardType(.decimalPad)
+                TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+            }
+        }
+    }
+
+    private var deleteButton: some View {
+        VStack {
+            Button(role: .destructive) { showDeleteConfirmation = true } label: {
+                Text("Delete Budget")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .padding()
+        }
+        .background(.ultraThinMaterial)
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                if !accountName.isEmpty {
-                    HStack { Text("Account"); Spacer(); Text(accountName).foregroundStyle(.secondary) }
-                }
-                Section("Budget") {
-                    TextField("Name", text: $name)
-                    TextField("Amount", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
-                }
-            }
+            formContent
             .navigationTitle("Edit Budget")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Close") { isPresented = false } }
@@ -1441,16 +1470,7 @@ private struct EditTargetSheet: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                VStack {
-                    Button(role: .destructive) { showDeleteConfirmation = true } label: {
-                        Text("Delete Budget")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .padding()
-                }
-                .background(.ultraThinMaterial)
+                deleteButton
             }
             .sheet(isPresented: $showSaveReview) {
                 if let submission = pendingSubmission {
@@ -1465,7 +1485,7 @@ private struct EditTargetSheet: View {
                 }
             }
             .task {
-                await accountsStore.load()
+                await accountsStore.loadAccounts()
                 preloadIfNeeded()
             }
             .onChange(of: accountsStore.targets) { _, _ in preloadIfNeeded() }
