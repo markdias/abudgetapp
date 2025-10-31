@@ -5,8 +5,6 @@ struct SettingsView: View {
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
-    @AppStorage("autoProcessTransactionsEnabled") private var autoProcessTransactionsEnabled = false
-    @AppStorage("autoReduceBalancesEnabled") private var autoReduceBalancesEnabled = false
 
     @State private var storageStatus: String?
     @State private var storageStatusIsSuccess = false
@@ -16,6 +14,8 @@ struct SettingsView: View {
     @State private var showingImporter = false
     @State private var showingExporter = false
     @State private var exportDocument = JSONDocument()
+    @State private var showingExecutionManagement = false
+    @State private var executionLogs: [ExecutionLog] = []
 
     var body: some View {
         NavigationStack {
@@ -26,9 +26,9 @@ struct SettingsView: View {
                     VStack(spacing: 24) {
                         appearanceCard
                         activitiesCard
-                        automationCard
                         storageCard
                         dataManagementCard
+                        logsCard
                         diagnosticsCard
                         aboutCard
                     }
@@ -44,6 +44,9 @@ struct SettingsView: View {
             .sheet(isPresented: $showingDiagnostics) {
                 DiagnosticsRunnerView(isPresented: $showingDiagnostics)
             }
+            .sheet(isPresented: $showingExecutionManagement) {
+                ExecutionManagementView()
+            }
             // Removed Income Schedules; now lives under Transfers
             .alert("Delete All Data?", isPresented: $showingDeleteAllConfirm) {
                 Button("Delete", role: .destructive) { Task { await deleteAllData() } }
@@ -53,6 +56,9 @@ struct SettingsView: View {
             }
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
+            .onAppear {
+                executionLogs = ExecutionLogsManager.getLogs()
+            }
         }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
             switch result {
@@ -163,45 +169,6 @@ struct SettingsView: View {
         .glassCard()
     }
 
-    private var automationCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Automation")
-                    .font(.system(.title3, design: .rounded, weight: .semibold))
-                Spacer()
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [ModernTheme.tertiaryAccent.opacity(0.45), ModernTheme.primaryAccent.opacity(0.5)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: 68, height: 4)
-                    .opacity(0.7)
-            }
-            Toggle(isOn: $autoProcessTransactionsEnabled) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Process Transactions Automatically")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    Text("Runs whenever the app launches.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Toggle(isOn: $autoReduceBalancesEnabled) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Reduce Balances Automatically")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    Text("Adjusts balances when the app becomes active.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .glassCard()
-    }
-
     private var storageCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -272,6 +239,108 @@ struct SettingsView: View {
         .glassCard()
     }
 
+    private var logsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Execution Logs")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.tertiaryAccent.opacity(0.45), ModernTheme.secondaryAccent.opacity(0.55)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 64, height: 4)
+                    .opacity(0.7)
+            }
+
+            let recentLogs = executionLogs.prefix(20)
+            if recentLogs.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                    Text("No execution logs yet")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(recentLogs), id: \.id) { log in
+                        executionLogRow(log: log)
+                    }
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 4)
+
+            HStack(spacing: 12) {
+                Button(action: {
+                    ExecutionLogsManager.clearAllLogs()
+                    executionLogs = []
+                }) {
+                    Label("Clear All Logs", systemImage: "trash")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.orange)
+                }
+                .disabled(executionLogs.isEmpty)
+                .opacity(executionLogs.isEmpty ? 0.5 : 1.0)
+
+                Spacer()
+            }
+        }
+        .glassCard()
+    }
+
+    private func executionLogRow(log: ExecutionLog) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(log.processName)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    HStack(spacing: 8) {
+                        Text(dateFormatter(log.executedAt))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if log.wasAutomatic {
+                            Label("Auto", systemImage: "bolt.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                        } else {
+                            Label("Manual", systemImage: "hand.tap.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(log.itemCount)")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                    Text(log.itemCount == 1 ? "item" : "items")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(10)
+            .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
+            .cornerRadius(8)
+        }
+    }
+
+    private func dateFormatter(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter.string(from: date)
+    }
+
     private var diagnosticsCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -310,6 +379,23 @@ struct SettingsView: View {
                 showingCardReorder = true
             } label: {
                 Label("Reorder Cards", systemImage: "rectangle.3.group.bubble")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
+                    )
+            }
+            Button {
+                showingExecutionManagement = true
+            } label: {
+                Label("Execution Management", systemImage: "clock.badge.xmark")
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)

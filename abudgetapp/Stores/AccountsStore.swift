@@ -281,6 +281,56 @@ final class AccountsStore: ObservableObject {
         }
     }
 
+    @discardableResult
+    func purgeExecutions(startDate: Date, endDate: Date) async -> ExecutionPurgeSummary? {
+        do {
+            let summary = try await store.deleteExecutions(between: startDate, and: endDate)
+            transactions = await store.currentTransactions()
+            processedTransactionLogs = await store.currentProcessedTransactions()
+            statusMessage = StatusMessage(
+                title: "Executions Removed",
+                message: executionSummaryMessage(summary),
+                kind: .warning
+            )
+            return summary
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Purge Failed", message: dataError.localizedDescription, kind: .error)
+            return nil
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Purge Failed", message: dataError.localizedDescription, kind: .error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func purgeExecutionRun(timestamp: String) async -> ExecutionPurgeSummary? {
+        do {
+            let summary = try await store.deleteExecutionRun(timestamp: timestamp)
+            transactions = await store.currentTransactions()
+            processedTransactionLogs = await store.currentProcessedTransactions()
+            statusMessage = StatusMessage(
+                title: "Run Cleared",
+                message: executionSummaryMessage(summary),
+                kind: .warning
+            )
+            return summary
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Run Clear Failed", message: dataError.localizedDescription, kind: .error)
+            return nil
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Run Clear Failed", message: dataError.localizedDescription, kind: .error)
+            return nil
+        }
+    }
+
     func resetYearlyTransaction(id: Int) async {
         do {
             _ = try await store.markYearlyTransactionAsReady(id: id)
@@ -299,6 +349,26 @@ final class AccountsStore: ObservableObject {
 
     func transaction(for id: Int) -> TransactionRecord? {
         transactions.first { $0.id == id }
+    }
+
+    private func executionSummaryMessage(_ summary: ExecutionPurgeSummary) -> String {
+        let executionCount = summary.totalExecutionsRemoved
+        let runCount = summary.totalRunsAffected
+        if executionCount == 0 && summary.processedLogsRemoved == 0 {
+            return "No executions matched the selected criteria."
+        }
+
+        var components: [String] = []
+        if executionCount > 0 {
+            components.append("\(executionCount) execution\(executionCount == 1 ? "" : "s") removed")
+        }
+        if summary.processedLogsRemoved > 0 {
+            components.append("\(summary.processedLogsRemoved) log\(summary.processedLogsRemoved == 1 ? "" : "s") cleared")
+        }
+        if runCount > 0 {
+            components.append("across \(runCount) run\(runCount == 1 ? "" : "s")")
+        }
+        return components.joined(separator: ", ")
     }
 
     @discardableResult

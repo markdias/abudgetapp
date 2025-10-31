@@ -4,6 +4,65 @@ do not test the build
 
 ## Recent Changes
 
+### Settings Refactoring & Auto-Process Day Feature (2025-10-31)
+Moved automation toggles from Settings to their respective feature views for better UX:
+
+#### Changes Made:
+1. **Removed from SettingsView**:
+   - "Process Transactions Automatically" toggle
+   - "Reduce Balances Automatically" toggle
+   - Removed entire automationCard from Settings UI
+
+2. **Added to ProcessedTransactionsView**:
+   - "Process on App Launch" toggle in processingCard
+   - Allows users to enable/disable automatic processing when viewing transaction processing options
+   - Label: "Automatically processes when app opens"
+
+3. **Added to BalanceReductionView** (in TransfersView.swift):
+   - "Reduce on App Active" toggle in reduceNowCard
+   - Allows users to enable/disable automatic reduction when viewing balance reduction options
+   - Label: "Automatically reduces when app becomes active"
+
+4. **Implemented Auto-Process on Day Feature** (2025-10-31):
+   - New "Auto-Process on Day" card in ProcessedTransactionsView between Manual Processing and Auto-Process on Launch
+   - **Configuration**:
+     - Day picker: Select day 1-31 of month (global trigger)
+     - Time picker: Set specific hour (0-23) and minute (0-55 in 5-min increments)
+     - "Next Scheduled" display: Shows when next auto-process will run
+   - **Behavior**:
+     - Runs automatically when app launches on configured day at/after configured time
+     - Processes ALL due scheduled transactions
+     - Prevents duplicate processing on same day
+     - Shows notification with transaction count processed
+   - **Settings Storage** (abudgetappApp.swift):
+     - `autoProcessOnDayEnabled`: Boolean toggle
+     - `autoProcessDay`: Int (1-31)
+     - `autoProcessHour`: Int (0-23)
+     - `autoProcessMinute`: Int (0-55)
+     - `lastAutoProcessDate`: ISO8601 string tracking last execution
+
+#### Files Modified:
+- **SettingsView.swift**: Removed automationCard, removed @AppStorage references
+- **ProcessedTransactionsView.swift**:
+  - Added `@AppStorage` properties for auto-process day settings
+  - Added toggle to processingCard for auto-process on launch
+  - Added new autoProcessSettingsCard with day/time configuration
+  - Added nextScheduledText computed property
+- **TransfersView.swift (BalanceReductionView)**:
+  - Added toggle to reduceNowCard for auto-reduce on app active
+- **abudgetappApp.swift**:
+  - Added @AppStorage properties for day-based auto-processing
+  - Added shouldAutoProcessToday() method for schedule checking
+  - Added showAutoProcessNotification() method for user feedback
+  - Integrated auto-process check in bootstrap() after existing auto-process logic
+
+#### User Experience:
+- Toggles now live near their related functionality
+- Settings view is simpler (automation removed)
+- Clearer intent: toggle is visible where it's used
+- Day-based scheduling provides fine-grained control over when processing occurs
+- Settings persist across app sessions via @AppStorage
+
 ### Yearly Transactions Feature - Complete Implementation (2025-10-30)
 Implemented comprehensive yearly transactions system that processes transactions on specific dates (day-month-year) and tracks execution history with events. Yearly transactions are primarily linked to pots and deduct amounts when processed on their scheduled date. Additionally, added event history tracking to all transactions and income executions.
 

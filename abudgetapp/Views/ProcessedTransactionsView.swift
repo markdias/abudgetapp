@@ -3,6 +3,10 @@ import SwiftUI
 struct ProcessedTransactionsView: View {
     @EnvironmentObject private var accountsStore: AccountsStore
     @AppStorage("autoProcessTransactionsEnabled") private var autoProcessingEnabled = false
+    @AppStorage("autoProcessOnDayEnabled") private var autoProcessOnDayEnabled = false
+    @AppStorage("autoProcessDay") private var autoProcessDay: Int = 1
+    @AppStorage("autoProcessHour") private var autoProcessHour: Int = 8
+    @AppStorage("autoProcessMinute") private var autoProcessMinute: Int = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -94,6 +98,7 @@ struct ProcessedTransactionsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 24) {
                         processingCard
+                        autoProcessSettingsCard
                         scheduledTransactionsCard
                         if !processedLogsThisPeriod.isEmpty {
                             processedLogsCard
@@ -165,14 +170,20 @@ struct ProcessedTransactionsView: View {
             .disabled(isProcessing)
             .opacity(isProcessing ? 0.7 : 1)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Label(
-                    autoProcessingEnabled ? "Automatic processing runs when the app opens." : "Automatic processing is off.",
-                    systemImage: autoProcessingEnabled ? "bolt.badge.clock" : "bolt.slash"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Divider()
+                .padding(.vertical, 4)
 
+            Toggle(isOn: $autoProcessingEnabled) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Process on App Launch")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    Text("Automatically processes when app opens.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
                 if let summary = summaryText {
                     Text(summary)
                         .font(.caption)
@@ -181,6 +192,131 @@ struct ProcessedTransactionsView: View {
             }
         }
         .glassCard()
+    }
+
+    private var autoProcessSettingsCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Auto-Process on Day")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                Spacer()
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [ModernTheme.secondaryAccent.opacity(0.45), ModernTheme.tertiaryAccent.opacity(0.6)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 64, height: 4)
+                    .opacity(0.7)
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                Toggle("Enable Auto-Process on Day", isOn: $autoProcessOnDayEnabled)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+                if autoProcessOnDayEnabled {
+                    Divider()
+                        .padding(.vertical, 4)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Day selector
+                        HStack {
+                            Text("Day of Month")
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            Spacer()
+                            Picker("", selection: $autoProcessDay) {
+                                ForEach(1...31, id: \.self) { day in
+                                    Text("\(day)").tag(day)
+                                }
+                            }
+                            .frame(width: 80)
+                        }
+
+                        // Time selector
+                        HStack {
+                            Text("Time")
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            Spacer()
+                            HStack(spacing: 8) {
+                                Picker("Hour", selection: $autoProcessHour) {
+                                    ForEach(0..<24, id: \.self) { hour in
+                                        Text(String(format: "%02d", hour)).tag(hour)
+                                    }
+                                }
+                                .frame(width: 60)
+
+                                Text(":")
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+
+                                Picker("Minute", selection: $autoProcessMinute) {
+                                    ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { minute in
+                                        Text(String(format: "%02d", minute)).tag(minute)
+                                    }
+                                }
+                                .frame(width: 60)
+                            }
+                        }
+
+                        // Next scheduled
+                        HStack {
+                            Text("Next Scheduled")
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            Spacer()
+                            Text(nextScheduledText)
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .foregroundStyle(ModernTheme.secondaryAccent)
+                        }
+                    }
+                    .padding(.top, 8)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(
+                        autoProcessOnDayEnabled
+                            ? "Auto-process runs on day \(autoProcessDay) at \(String(format: "%02d:%02d", autoProcessHour, autoProcessMinute))"
+                            : "Auto-process on day is disabled.",
+                        systemImage: autoProcessOnDayEnabled ? "calendar.badge.clock" : "calendar.badge.minus"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .glassCard()
+    }
+
+    private var nextScheduledText: String {
+        let calendar = Calendar.current
+        let now = Date()
+        var dateComponents = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: now)
+
+        // Set to the configured time
+        dateComponents.day = autoProcessDay
+        dateComponents.hour = autoProcessHour
+        dateComponents.minute = autoProcessMinute
+        dateComponents.second = 0
+
+        if let scheduledDate = calendar.date(from: dateComponents) {
+            if scheduledDate > now {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "MMM d, h:mm a"
+                return formatter.string(from: scheduledDate)
+            } else {
+                // Next month
+                var nextMonth = dateComponents
+                nextMonth.month = (dateComponents.month ?? 1) + 1
+                if let nextScheduledDate = calendar.date(from: nextMonth) {
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "MMM d, h:mm a"
+                    return formatter.string(from: nextScheduledDate)
+                }
+            }
+        }
+
+        return "—"
     }
 
     private var scheduledTransactionsCard: some View {

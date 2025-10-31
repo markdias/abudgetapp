@@ -497,6 +497,10 @@ actor LocalBudgetStore {
         state.transferSchedules[index] = schedule
         state.lastTransfersExecutedAt = stamp
         try persist()
+
+        // Log execution
+        ExecutionLogsManager.addLog("Transfer Schedules", itemCount: 1, wasAutomatic: false)
+
         return MessageResponse(message: "Transfer schedule executed")
     }
 
@@ -550,6 +554,12 @@ actor LocalBudgetStore {
             state.lastTransfersExecutedAt = stamp
         }
         try persist()
+
+        // Log execution
+        if executed > 0 {
+            ExecutionLogsManager.addLog("Transfer Schedules", itemCount: executed, wasAutomatic: false)
+        }
+
         return IncomeExecutionResponse(accounts: state.accounts, executed_count: executed)
     }
 
@@ -576,17 +586,16 @@ actor LocalBudgetStore {
         // Remove the event
         events.remove(at: eventIndex)
 
-        // If no events left, optionally delete the entire transaction
+        // Always update the transaction with remaining events (even if empty)
+        transaction.events = events
+        state.transactions[txIndex] = transaction
+
+        // Clear the linkedTransactionId from transfer schedule if no events left
         if events.isEmpty {
-            state.transactions.remove(at: txIndex)
-            // Also clear the linkedTransactionId from the transfer schedule
             if let transferId = transaction.transferScheduleId,
                let scheduleIndex = state.transferSchedules.firstIndex(where: { $0.id == transferId }) {
                 state.transferSchedules[scheduleIndex].linkedTransactionId = nil
             }
-        } else {
-            transaction.events = events
-            state.transactions[txIndex] = transaction
         }
 
         try persist()
@@ -923,6 +932,12 @@ actor LocalBudgetStore {
             try persist()
         }
 
+        // Log execution
+        let totalProcessed = processedLogs.count
+        if totalProcessed > 0 {
+            ExecutionLogsManager.addLog("Scheduled Transactions", itemCount: totalProcessed, wasAutomatic: !forceManual)
+        }
+
         return ProcessTransactionsResult(
             processed: processedLogs,
             skipped: skipped,
@@ -1159,6 +1174,12 @@ actor LocalBudgetStore {
         }
 
         try persist()
+
+        // Log execution
+        if !newLogs.isEmpty {
+            ExecutionLogsManager.addLog("Balance Reduction", itemCount: newLogs.count, wasAutomatic: false)
+        }
+
         return state.accounts
     }
 
@@ -1222,6 +1243,10 @@ actor LocalBudgetStore {
         schedule.lastExecuted = isoNow
         state.incomeSchedules[index] = schedule
         try persist()
+
+        // Log execution
+        ExecutionLogsManager.addLog("Income Schedules", itemCount: 1, wasAutomatic: false)
+
         return MessageResponse(message: "Income schedule executed")
     }
 
@@ -1252,6 +1277,12 @@ actor LocalBudgetStore {
             }
         }
         try persist()
+
+        // Log execution
+        if executed > 0 {
+            ExecutionLogsManager.addLog("Income Schedules", itemCount: executed, wasAutomatic: false)
+        }
+
         return IncomeExecutionResponse(accounts: state.accounts, executed_count: executed)
     }
 
@@ -1271,17 +1302,27 @@ actor LocalBudgetStore {
 
         events.remove(at: eventIndex)
 
-        if events.isEmpty {
-            // If last event, delete the entire schedule
-            state.incomeSchedules.remove(at: scheduleIndex)
-        } else {
-            // Otherwise update schedule with remaining events
-            schedule.events = events
-            state.incomeSchedules[scheduleIndex] = schedule
-        }
+        // Always update schedule with remaining events (even if empty)
+        schedule.events = events
+        state.incomeSchedules[scheduleIndex] = schedule
 
         try persist()
         return MessageResponse(message: "Execution event deleted")
+    }
+
+    func deleteExecutions(between startDate: Date, and endDate: Date) throws -> ExecutionPurgeSummary {
+        let rangeStart = startDate
+        let rangeEnd = endDate
+        guard rangeStart <= rangeEnd else {
+            throw StoreError.invalidOperation("Start date must be before end date")
+        }
+        return try purgeExecutions { _, eventDate in
+            eventDate >= rangeStart && eventDate <= rangeEnd
+        }
+    }
+
+    func deleteExecutionRun(timestamp: String) throws -> ExecutionPurgeSummary {
+        try purgeExecutions { raw, _ in raw == timestamp }
     }
 
     func deleteIncomeSchedule(id: Int) throws {
@@ -1553,6 +1594,130 @@ actor LocalBudgetStore {
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let directory = baseURL.appendingPathComponent("MyBudget", isDirectory: true)
         return directory.appendingPathComponent("budget_state.json")
+    }
+}
+
+private extension LocalBudgetStore {
+    func purgeExecutions(
+        matching shouldRemove: (String, Date) -> Bool
+    ) throws -> ExecutionPurgeSummary {
+        var didMutate = false
+
+        var transactionEventsRemoved = 0
+        var incomeEventsRemoved = 0
+        var processedLogsRemoved = 0
+        let transactionsRemoved = 0
+        let incomeSchedulesRemoved = 0
+        var runTimestamps: Set<String> = []
+
+        if !state.transactions.isEmpty {
+            for index in state.transactions.indices.reversed() {
+                var transaction = state.transactions[index]
+                guard let events = transaction.events, !events.isEmpty else { continue }
+
+                var retainedEvents: [TransactionEvent] = []
+                retainedEvents.reserveCapacity(events.count)
+
+                for event in events {
+                    guard let eventDate = LocalBudgetStore.isoFormatter.date(from: event.executedAt) else {
+                        retainedEvents.append(event)
+                        continue
+                    }
+                    if shouldRemove(event.executedAt, eventDate) {
+                        transactionEventsRemoved += 1
+                        runTimestamps.insert(event.executedAt)
+                        didMutate = true
+                    } else {
+                        retainedEvents.append(event)
+                    }
+                }
+
+                guard retainedEvents.count != events.count else { continue }
+
+                if retainedEvents.isEmpty {
+                    transaction.events = nil
+                    if transaction.kind == .yearly {
+                        transaction.isCompleted = false
+                    }
+                    state.transactions[index] = transaction
+                } else {
+                    transaction.events = retainedEvents
+                    state.transactions[index] = transaction
+                }
+            }
+        }
+
+        if !state.incomeSchedules.isEmpty {
+            for index in state.incomeSchedules.indices.reversed() {
+                var schedule = state.incomeSchedules[index]
+                guard let events = schedule.events, !events.isEmpty else { continue }
+
+                var retainedEvents: [TransactionEvent] = []
+                retainedEvents.reserveCapacity(events.count)
+
+                for event in events {
+                    guard let eventDate = LocalBudgetStore.isoFormatter.date(from: event.executedAt) else {
+                        retainedEvents.append(event)
+                        continue
+                    }
+                    if shouldRemove(event.executedAt, eventDate) {
+                        incomeEventsRemoved += 1
+                        runTimestamps.insert(event.executedAt)
+                        didMutate = true
+                    } else {
+                        retainedEvents.append(event)
+                    }
+                }
+
+                guard retainedEvents.count != events.count else { continue }
+
+                if retainedEvents.isEmpty {
+                    schedule.events = nil
+                    schedule.isCompleted = false
+                    schedule.lastExecuted = nil
+                } else {
+                    schedule.events = retainedEvents
+                }
+
+                state.incomeSchedules[index] = schedule
+            }
+        }
+
+        if !state.processedTransactionLogs.isEmpty {
+            var retainedLogs: [ProcessedTransactionLog] = []
+            retainedLogs.reserveCapacity(state.processedTransactionLogs.count)
+
+            for log in state.processedTransactionLogs {
+                guard let processedDate = LocalBudgetStore.isoFormatter.date(from: log.processedAt) else {
+                    retainedLogs.append(log)
+                    continue
+                }
+                if shouldRemove(log.processedAt, processedDate) {
+                    processedLogsRemoved += 1
+                    runTimestamps.insert(log.processedAt)
+                    didMutate = true
+                } else {
+                    retainedLogs.append(log)
+                }
+            }
+
+            if retainedLogs.count != state.processedTransactionLogs.count {
+                state.processedTransactionLogs = retainedLogs
+            }
+        }
+
+        if didMutate {
+            try persist()
+        }
+
+        return ExecutionPurgeSummary(
+            runTimestamps: Array(runTimestamps).sorted(),
+            transactionEventsRemoved: transactionEventsRemoved,
+            incomeEventsRemoved: incomeEventsRemoved,
+            processedLogsRemoved: processedLogsRemoved,
+            transactionsRemoved: transactionsRemoved,
+            incomeSchedulesRemoved: incomeSchedulesRemoved
+        )
     }
 }
 

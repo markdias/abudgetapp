@@ -839,3 +839,20 @@ public struct TransferScheduleSubmission: Codable {
         self.linkedCreditAccountId = linkedCreditAccountId
     }
 }
+
+// MARK: - Execution Logs
+public struct ExecutionLog: Identifiable, Codable, Hashable {
+    public let id: UUID
+    public let processName: String
+    public let executedAt: Date
+    public let itemCount: Int
+    public let wasAutomatic: Bool
+
+    public init(id: UUID = UUID(), processName: String, executedAt: Date = Date(), itemCount: Int, wasAutomatic: Bool) {
+        self.id = id
+        self.processName = processName
+        self.executedAt = executedAt
+        self.itemCount = itemCount
+        self.wasAutomatic = wasAutomatic
+    }
+}
