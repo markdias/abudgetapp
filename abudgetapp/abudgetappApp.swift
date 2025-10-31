@@ -6,6 +6,11 @@ struct MyBudgetApp: App {
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("autoProcessTransactionsEnabled") private var autoProcessTransactionsEnabled = false
     @AppStorage("autoReduceBalancesEnabled") private var autoReduceBalancesEnabled = false
+    @AppStorage("autoProcessOnDayEnabled") private var autoProcessOnDayEnabled = false
+    @AppStorage("autoProcessDay") private var autoProcessDay: Int = 1
+    @AppStorage("autoProcessHour") private var autoProcessHour: Int = 8
+    @AppStorage("autoProcessMinute") private var autoProcessMinute: Int = 0
+    @AppStorage("lastAutoProcessDate") private var lastAutoProcessDate: String = ""
     @StateObject private var accountsStore: AccountsStore
     @StateObject private var potsStore: PotsStore
     @StateObject private var diagnosticsStore: DiagnosticsStore
@@ -47,6 +52,11 @@ struct MyBudgetApp: App {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await accountsStore.loadAccounts() }
         }
+        // Auto-enable processing on scheduled day/time
+        if autoProcessOnDayEnabled && shouldAutoProcessToday() {
+            autoProcessTransactionsEnabled = true
+            lastAutoProcessDate = ISO8601DateFormatter().string(from: Date())
+        }
         if autoProcessTransactionsEnabled {
             await accountsStore.processScheduledTransactions()
         }
@@ -54,6 +64,41 @@ struct MyBudgetApp: App {
             await accountsStore.applyMonthlyReduction()
         }
     }
+
+    private func shouldAutoProcessToday() -> Bool {
+        let now = Date()
+        let calendar = Calendar.current
+        let currentDay = calendar.component(.day, from: now)
+        let currentHour = calendar.component(.hour, from: now)
+        let currentMinute = calendar.component(.minute, from: now)
+
+        // Check if today matches the configured day
+        guard currentDay == autoProcessDay else { return false }
+
+        // Check if current time is at or past the scheduled time
+        let scheduledMinutes = autoProcessHour * 60 + autoProcessMinute
+        let currentMinutes = currentHour * 60 + currentMinute
+
+        // Check if we already processed today
+        let lastDate = lastAutoProcessDate
+        let formatter = ISO8601DateFormatter()
+        if let lastProcessDate = formatter.date(from: lastDate) {
+            let lastProcessDay = calendar.component(.day, from: lastProcessDate)
+            let lastProcessMonth = calendar.component(.month, from: lastProcessDate)
+            let lastProcessYear = calendar.component(.year, from: lastProcessDate)
+
+            let currentMonth = calendar.component(.month, from: now)
+            let currentYear = calendar.component(.year, from: now)
+
+            // If we already processed today, don't process again
+            if lastProcessDay == currentDay && lastProcessMonth == currentMonth && lastProcessYear == currentYear {
+                return false
+            }
+        }
+
+        return currentMinutes >= scheduledMinutes
+    }
+
 }
 
 // MARK: - Appearance mapping used by App
