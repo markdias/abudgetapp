@@ -339,17 +339,48 @@ actor LocalBudgetStore {
             throw StoreError.notFound("Account #\(submission.toAccountId) not found")
         }
 
+        // Validate linked credit account if provided
+        if let linkedCreditId = submission.linkedCreditAccountId {
+            guard state.accounts.contains(where: { $0.id == linkedCreditId }) else {
+                throw StoreError.notFound("Linked credit account #\(linkedCreditId) not found")
+            }
+        }
+
+        // Determine the kind and date based on whether it's yearly, scheduled with credit card, or regular scheduled
+        let kind: TransactionRecord.Kind
+        if submission.yearlyDate != nil {
+            kind = .yearly
+        } else if submission.linkedCreditAccountId != nil {
+            kind = .creditCardCharge
+        } else {
+            kind = .scheduled
+        }
+
+        let dateValue: String
+        if kind == .yearly {
+            // For yearly transactions, store an empty date field (yearlyDate is separate)
+            dateValue = ""
+        } else {
+            // For scheduled transactions, use the provided date
+            dateValue = submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date())
+        }
+
         let record = TransactionRecord(
             id: state.nextTransactionId,
             name: submission.name,
             vendor: submission.vendor,
             amount: submission.amount,
-            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
+            date: dateValue,
             fromAccountId: submission.fromAccountId,
             toAccountId: submission.toAccountId,
             toPotName: submission.toPotName,
             paymentType: submission.paymentType,
-            linkedCreditAccountId: submission.linkedCreditAccountId
+            linkedCreditAccountId: submission.linkedCreditAccountId,
+            kind: kind,
+            transferScheduleId: nil,
+            events: nil,
+            yearlyDate: submission.yearlyDate,
+            isCompleted: submission.isCompleted
         )
         state.nextTransactionId += 1
         state.transactions.append(record)
@@ -366,11 +397,45 @@ actor LocalBudgetStore {
         guard state.accounts.contains(where: { $0.id == submission.toAccountId }) else {
             throw StoreError.notFound("Account #\(submission.toAccountId) not found")
         }
+
+        // Validate linked credit account if provided
+        if let linkedCreditId = submission.linkedCreditAccountId {
+            guard state.accounts.contains(where: { $0.id == linkedCreditId }) else {
+                throw StoreError.notFound("Linked credit account #\(linkedCreditId) not found")
+            }
+        }
+
         // Prevent duplicate pending schedules to the same destination
         let destPot = submission.toPotName ?? ""
         if state.transferSchedules.contains(where: { $0.isActive && !$0.isCompleted && $0.toAccountId == submission.toAccountId && ($0.toPotName ?? "") == destPot }) {
             throw StoreError.invalidOperation("A pending schedule already exists for this destination")
         }
+
+        // If linked to credit card, create transaction upfront
+        var linkedTransactionId: Int? = nil
+        if let creditAccountId = submission.linkedCreditAccountId {
+            let now = Date()
+            let stamp = LocalBudgetStore.isoFormatter.string(from: now)
+            let newTransaction = TransactionRecord(
+                id: state.nextTransactionId,
+                name: submission.description.isEmpty ? "Credit Card Payment" : submission.description,
+                vendor: "Transfer Payment",
+                amount: submission.amount,
+                date: stamp,
+                fromAccountId: submission.fromAccountId,
+                toAccountId: submission.toAccountId,
+                toPotName: submission.toPotName,
+                paymentType: "credit_card_payment",
+                linkedCreditAccountId: creditAccountId,
+                kind: .creditCardPayment,
+                transferScheduleId: nil,
+                events: nil
+            )
+            state.transactions.append(newTransaction)
+            linkedTransactionId = state.nextTransactionId
+            state.nextTransactionId += 1
+        }
+
         let schedule = TransferSchedule(
             id: state.nextTransferScheduleId,
             fromAccountId: submission.fromAccountId,
@@ -383,7 +448,7 @@ actor LocalBudgetStore {
             isCompleted: false,
             lastExecuted: nil,
             linkedCreditAccountId: submission.linkedCreditAccountId,
-            linkedTransactionId: nil
+            linkedTransactionId: linkedTransactionId
         )
         state.nextTransferScheduleId += 1
         state.transferSchedules.append(schedule)
@@ -402,8 +467,7 @@ actor LocalBudgetStore {
         let stamp = LocalBudgetStore.isoFormatter.string(from: now)
 
         // Handle credit card payment tracking
-        if let creditAccountId = schedule.linkedCreditAccountId {
-            print("DEBUG: Executing credit card transfer schedule \(schedule.id), linkedTransactionId: \(schedule.linkedTransactionId ?? -1)")
+        if schedule.linkedCreditAccountId != nil {
             // Create new event for this execution
             let event = TransactionEvent(
                 id: state.nextTransactionEventId,
@@ -412,37 +476,14 @@ actor LocalBudgetStore {
             )
             state.nextTransactionEventId += 1
 
+            // Add event to the existing transaction (created when schedule was created)
             if let linkedTxId = schedule.linkedTransactionId,
                let txIndex = state.transactions.firstIndex(where: { $0.id == linkedTxId }) {
-                // Update existing transaction - add event
-                print("DEBUG: Adding event to existing transaction \(linkedTxId) for schedule \(schedule.id)")
                 var transaction = state.transactions[txIndex]
                 var events = transaction.events ?? []
                 events.append(event)
                 transaction.events = events
                 state.transactions[txIndex] = transaction
-            } else {
-                // Create new transaction for first execution
-                print("DEBUG: Creating new credit card payment transaction for schedule \(schedule.id)")
-                let newTransaction = TransactionRecord(
-                    id: state.nextTransactionId,
-                    name: schedule.description.isEmpty ? "Credit Card Payment" : schedule.description,
-                    vendor: "Transfer Payment",
-                    amount: schedule.amount,
-                    date: stamp,
-                    fromAccountId: schedule.fromAccountId,
-                    toAccountId: creditAccountId,
-                    toPotName: schedule.toPotName,
-                    paymentType: "credit_card_payment",
-                    linkedCreditAccountId: nil,
-                    kind: .creditCardPayment,
-                    transferScheduleId: schedule.id,
-                    events: [event]
-                )
-                state.transactions.append(newTransaction)
-                schedule.linkedTransactionId = state.nextTransactionId
-                print("DEBUG: Set linkedTransactionId to \(state.nextTransactionId) for schedule \(schedule.id)")
-                state.nextTransactionId += 1
             }
 
             // Don't mark as completed for credit card payments (allow re-execution)
@@ -470,7 +511,7 @@ actor LocalBudgetStore {
                     try applyTransfer(schedule: schedule)
 
                     // Handle credit card payment tracking
-                    if let creditAccountId = schedule.linkedCreditAccountId {
+                    if schedule.linkedCreditAccountId != nil {
                         // Create new event for this execution
                         let event = TransactionEvent(
                             id: state.nextTransactionEventId,
@@ -479,34 +520,14 @@ actor LocalBudgetStore {
                         )
                         state.nextTransactionEventId += 1
 
+                        // Add event to the existing transaction (created when schedule was created)
                         if let linkedTxId = schedule.linkedTransactionId,
                            let txIndex = state.transactions.firstIndex(where: { $0.id == linkedTxId }) {
-                            // Update existing transaction - add event
                             var transaction = state.transactions[txIndex]
                             var events = transaction.events ?? []
                             events.append(event)
                             transaction.events = events
                             state.transactions[txIndex] = transaction
-                        } else {
-                            // Create new transaction for first execution
-                            let newTransaction = TransactionRecord(
-                                id: state.nextTransactionId,
-                                name: schedule.description.isEmpty ? "Credit Card Payment" : schedule.description,
-                                vendor: "Transfer Payment",
-                                amount: schedule.amount,
-                                date: stamp,
-                                fromAccountId: schedule.fromAccountId,
-                                toAccountId: creditAccountId,
-                                toPotName: schedule.toPotName,
-                                paymentType: "credit_card_payment",
-                                linkedCreditAccountId: nil,
-                                kind: .creditCardPayment,
-                                transferScheduleId: schedule.id,
-                                events: [event]
-                            )
-                            state.transactions.append(newTransaction)
-                            schedule.linkedTransactionId = state.nextTransactionId
-                            state.nextTransactionId += 1
                         }
 
                         // Don't mark as completed for credit card payments (allow re-execution)
@@ -578,18 +599,35 @@ actor LocalBudgetStore {
         }
 
         let existing = state.transactions[index]
+
+        // Determine the kind and date based on submission
+        let kind: TransactionRecord.Kind = submission.yearlyDate != nil ? .yearly : .scheduled
+        let dateValue: String
+
+        if kind == .yearly {
+            // For yearly transactions, store an empty date field (yearlyDate is separate)
+            dateValue = ""
+        } else {
+            // For scheduled transactions, use the provided date
+            dateValue = submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date())
+        }
+
         let updated = TransactionRecord(
             id: id,
             name: submission.name,
             vendor: submission.vendor,
             amount: submission.amount,
-            date: submission.date ?? LocalBudgetStore.isoFormatter.string(from: Date()),
+            date: dateValue,
             fromAccountId: submission.fromAccountId,
             toAccountId: submission.toAccountId,
             toPotName: submission.toPotName,
             paymentType: submission.paymentType,
             linkedCreditAccountId: submission.linkedCreditAccountId,
-            kind: existing.kind
+            kind: kind,
+            transferScheduleId: existing.transferScheduleId,
+            events: existing.events,
+            yearlyDate: submission.yearlyDate,
+            isCompleted: submission.isCompleted
         )
 
         state.transactions[index] = updated
@@ -603,6 +641,22 @@ actor LocalBudgetStore {
         }
         _ = state.transactions.remove(at: index)
         try persist()
+    }
+
+    func markYearlyTransactionAsReady(id: Int) throws -> MessageResponse {
+        guard let index = state.transactions.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.notFound("Transaction #\(id) not found")
+        }
+        guard state.transactions[index].kind == .yearly else {
+            throw StoreError.invalidOperation("Transaction is not a yearly transaction")
+        }
+
+        var transaction = state.transactions[index]
+        transaction.isCompleted = false
+        state.transactions[index] = transaction
+        try persist()
+
+        return MessageResponse(message: "Yearly transaction reset for next year")
     }
 
     // MARK: - Scheduled Transaction Processing
@@ -658,7 +712,7 @@ actor LocalBudgetStore {
         let scheduledTransactions = state.transactions
 
         for transaction in scheduledTransactions {
-            if transaction.kind != .scheduled { continue }
+            if transaction.kind != .scheduled && transaction.kind != .creditCardCharge { continue }
             guard LocalBudgetStore.isDayString(transaction.date),
                   let scheduledDay = LocalBudgetStore.scheduledDay(from: transaction.date) else {
                 continue
@@ -711,49 +765,27 @@ actor LocalBudgetStore {
             }
             state.accounts[accountIndex] = account
 
+            // Create event for this transaction processing
+            let event = TransactionEvent(
+                id: state.nextTransactionEventId,
+                executedAt: isoNow,
+                amount: transaction.amount
+            )
+            state.nextTransactionEventId += 1
+
+            // Add event to the existing transaction record
+            if let existingTxIndex = state.transactions.firstIndex(where: { $0.id == transaction.id }) {
+                var existingTx = state.transactions[existingTxIndex]
+                var events = existingTx.events ?? []
+                events.append(event)
+                existingTx.events = events
+                state.transactions[existingTxIndex] = existingTx
+            }
+
             if let creditIndex = creditAccountIndex {
                 var creditAccount = state.accounts[creditIndex]
                 creditAccount.balance -= transaction.amount
                 state.accounts[creditIndex] = creditAccount
-
-                // Create or update credit card charge transaction with events
-                let event = TransactionEvent(
-                    id: state.nextTransactionEventId,
-                    executedAt: isoNow,
-                    amount: transaction.amount
-                )
-                state.nextTransactionEventId += 1
-
-                // Check if transaction record already exists for this scheduled transaction
-                if let existingTxIndex = state.transactions.firstIndex(where: {
-                    $0.kind == .creditCardCharge && $0.name == transaction.name && $0.toAccountId == creditAccount.id
-                }) {
-                    // Update existing transaction - add event
-                    var existingTx = state.transactions[existingTxIndex]
-                    var events = existingTx.events ?? []
-                    events.append(event)
-                    existingTx.events = events
-                    state.transactions[existingTxIndex] = existingTx
-                } else {
-                    // Create new transaction for first processing
-                    let chargeRecord = TransactionRecord(
-                        id: state.nextTransactionId,
-                        name: transaction.name,
-                        vendor: transaction.vendor,
-                        amount: transaction.amount,
-                        date: String(scheduledDay),
-                        fromAccountId: nil,
-                        toAccountId: creditAccount.id,
-                        toPotName: nil,
-                        paymentType: "credit_card_charge",
-                        linkedCreditAccountId: nil,
-                        kind: .creditCardCharge,
-                        transferScheduleId: nil,
-                        events: [event]
-                    )
-                    state.nextTransactionId += 1
-                    state.transactions.append(chargeRecord)
-                }
                 didMutate = true
             }
 
@@ -776,6 +808,82 @@ actor LocalBudgetStore {
             state.processedTransactionLogs.append(log)
             processedLogs.append(log)
             processedIds.insert(transaction.id)
+            didMutate = true
+        }
+
+        // Process yearly transactions
+        for transaction in scheduledTransactions {
+            if transaction.kind != .yearly { continue }
+            guard LocalBudgetStore.isYearlyDateString(transaction.yearlyDate ?? ""),
+                  LocalBudgetStore.shouldProcessYearlyTransaction(transaction),
+                  transaction.isCompleted != true else {
+                continue
+            }
+
+            guard let accountIndex = state.accounts.firstIndex(where: { $0.id == transaction.toAccountId }) else {
+                skipped.append(ProcessedTransactionSkip(paymentId: transaction.id, accountId: transaction.toAccountId, potName: transaction.toPotName, reason: "Account not found"))
+                continue
+            }
+
+            var account = state.accounts[accountIndex]
+            var pots = account.pots ?? []
+            var didTouchPot = false
+
+            if let potName = transaction.toPotName, !potName.isEmpty {
+                if let potIndex = pots.firstIndex(where: { $0.name.caseInsensitiveCompare(potName) == .orderedSame }) {
+                    var pot = pots[potIndex]
+                    pot.balance -= transaction.amount
+                    pots[potIndex] = pot
+                    didTouchPot = true
+                } else {
+                    skipped.append(ProcessedTransactionSkip(paymentId: transaction.id, accountId: account.id, potName: transaction.toPotName, reason: "Pot not found"))
+                    continue
+                }
+            } else {
+                account.balance -= transaction.amount
+            }
+
+            if didTouchPot {
+                account.pots = pots
+            }
+            state.accounts[accountIndex] = account
+
+            // Create event for yearly transaction
+            let event = TransactionEvent(
+                id: state.nextTransactionEventId,
+                executedAt: isoNow,
+                amount: transaction.amount
+            )
+            state.nextTransactionEventId += 1
+
+            // Update transaction record with event and mark as completed
+            if let txIndex = state.transactions.firstIndex(where: { $0.id == transaction.id }) {
+                var tx = state.transactions[txIndex]
+                var events = tx.events ?? []
+                events.append(event)
+                tx.events = events
+                tx.isCompleted = true
+                state.transactions[txIndex] = tx
+            }
+
+            let logId = state.nextProcessedTransactionLogId
+            state.nextProcessedTransactionLogId += 1
+            let log = ProcessedTransactionLog(
+                id: logId,
+                paymentId: transaction.id,
+                accountId: account.id,
+                potName: transaction.toPotName,
+                amount: transaction.amount,
+                day: LocalBudgetStore.yearlyDate(from: transaction.yearlyDate ?? "").map { $0.day } ?? 0,
+                name: transaction.name,
+                company: transaction.vendor,
+                paymentType: transaction.paymentType,
+                processedAt: isoNow,
+                period: period,
+                wasManual: forceManual
+            )
+            state.processedTransactionLogs.append(log)
+            processedLogs.append(log)
             didMutate = true
         }
 
@@ -1096,8 +1204,22 @@ actor LocalBudgetStore {
             throw StoreError.invalidOperation("Income schedule is inactive")
         }
         try applyIncome(schedule: schedule)
+
+        // Add event tracking for income execution
+        let now = Date()
+        let isoNow = LocalBudgetStore.isoFormatter.string(from: now)
+        let event = TransactionEvent(
+            id: state.nextTransactionEventId,
+            executedAt: isoNow,
+            amount: schedule.amount
+        )
+        state.nextTransactionEventId += 1
+        var events = schedule.events ?? []
+        events.append(event)
+        schedule.events = events
+
         schedule.isCompleted = true
-        schedule.lastExecuted = LocalBudgetStore.isoFormatter.string(from: Date())
+        schedule.lastExecuted = isoNow
         state.incomeSchedules[index] = schedule
         try persist()
         return MessageResponse(message: "Income schedule executed")
@@ -1105,17 +1227,61 @@ actor LocalBudgetStore {
 
     func executeAllIncomeSchedules() throws -> IncomeExecutionResponse {
         var executed = 0
+        let now = Date()
+        let isoNow = LocalBudgetStore.isoFormatter.string(from: now)
+
         for index in state.incomeSchedules.indices {
             if state.incomeSchedules[index].isActive && !state.incomeSchedules[index].isCompleted {
                 let schedule = state.incomeSchedules[index]
                 try applyIncome(schedule: schedule)
+
+                // Add event tracking for income execution
+                let event = TransactionEvent(
+                    id: state.nextTransactionEventId,
+                    executedAt: isoNow,
+                    amount: schedule.amount
+                )
+                state.nextTransactionEventId += 1
+                var events = state.incomeSchedules[index].events ?? []
+                events.append(event)
+                state.incomeSchedules[index].events = events
+
                 state.incomeSchedules[index].isCompleted = true
-                state.incomeSchedules[index].lastExecuted = LocalBudgetStore.isoFormatter.string(from: Date())
+                state.incomeSchedules[index].lastExecuted = isoNow
                 executed += 1
             }
         }
         try persist()
         return IncomeExecutionResponse(accounts: state.accounts, executed_count: executed)
+    }
+
+    func deleteIncomeEvent(scheduleId: Int, eventId: Int) throws -> MessageResponse {
+        guard let scheduleIndex = state.incomeSchedules.firstIndex(where: { $0.id == scheduleId }) else {
+            throw StoreError.notFound("Income schedule #\(scheduleId) not found")
+        }
+
+        var schedule = state.incomeSchedules[scheduleIndex]
+        guard var events = schedule.events, !events.isEmpty else {
+            throw StoreError.invalidOperation("No events to delete")
+        }
+
+        guard let eventIndex = events.firstIndex(where: { $0.id == eventId }) else {
+            throw StoreError.notFound("Event #\(eventId) not found")
+        }
+
+        events.remove(at: eventIndex)
+
+        if events.isEmpty {
+            // If last event, delete the entire schedule
+            state.incomeSchedules.remove(at: scheduleIndex)
+        } else {
+            // Otherwise update schedule with remaining events
+            schedule.events = events
+            state.incomeSchedules[scheduleIndex] = schedule
+        }
+
+        try persist()
+        return MessageResponse(message: "Execution event deleted")
     }
 
     func deleteIncomeSchedule(id: Int) throws {
@@ -1178,6 +1344,34 @@ actor LocalBudgetStore {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value = Int(trimmed), (1...31).contains(value) else { return false }
         return trimmed.rangeOfCharacter(from: CharacterSet.decimalDigits.inverted) == nil
+    }
+
+    private static func isYearlyDateString(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmed.split(separator: "-")
+        guard components.count == 3,
+              let day = Int(components[0]), (1...31).contains(day),
+              let month = Int(components[1]), (1...12).contains(month),
+              let year = Int(components[2]), year >= 2000 else { return false }
+        return true
+    }
+
+    private static func yearlyDate(from raw: String) -> (day: Int, month: Int, year: Int)? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmed.split(separator: "-")
+        guard components.count == 3,
+              let day = Int(components[0]), (1...31).contains(day),
+              let month = Int(components[1]), (1...12).contains(month),
+              let year = Int(components[2]), year >= 2000 else { return nil }
+        return (day: day, month: month, year: year)
+    }
+
+    private static func shouldProcessYearlyTransaction(_ transaction: TransactionRecord) -> Bool {
+        guard let yearlyDateStr = transaction.yearlyDate,
+              let parsedDate = yearlyDate(from: yearlyDateStr) else { return false }
+
+        let today = Calendar.current.dateComponents([.day, .month], from: Date())
+        return today.day == parsedDate.day && today.month == parsedDate.month
     }
 
     private static func periodString(for date: Date) -> String {

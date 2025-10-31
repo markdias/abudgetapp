@@ -242,6 +242,7 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         case scheduled
         case creditCardCharge = "credit_card_charge"
         case creditCardPayment = "credit_card_payment"
+        case yearly
     }
 
     public let id: Int
@@ -257,6 +258,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
     public let kind: Kind
     public var transferScheduleId: Int?
     public var events: [TransactionEvent]?
+    public var yearlyDate: String? // Format: "25-12-2025" (day-month-year)
+    public var isCompleted: Bool?
 
     public var executionCount: Int {
         return events?.count ?? 0
@@ -275,7 +278,9 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         linkedCreditAccountId: Int? = nil,
         kind: Kind = .scheduled,
         transferScheduleId: Int? = nil,
-        events: [TransactionEvent]? = nil
+        events: [TransactionEvent]? = nil,
+        yearlyDate: String? = nil,
+        isCompleted: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -290,6 +295,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         self.kind = kind
         self.transferScheduleId = transferScheduleId
         self.events = events
+        self.yearlyDate = yearlyDate
+        self.isCompleted = isCompleted
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -306,6 +313,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         case kind
         case transferScheduleId
         case events
+        case yearlyDate
+        case isCompleted
     }
 
     public init(from decoder: Decoder) throws {
@@ -323,6 +332,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .scheduled
         transferScheduleId = try container.decodeIfPresent(Int.self, forKey: .transferScheduleId)
         events = try container.decodeIfPresent([TransactionEvent].self, forKey: .events)
+        yearlyDate = try container.decodeIfPresent(String.self, forKey: .yearlyDate)
+        isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -340,6 +351,8 @@ public struct TransactionRecord: Identifiable, Codable, Hashable {
         try container.encode(kind, forKey: .kind)
         try container.encodeIfPresent(transferScheduleId, forKey: .transferScheduleId)
         try container.encodeIfPresent(events, forKey: .events)
+        try container.encodeIfPresent(yearlyDate, forKey: .yearlyDate)
+        try container.encodeIfPresent(isCompleted, forKey: .isCompleted)
     }
 
     public static func == (lhs: TransactionRecord, rhs: TransactionRecord) -> Bool {
@@ -581,9 +594,14 @@ public struct IncomeSchedule: Identifiable, Codable, Hashable {
     public let isActive: Bool
     public var isCompleted: Bool
     public var lastExecuted: String?
-    
+    public var events: [TransactionEvent]?
+
+    public var executionCount: Int {
+        return events?.count ?? 0
+    }
+
     public init(id: Int, accountId: Int, incomeId: Int, amount: Double, description: String, company: String,
-         isActive: Bool, isCompleted: Bool, lastExecuted: String? = nil) {
+         isActive: Bool, isCompleted: Bool, lastExecuted: String? = nil, events: [TransactionEvent]? = nil) {
         self.id = id
         self.accountId = accountId
         self.incomeId = incomeId
@@ -593,12 +611,13 @@ public struct IncomeSchedule: Identifiable, Codable, Hashable {
         self.isActive = isActive
         self.isCompleted = isCompleted
         self.lastExecuted = lastExecuted
+        self.events = events
     }
-    
+
     public static func == (lhs: IncomeSchedule, rhs: IncomeSchedule) -> Bool {
         return lhs.id == rhs.id
     }
-    
+
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
@@ -720,6 +739,8 @@ public struct TransactionSubmission: Codable {
     public var toPotName: String?
     public var paymentType: String?
     public var linkedCreditAccountId: Int?
+    public var yearlyDate: String?
+    public var isCompleted: Bool?
 
     public init(
         name: String,
@@ -730,7 +751,9 @@ public struct TransactionSubmission: Codable {
         toAccountId: Int,
         toPotName: String? = nil,
         paymentType: String? = nil,
-        linkedCreditAccountId: Int? = nil
+        linkedCreditAccountId: Int? = nil,
+        yearlyDate: String? = nil,
+        isCompleted: Bool? = nil
     ) {
         self.name = name
         self.vendor = vendor
@@ -741,6 +764,8 @@ public struct TransactionSubmission: Codable {
         self.toPotName = toPotName
         self.paymentType = paymentType
         self.linkedCreditAccountId = linkedCreditAccountId
+        self.yearlyDate = yearlyDate
+        self.isCompleted = isCompleted
     }
 }
 

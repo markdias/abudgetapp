@@ -281,6 +281,22 @@ final class AccountsStore: ObservableObject {
         }
     }
 
+    func resetYearlyTransaction(id: Int) async {
+        do {
+            _ = try await store.markYearlyTransactionAsReady(id: id)
+            transactions = await store.currentTransactions()
+            statusMessage = StatusMessage(title: "Yearly Transaction Reset", message: "Ready for next year", kind: .success)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Reset Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Reset Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
     func transaction(for id: Int) -> TransactionRecord? {
         transactions.first { $0.id == id }
     }

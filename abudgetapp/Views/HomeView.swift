@@ -413,6 +413,7 @@ private struct StackedAccountDeck: View {
 
 struct ActivitiesPanelSection: View {
     @EnvironmentObject private var accountsStore: AccountsStore
+    @EnvironmentObject private var incomeSchedulesStore: IncomeSchedulesStore
     enum Kind { case income, transaction, target }
 
     struct Item: Identifiable {
@@ -497,12 +498,41 @@ struct ActivitiesPanelSection: View {
         // Transactions from store
         let txFilter = transactions.filter { record in
             guard let sel = selectedAccountId else { return true }
-            return record.toAccountId == sel || record.fromAccountId == sel
+            return record.toAccountId == sel || record.fromAccountId == sel || record.linkedCreditAccountId == sel
         }
         for r in txFilter {
-            let acctName = accounts.first(where: { $0.id == r.toAccountId })?.name
-                ?? (r.fromAccountId.flatMap { id in accounts.first(where: { $0.id == id })?.name } ?? "Unknown")
+            // Determine if this is a linked credit card transaction being viewed from the credit card perspective
+            let isLinkedCreditCardView = r.linkedCreditAccountId == selectedAccountId && r.linkedCreditAccountId != nil
+
+            let acctName: String
+            if isLinkedCreditCardView {
+                // Show the source account name when viewing from credit card perspective
+                acctName = accounts.first(where: { $0.id == r.toAccountId })?.name ?? "Unknown"
+            } else {
+                // Normal display
+                acctName = accounts.first(where: { $0.id == r.toAccountId })?.name
+                    ?? (r.fromAccountId.flatMap { id in accounts.first(where: { $0.id == id })?.name } ?? "Unknown")
+            }
+
             let typeSuffix: String? = {
+                // Check if it's a yearly transaction
+                if r.kind == .yearly, let yd = r.yearlyDate {
+                    let components = yd.split(separator: "-")
+                    if components.count == 3, let day = Int(components[0]), let month = Int(components[1]) {
+                        let monthFormatter = DateFormatter()
+                        monthFormatter.dateFormat = "MMM"
+                        let tempDate = Calendar.current.date(from: DateComponents(month: month, day: day))
+                        let monthStr = tempDate.map { monthFormatter.string(from: $0) } ?? "\(month)"
+                        return "Yearly: \(monthStr) \(day)"
+                    }
+                    return "Yearly"
+                }
+
+                // Show "Linked to [Account]" for credit card linked transactions viewed from credit card perspective
+                if isLinkedCreditCardView {
+                    return "Linked to \(acctName)"
+                }
+
                 guard let pt = r.paymentType else { return nil }
                 switch pt {
                 case "direct_debit": return "Direct Debit"
@@ -521,7 +551,8 @@ struct ActivitiesPanelSection: View {
                 accountName: acctName,
                 potName: r.toPotName,
                 metadata: [
-                    "paymentType": r.paymentType ?? ""
+                    "paymentType": r.paymentType ?? "",
+                    "isLinkedCreditCard": isLinkedCreditCardView ? "true" : "false"
                 ],
                 accountId: r.toAccountId,
                 incomeId: nil,
@@ -1105,6 +1136,8 @@ private struct EditTransactionSheet: View {
     @State private var amount: String = ""
     @State private var paymentType: String = "direct_debit" // "card" or "direct_debit"
     @State private var dayOfMonth: String = ""
+    @State private var transactionType: String = "scheduled" // "scheduled" or "yearly"
+    @State private var yearlyDate: Date = Date()
     @State private var linkedCreditAccountId: Int? = nil
     @State private var didPreload = false
     @State private var pendingSubmission: TransactionSubmission? = nil
@@ -1121,8 +1154,14 @@ private struct EditTransactionSheet: View {
 
     private var canSave: Bool {
         guard let _ = toAccountId, let money = Double(amount), money > 0 else { return false }
-        guard !name.isEmpty, !vendor.isEmpty, let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
-        return true
+        guard !name.isEmpty, !vendor.isEmpty else { return false }
+
+        if transactionType == "yearly" {
+            return true
+        } else {
+            guard let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+            return true
+        }
     }
 
     private var formContent: some View {
@@ -1163,7 +1202,20 @@ private struct EditTransactionSheet: View {
                 TextField("Name", text: $name)
                 TextField("Vendor", text: $vendor)
                 TextField("Amount", text: $amount).keyboardType(.decimalPad)
-                TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+            }
+
+            Section("Schedule") {
+                Picker("Type", selection: $transactionType) {
+                    Text("Scheduled").tag("scheduled")
+                    Text("Yearly").tag("yearly")
+                }
+                .pickerStyle(.navigationLink)
+
+                if transactionType == "yearly" {
+                    DatePicker("Date", selection: $yearlyDate, displayedComponents: .date)
+                } else {
+                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                }
             }
         }
     }
@@ -1228,8 +1280,21 @@ private struct EditTransactionSheet: View {
         vendor = record.vendor
         amount = String(format: "%.2f", record.amount)
         paymentType = record.paymentType ?? "direct_debit"
-        dayOfMonth = record.date
         linkedCreditAccountId = record.linkedCreditAccountId
+
+        // Handle yearly vs scheduled transactions
+        if record.kind == .yearly, let yearlyDateStr = record.yearlyDate {
+            transactionType = "yearly"
+            let formatter = DateFormatter()
+            formatter.dateFormat = "dd-MM-yyyy"
+            if let date = formatter.date(from: yearlyDateStr) {
+                yearlyDate = date
+            }
+        } else {
+            transactionType = "scheduled"
+            dayOfMonth = record.date
+        }
+
         didPreload = true
         sanitizeLinkedCreditCardSelection()
     }
@@ -1306,17 +1371,33 @@ private struct EditTransactionSheet: View {
 
     private func makeSubmission(basedOn record: TransactionRecord) -> TransactionSubmission? {
         guard let toAccountId, let money = Double(amount) else { return nil }
-        let trimmedDay = dayOfMonth.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let dateValue: String?
+        let yearlyDateValue: String?
+
+        if transactionType == "yearly" {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "dd-MM-yyyy"
+            yearlyDateValue = formatter.string(from: yearlyDate)
+            dateValue = nil
+        } else {
+            let trimmedDay = dayOfMonth.trimmingCharacters(in: .whitespacesAndNewlines)
+            dateValue = trimmedDay.isEmpty ? nil : trimmedDay
+            yearlyDateValue = nil
+        }
+
         return TransactionSubmission(
             name: name,
             vendor: vendor,
             amount: money,
-            date: trimmedDay.isEmpty ? nil : trimmedDay,
+            date: dateValue,
             fromAccountId: record.fromAccountId,
             toAccountId: toAccountId,
             toPotName: selectedPot,
             paymentType: paymentType,
-            linkedCreditAccountId: linkedCreditAccountId
+            linkedCreditAccountId: linkedCreditAccountId,
+            yearlyDate: yearlyDateValue,
+            isCompleted: record.isCompleted
         )
     }
 
@@ -1616,7 +1697,11 @@ private extension ActivitiesPanelSection {
                 let account = accountsStore.account(for: accountId),
                 let income = account.incomes?.first(where: { $0.id == incomeId })
             else { return }
-            previewIncome = IncomePreviewContext(income: income, accountName: account.name)
+            // Find corresponding income schedule
+            let schedule = incomeSchedulesStore.schedules.first(where: {
+                $0.accountId == accountId && $0.incomeId == incomeId
+            })
+            previewIncome = IncomePreviewContext(income: income, accountName: account.name, incomeSchedule: schedule)
         case .target:
             guard
                 let targetId = item.targetId,
@@ -1688,6 +1773,8 @@ private struct AddTransactionSheet: View {
     @State private var amount: String = ""
     @State private var dayOfMonth: String = ""
     @State private var linkedCreditAccountId: Int? = nil
+    @State private var transactionType: String = "scheduled" // "scheduled" or "yearly"
+    @State private var yearlyDate: Date = Date()
 
     private var toAccount: Account? {
         guard let id = toAccountId else { return nil }
@@ -1701,8 +1788,15 @@ private struct AddTransactionSheet: View {
     private var canSave: Bool {
         guard let id = toAccountId, accountsStore.account(for: id) != nil else { return false }
         guard !type.isEmpty, !company.isEmpty, let money = Double(amount), money > 0 else { return false }
-        guard let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
-        return true
+
+        if transactionType == "yearly" {
+            // Validate yearly date is selected and in the future or today
+            return true
+        } else {
+            // Validate day of month for scheduled transactions
+            guard let day = Int(dayOfMonth), (1...31).contains(day) else { return false }
+            return true
+        }
     }
 
     var body: some View {
@@ -1744,7 +1838,20 @@ private struct AddTransactionSheet: View {
                     TextField("Name", text: $type)
                     TextField("Company", text: $company)
                     TextField("Value", text: $amount).keyboardType(.decimalPad)
-                    TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                }
+
+                Section("Schedule") {
+                    Picker("Type", selection: $transactionType) {
+                        Text("Scheduled").tag("scheduled")
+                        Text("Yearly").tag("yearly")
+                    }
+                    .pickerStyle(.navigationLink)
+
+                    if transactionType == "yearly" {
+                        DatePicker("Date", selection: $yearlyDate, displayedComponents: .date)
+                    } else {
+                        TextField("Day of Month (1-31)", text: $dayOfMonth).keyboardType(.numberPad)
+                    }
                 }
             }
             .navigationTitle("Add Transaction")
@@ -1763,16 +1870,32 @@ private struct AddTransactionSheet: View {
 
     private func save() async {
         guard let toAccountId, let money = Double(amount) else { return }
+
+        let dateValue: String?
+        let yearlyDateValue: String?
+
+        if transactionType == "yearly" {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "dd-MM-yyyy"
+            yearlyDateValue = formatter.string(from: yearlyDate)
+            dateValue = nil
+        } else {
+            dateValue = dayOfMonth
+            yearlyDateValue = nil
+        }
+
         let submission = TransactionSubmission(
             name: type,
             vendor: company,
             amount: abs(money),
-            date: dayOfMonth,
+            date: dateValue,
             fromAccountId: nil,
             toAccountId: toAccountId,
             toPotName: potName,
             paymentType: paymentType,
-            linkedCreditAccountId: linkedCreditAccountId
+            linkedCreditAccountId: linkedCreditAccountId,
+            yearlyDate: yearlyDateValue,
+            isCompleted: transactionType == "yearly" ? false : nil
         )
         await accountsStore.addTransaction(submission)
         isPresented = false
@@ -2732,6 +2855,7 @@ private struct IncomePreviewContext: Identifiable {
     let id = UUID()
     let income: Income
     let accountName: String
+    let incomeSchedule: IncomeSchedule?
 }
 
 private struct TargetPreviewContext: Identifiable {
@@ -2787,6 +2911,19 @@ private struct TransactionPreviewSheet: View {
     }
 
     private var dayDescription: String {
+        // Check if it's a yearly transaction
+        if record.kind == .yearly, let yearlyDate = record.yearlyDate {
+            let components = yearlyDate.split(separator: "-")
+            if components.count == 3, let day = Int(components[0]), let month = Int(components[1]), let year = Int(components[2]) {
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "dd MMM yyyy"
+                if let date = Calendar.current.date(from: DateComponents(year: year, month: month, day: day)) {
+                    return dateFormatter.string(from: date)
+                }
+            }
+            return yearlyDate
+        }
+
         if let day = Int(record.date), (1...31).contains(day) {
             return "\(day)"
         }
@@ -2896,6 +3033,9 @@ private struct TransactionPreviewSheet: View {
 
 private struct IncomePreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var incomeSchedulesStore: IncomeSchedulesStore
+    @State private var showDeleteConfirm = false
+    @State private var deletingEventId: Int?
 
     let context: IncomePreviewContext
 
@@ -2910,6 +3050,30 @@ private struct IncomePreviewSheet: View {
         return date.isEmpty ? "—" : date
     }
 
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let displayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private func formattedDate(for timestamp: String) -> String {
+        guard let date = IncomePreviewSheet.isoFormatter.date(from: timestamp) else {
+            return timestamp
+        }
+        return IncomePreviewSheet.displayFormatter.string(from: date)
+    }
+
+    private func formatEventAmount(_ amount: Double) -> String {
+        return "£" + String(format: "%.2f", amount)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -2919,14 +3083,45 @@ private struct IncomePreviewSheet: View {
                     LabeledContent("Amount", value: formattedAmount)
                     LabeledContent("Day", value: dayDescription)
                     LabeledContent("Pot", value: potDescription)
+                    if let schedule = context.incomeSchedule, schedule.executionCount > 0 {
+                        LabeledContent("Executions", value: "\(schedule.executionCount)")
+                    }
                 }
 
                 Section("Account") {
                     LabeledContent("Account", value: context.accountName)
                 }
 
+                if let schedule = context.incomeSchedule, let events = schedule.events, !events.isEmpty {
+                    Section("Execution History") {
+                        ForEach(events.sorted(by: { $0.executedAt > $1.executedAt })) { event in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(formattedDate(for: event.executedAt))
+                                        .font(.subheadline)
+                                    Text(formatEventAmount(event.amount))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button(role: .destructive) {
+                                    deletingEventId = event.id
+                                    showDeleteConfirm = true
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
                 Section("Identifiers") {
                     LabeledContent("Income ID", value: "\(context.income.id)")
+                    if let schedule = context.incomeSchedule {
+                        LabeledContent("Schedule ID", value: "\(schedule.id)")
+                    }
                 }
             }
             .navigationTitle("Income Details")
@@ -2934,6 +3129,21 @@ private struct IncomePreviewSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .alert("Delete Event?", isPresented: $showDeleteConfirm) {
+                Button("Delete", role: .destructive) {
+                    if let eventId = deletingEventId, let schedule = context.incomeSchedule {
+                        Task {
+                            await incomeSchedulesStore.deleteEvent(scheduleId: schedule.id, eventId: eventId)
+                            dismiss()
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    deletingEventId = nil
+                }
+            } message: {
+                Text("This will remove this execution event. If it's the last event, the entire schedule will be deleted.")
             }
         }
     }
