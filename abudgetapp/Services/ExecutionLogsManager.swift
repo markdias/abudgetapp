@@ -9,8 +9,8 @@ class ExecutionLogsManager {
     }()
 
     // MARK: - Add Log
-    static func addLog(_ processName: String, itemCount: Int, wasAutomatic: Bool) {
-        let log = ExecutionLog(processName: processName, itemCount: itemCount, wasAutomatic: wasAutomatic)
+    static func addLog(_ processName: String, itemCount: Int, wasAutomatic: Bool, itemNames: [String]? = nil) {
+        let log = ExecutionLog(processName: processName, itemCount: itemCount, wasAutomatic: wasAutomatic, itemNames: itemNames)
         var logs = getLogs()
         logs.insert(log, at: 0) // Add to front (most recent first)
 

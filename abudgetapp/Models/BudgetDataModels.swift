@@ -847,12 +847,14 @@ public struct ExecutionLog: Identifiable, Codable, Hashable {
     public let executedAt: Date
     public let itemCount: Int
     public let wasAutomatic: Bool
+    public let itemNames: [String]?
 
-    public init(id: UUID = UUID(), processName: String, executedAt: Date = Date(), itemCount: Int, wasAutomatic: Bool) {
+    public init(id: UUID = UUID(), processName: String, executedAt: Date = Date(), itemCount: Int, wasAutomatic: Bool, itemNames: [String]? = nil) {
         self.id = id
         self.processName = processName
         self.executedAt = executedAt
         self.itemCount = itemCount
         self.wasAutomatic = wasAutomatic
+        self.itemNames = itemNames
     }
 }

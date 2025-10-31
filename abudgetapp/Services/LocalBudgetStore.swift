@@ -499,13 +499,14 @@ actor LocalBudgetStore {
         try persist()
 
         // Log execution
-        ExecutionLogsManager.addLog("Transfer Schedules", itemCount: 1, wasAutomatic: false)
+        ExecutionLogsManager.addLog("Transfer Schedules", itemCount: 1, wasAutomatic: false, itemNames: [schedule.description])
 
         return MessageResponse(message: "Transfer schedule executed")
     }
 
     func executeAllTransferSchedules() throws -> IncomeExecutionResponse {
         var executed = 0
+        var executedNames: [String] = []
         let now = Date()
         let stamp = LocalBudgetStore.isoFormatter.string(from: now)
         for index in state.transferSchedules.indices {
@@ -543,6 +544,7 @@ actor LocalBudgetStore {
                     }
 
                     state.transferSchedules[index] = schedule
+                    executedNames.append(schedule.description)
                     executed += 1
                 } catch {
                     // Skip schedules that cannot be executed (e.g., insufficient funds)
@@ -557,7 +559,7 @@ actor LocalBudgetStore {
 
         // Log execution
         if executed > 0 {
-            ExecutionLogsManager.addLog("Transfer Schedules", itemCount: executed, wasAutomatic: false)
+            ExecutionLogsManager.addLog("Transfer Schedules", itemCount: executed, wasAutomatic: false, itemNames: executedNames)
         }
 
         return IncomeExecutionResponse(accounts: state.accounts, executed_count: executed)
@@ -935,7 +937,8 @@ actor LocalBudgetStore {
         // Log execution
         let totalProcessed = processedLogs.count
         if totalProcessed > 0 {
-            ExecutionLogsManager.addLog("Scheduled Transactions", itemCount: totalProcessed, wasAutomatic: !forceManual)
+            let itemNames = processedLogs.map { $0.name }
+            ExecutionLogsManager.addLog("Scheduled Transactions", itemCount: totalProcessed, wasAutomatic: !forceManual, itemNames: itemNames)
         }
 
         return ProcessTransactionsResult(
@@ -1177,7 +1180,8 @@ actor LocalBudgetStore {
 
         // Log execution
         if !newLogs.isEmpty {
-            ExecutionLogsManager.addLog("Balance Reduction", itemCount: newLogs.count, wasAutomatic: false)
+            let itemNames = newLogs.map { $0.accountName }
+            ExecutionLogsManager.addLog("Balance Reduction", itemCount: newLogs.count, wasAutomatic: false, itemNames: itemNames)
         }
 
         return state.accounts
@@ -1245,13 +1249,15 @@ actor LocalBudgetStore {
         try persist()
 
         // Log execution
-        ExecutionLogsManager.addLog("Income Schedules", itemCount: 1, wasAutomatic: false)
+        let itemName = "\(schedule.description) (£\(String(format: "%.2f", schedule.amount)))"
+        ExecutionLogsManager.addLog("Income Schedules", itemCount: 1, wasAutomatic: false, itemNames: [itemName])
 
         return MessageResponse(message: "Income schedule executed")
     }
 
     func executeAllIncomeSchedules() throws -> IncomeExecutionResponse {
         var executed = 0
+        var executedNames: [String] = []
         let now = Date()
         let isoNow = LocalBudgetStore.isoFormatter.string(from: now)
 
@@ -1273,6 +1279,8 @@ actor LocalBudgetStore {
 
                 state.incomeSchedules[index].isCompleted = true
                 state.incomeSchedules[index].lastExecuted = isoNow
+                let itemName = "\(schedule.description) (£\(String(format: "%.2f", schedule.amount)))"
+                executedNames.append(itemName)
                 executed += 1
             }
         }
@@ -1280,7 +1288,7 @@ actor LocalBudgetStore {
 
         // Log execution
         if executed > 0 {
-            ExecutionLogsManager.addLog("Income Schedules", itemCount: executed, wasAutomatic: false)
+            ExecutionLogsManager.addLog("Income Schedules", itemCount: executed, wasAutomatic: false, itemNames: executedNames)
         }
 
         return IncomeExecutionResponse(accounts: state.accounts, executed_count: executed)

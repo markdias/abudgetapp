@@ -4,6 +4,7 @@ struct ExecutionLogsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var executionLogs: [ExecutionLog] = []
     @State private var expandedSections: Set<String> = []
+    @State private var expandedLogItems: Set<UUID> = []
 
     var body: some View {
         NavigationStack {
@@ -180,73 +181,133 @@ struct ExecutionLogsView: View {
     }
 
     private func logEntryRow(log: ExecutionLog) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(dateFormatter(log.executedAt))
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        if log.wasAutomatic {
-                            Label("Auto", systemImage: "bolt.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.green)
-                        } else {
-                            Label("Manual", systemImage: "hand.tap.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.blue)
+        let isExpanded = expandedLogItems.contains(log.id)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Button(action: { toggleLogItem(log.id) }) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text(dateFormatter(log.executedAt))
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            if log.wasAutomatic {
+                                Label("Auto", systemImage: "bolt.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.green)
+                            } else {
+                                Label("Manual", systemImage: "hand.tap.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(ModernTheme.primaryAccent)
+                            Text("Processed \(log.itemCount) \(log.itemCount == 1 ? "item" : "items")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    Text("Processed \(log.itemCount) \(log.itemCount == 1 ? "item" : "items")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
 
-                Spacer()
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
+                .cornerRadius(8)
             }
-            .padding(10)
-            .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
-            .cornerRadius(8)
+
+            if isExpanded, let itemNames = log.itemNames, !itemNames.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(itemNames, id: \.self) { itemName in
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle()
+                                .fill(ModernTheme.primaryAccent.opacity(0.4))
+                                .frame(width: 4, height: 4)
+                                .padding(.top, 6)
+
+                            Text(itemName)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                                .lineLimit(3)
+                        }
+                        .padding(.horizontal, 10)
+                    }
+                }
+                .padding(10)
+                .background(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.2))
+                .cornerRadius(8)
+            }
         }
     }
 
     private func allLogsEntryRow(log: ExecutionLog) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(log.processName)
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(ModernTheme.primaryAccent)
-                    }
-                    HStack(spacing: 8) {
-                        Text(dateFormatter(log.executedAt))
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundStyle(.secondary)
-                        if log.wasAutomatic {
-                            Label("Auto", systemImage: "bolt.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.green)
-                        } else {
-                            Label("Manual", systemImage: "hand.tap.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.blue)
+        let isExpanded = expandedLogItems.contains(log.id)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Button(action: { toggleLogItem(log.id) }) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(ModernTheme.primaryAccent)
+                            Text(log.processName)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(ModernTheme.primaryAccent)
+                        }
+                        HStack(spacing: 8) {
+                            Text(dateFormatter(log.executedAt))
+                                .font(.system(size: 12, design: .rounded))
+                                .foregroundStyle(.secondary)
+                            if log.wasAutomatic {
+                                Label("Auto", systemImage: "bolt.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.green)
+                            } else {
+                                Label("Manual", systemImage: "hand.tap.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
                         }
                     }
-                }
 
-                Spacer()
+                    Spacer()
 
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(log.itemCount)")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                    Text(log.itemCount == 1 ? "item" : "items")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("\(log.itemCount)")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                        Text(log.itemCount == 1 ? "item" : "items")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(10)
+                .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
+                .cornerRadius(8)
             }
-            .padding(10)
-            .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
-            .cornerRadius(8)
+
+            if isExpanded, let itemNames = log.itemNames, !itemNames.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(itemNames, id: \.self) { itemName in
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle()
+                                .fill(ModernTheme.primaryAccent.opacity(0.4))
+                                .frame(width: 4, height: 4)
+                                .padding(.top, 6)
+
+                            Text(itemName)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                                .lineLimit(3)
+                        }
+                        .padding(.horizontal, 10)
+                    }
+                }
+                .padding(10)
+                .background(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.2))
+                .cornerRadius(8)
+            }
         }
     }
 
@@ -260,6 +321,14 @@ struct ExecutionLogsView: View {
             expandedSections.remove(name)
         } else {
             expandedSections.insert(name)
+        }
+    }
+
+    private func toggleLogItem(_ id: UUID) {
+        if expandedLogItems.contains(id) {
+            expandedLogItems.remove(id)
+        } else {
+            expandedLogItems.insert(id)
         }
     }
 
