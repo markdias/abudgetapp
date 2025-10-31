@@ -67,13 +67,15 @@ struct ProcessedTransactionsView: View {
                 }
                 let log = lookup[transaction.id]
                 let processedAt = log.flatMap { ProcessedTransactionsView.isoFormatter.date(from: $0.processedAt) }
+                let linkedCreditAccount = transaction.linkedCreditAccountId.flatMap { accountsById[$0] }
                 return ScheduledItem(
                     transaction: transaction,
                     accountName: account.name,
                     potName: transaction.toPotName,
                     scheduledDay: day,
                     processedAt: processedAt,
-                    log: log
+                    log: log,
+                    linkedCreditAccount: linkedCreditAccount
                 )
             }
             .sorted {
@@ -217,7 +219,10 @@ struct ProcessedTransactionsView: View {
     }
 
     private var processedLogsCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let accountsById = Dictionary(uniqueKeysWithValues: accountsStore.accounts.map { ($0.id, $0) })
+        let transactionsById = Dictionary(uniqueKeysWithValues: accountsStore.transactions.map { ($0.id, $0) })
+
+        return VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("Processed This Month")
                     .font(.system(.title3, design: .rounded, weight: .semibold))
@@ -236,9 +241,13 @@ struct ProcessedTransactionsView: View {
 
             VStack(spacing: 12) {
                 ForEach(processedLogsThisPeriod) { log in
+                    let linkedCreditAccount = transactionsById[log.paymentId].flatMap { transaction in
+                        transaction.linkedCreditAccountId.flatMap { accountsById[$0] }
+                    }
                     ProcessedLogRow(
                         log: log,
-                        accountName: accountsStore.account(for: log.accountId)?.name ?? "Account #\(log.accountId)"
+                        accountName: accountsStore.account(for: log.accountId)?.name ?? "Account #\(log.accountId)",
+                        linkedCreditAccount: linkedCreditAccount
                     )
                 }
             }
@@ -273,6 +282,7 @@ struct ProcessedTransactionsView: View {
         let scheduledDay: Int
         let processedAt: Date?
         let log: ProcessedTransactionLog?
+        let linkedCreditAccount: Account?
 
         var id: Int { transaction.id }
         var isProcessed: Bool { log != nil }
@@ -284,50 +294,61 @@ struct ProcessedTransactionsView: View {
         let item: ScheduledItem
 
         var body: some View {
-            HStack(alignment: .center, spacing: 16) {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: item.isProcessed
-                                ? [ModernTheme.secondaryAccent, Color.green.opacity(0.55)]
-                                : [ModernTheme.primaryAccent, ModernTheme.tertiaryAccent.opacity(0.55)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 16) {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: item.isProcessed
+                                    ? [ModernTheme.secondaryAccent, Color.green.opacity(0.55)]
+                                    : [ModernTheme.primaryAccent, ModernTheme.tertiaryAccent.opacity(0.55)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 48, height: 48)
-                    .overlay(
-                        Image(systemName: item.isProcessed ? "checkmark.circle.fill" : "clock.badge.exclamationmark")
-                            .foregroundStyle(.white)
-                            .font(.headline)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
-                    )
+                        .frame(width: 48, height: 48)
+                        .overlay(
+                            Image(systemName: item.isProcessed ? "checkmark.circle.fill" : "clock.badge.exclamationmark")
+                                .foregroundStyle(.white)
+                                .font(.headline)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                        )
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(item.transaction.name.isEmpty ? item.transaction.vendor : item.transaction.name)
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    Text(destinationLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    infoLine
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.transaction.name.isEmpty ? item.transaction.vendor : item.transaction.name)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        Text(destinationLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        infoLine
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Text(currencyString(item.transaction.amount))
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(ModernTheme.secondaryAccent)
+                        Text("Day \(item.scheduledDay)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
 
-                Spacer()
+                if let creditAccount = item.linkedCreditAccount {
+                    Divider()
+                        .padding(.horizontal, 14)
 
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text(currencyString(item.transaction.amount))
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(ModernTheme.secondaryAccent)
-                    Text("Day \(item.scheduledDay)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    creditCardBalanceSection(account: creditAccount)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
             .background(
                 RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
                     .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
@@ -336,6 +357,38 @@ struct ProcessedTransactionsView: View {
                             .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
                     )
             )
+        }
+
+        @ViewBuilder
+        private func creditCardBalanceSection(account: Account) -> some View {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Credit Card Balance Impact")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    balanceRow(label: "Current Balance", amount: account.balance, isHighlight: false)
+                    balanceRow(label: "Amount to Remove", amount: item.transaction.amount, isHighlight: true)
+                    Divider()
+                        .padding(.vertical, 4)
+                    balanceRow(label: "New Balance", amount: account.balance - item.transaction.amount, isHighlight: false)
+                }
+                .padding(10)
+                .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
+                .cornerRadius(8)
+            }
+        }
+
+        private func balanceRow(label: String, amount: Double, isHighlight: Bool) -> some View {
+            HStack {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(currencyString(amount))
+                    .font(.system(size: 13, weight: isHighlight ? .semibold : .regular, design: .rounded))
+                    .foregroundStyle(isHighlight ? ModernTheme.secondaryAccent : .primary)
+            }
         }
 
         private var destinationLine: String {
@@ -385,47 +438,59 @@ struct ProcessedTransactionsView: View {
         @Environment(\.colorScheme) private var colorScheme
         let log: ProcessedTransactionLog
         let accountName: String
+        let linkedCreditAccount: Account?
 
         var body: some View {
-            HStack(alignment: .center, spacing: 16) {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: log.wasManual
-                                ? [ModernTheme.tertiaryAccent, Color.orange.opacity(0.55)]
-                                : [ModernTheme.secondaryAccent, Color.green.opacity(0.55)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 16) {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: log.wasManual
+                                    ? [ModernTheme.tertiaryAccent, Color.orange.opacity(0.55)]
+                                    : [ModernTheme.secondaryAccent, Color.green.opacity(0.55)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 48, height: 48)
-                    .overlay(
-                        Image(systemName: log.wasManual ? "hand.tap.fill" : "clock.fill")
-                            .foregroundStyle(.white)
-                            .font(.headline)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
-                    )
+                        .frame(width: 48, height: 48)
+                        .overlay(
+                            Image(systemName: log.wasManual ? "hand.tap.fill" : "clock.fill")
+                                .foregroundStyle(.white)
+                                .font(.headline)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
+                        )
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(log.name)
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    Text(destinationLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    infoStack
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(log.name)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        Text(destinationLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        infoStack
+                    }
+
+                    Spacer()
+
+                    Text(currencyString(log.amount))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(ModernTheme.secondaryAccent)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
 
-                Spacer()
+                if let creditAccount = linkedCreditAccount {
+                    Divider()
+                        .padding(.horizontal, 14)
 
-                Text(currencyString(log.amount))
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(ModernTheme.secondaryAccent)
+                    creditCardBalanceSection(account: creditAccount)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
             .background(
                 RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
                     .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
@@ -434,6 +499,38 @@ struct ProcessedTransactionsView: View {
                             .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
                     )
             )
+        }
+
+        @ViewBuilder
+        private func creditCardBalanceSection(account: Account) -> some View {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Credit Card Balance Impact")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    balanceRow(label: "Balance After Processing", amount: account.balance, isHighlight: false)
+                    balanceRow(label: "Amount Removed", amount: log.amount, isHighlight: true)
+                    Divider()
+                        .padding(.vertical, 4)
+                    balanceRow(label: "Previous Balance", amount: account.balance + log.amount, isHighlight: false)
+                }
+                .padding(10)
+                .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
+                .cornerRadius(8)
+            }
+        }
+
+        private func balanceRow(label: String, amount: Double, isHighlight: Bool) -> some View {
+            HStack {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(currencyString(amount))
+                    .font(.system(size: 13, weight: isHighlight ? .semibold : .regular, design: .rounded))
+                    .foregroundStyle(isHighlight ? ModernTheme.secondaryAccent : .primary)
+            }
         }
 
         private var destinationLine: String {

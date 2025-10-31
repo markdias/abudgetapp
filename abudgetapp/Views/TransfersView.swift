@@ -21,10 +21,10 @@ struct TransfersView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 24) {
                         VStack(spacing: 18) {
-                            LargeActionButton(title: "Transfer Schedules", icon: "arrow.left.arrow.right.circle.fill", gradient: [ModernTheme.primaryAccent, Color(red: 0.32, green: 0.72, blue: 1.0)]) { showingTransferSchedules = true }
                             LargeActionButton(title: "Income Schedules", icon: "calendar.badge.clock", gradient: [ModernTheme.secondaryAccent, Color(red: 0.39, green: 0.95, blue: 0.82)]) {
                                 showingIncomeSchedules = true
                             }
+                            LargeActionButton(title: "Transfer Schedules", icon: "arrow.left.arrow.right.circle.fill", gradient: [ModernTheme.primaryAccent, Color(red: 0.32, green: 0.72, blue: 1.0)]) { showingTransferSchedules = true }
                             LargeActionButton(title: "Processed Transactions", icon: "checklist.checked", gradient: [Color(red: 0.27, green: 0.85, blue: 0.96), ModernTheme.primaryAccent]) {
                                 showingProcessedTransactions = true
                             }

@@ -71,6 +71,22 @@ final class IncomeSchedulesStore: ObservableObject {
         }
     }
 
+    func deleteEvent(scheduleId: Int, eventId: Int) async {
+        do {
+            _ = try await store.deleteIncomeEvent(scheduleId: scheduleId, eventId: eventId)
+            schedules = await store.currentIncomeSchedules()
+            statusMessage = StatusMessage(title: "Event Deleted", message: "Execution event removed", kind: .warning)
+        } catch let error as LocalBudgetStore.StoreError {
+            let dataError = error.asBudgetDataError
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Event Failed", message: dataError.localizedDescription, kind: .error)
+        } catch {
+            let dataError = BudgetDataError.unknown(error)
+            lastError = dataError
+            statusMessage = StatusMessage(title: "Delete Event Failed", message: dataError.localizedDescription, kind: .error)
+        }
+    }
+
     func execute(schedule: IncomeSchedule) async {
         do {
             _ = try await store.executeIncomeSchedule(id: schedule.id)
