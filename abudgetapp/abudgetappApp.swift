@@ -53,11 +53,13 @@ struct MyBudgetApp: App {
             group.addTask { await accountsStore.loadAccounts() }
         }
         // Auto-enable processing on scheduled day/time
-        if autoProcessOnDayEnabled && shouldAutoProcessToday() {
-            autoProcessTransactionsEnabled = true
+        let scheduledRunTriggered = autoProcessOnDayEnabled && shouldAutoProcessToday()
+        if scheduledRunTriggered {
             lastAutoProcessDate = ISO8601DateFormatter().string(from: Date())
         }
-        if autoProcessTransactionsEnabled {
+
+        let shouldProcessTransactions = autoProcessTransactionsEnabled || scheduledRunTriggered
+        if shouldProcessTransactions {
             await accountsStore.processScheduledTransactions()
         }
         if autoReduceBalancesEnabled {

@@ -588,12 +588,18 @@ actor LocalBudgetStore {
         // Remove the event
         events.remove(at: eventIndex)
 
-        // Always update the transaction with remaining events (even if empty)
-        transaction.events = events
+        if events.isEmpty {
+            transaction.events = nil
+            if transaction.kind == .yearly {
+                transaction.isCompleted = false
+            }
+        } else {
+            transaction.events = events
+        }
         state.transactions[txIndex] = transaction
 
         // Clear the linkedTransactionId from transfer schedule if no events left
-        if events.isEmpty {
+        if transaction.events == nil {
             if let transferId = transaction.transferScheduleId,
                let scheduleIndex = state.transferSchedules.firstIndex(where: { $0.id == transferId }) {
                 state.transferSchedules[scheduleIndex].linkedTransactionId = nil
@@ -1310,8 +1316,13 @@ actor LocalBudgetStore {
 
         events.remove(at: eventIndex)
 
-        // Always update schedule with remaining events (even if empty)
-        schedule.events = events
+        if events.isEmpty {
+            schedule.events = nil
+            schedule.isCompleted = false
+            schedule.lastExecuted = nil
+        } else {
+            schedule.events = events
+        }
         state.incomeSchedules[scheduleIndex] = schedule
 
         try persist()
