@@ -278,16 +278,20 @@ struct BalanceReductionView: View {
             .disabled(isReducing)
             .opacity(isReducing ? 0.6 : 1)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Label(
-                    autoReduceEnabled
-                        ? "Automatic reduction runs when the app becomes active."
-                        : "Automatic reduction is off.",
-                    systemImage: autoReduceEnabled ? "bolt.badge.clock" : "bolt.slash"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Divider()
+                .padding(.vertical, 4)
 
+            Toggle(isOn: $autoReduceEnabled) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Reduce on App Active")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    Text("Automatically reduces when app becomes active.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
                 if let summary = lastRunSummary {
                     Text(summary)
                         .font(.caption)

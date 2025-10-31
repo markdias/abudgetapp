@@ -5,8 +5,6 @@ struct SettingsView: View {
     @EnvironmentObject private var diagnosticsStore: DiagnosticsStore
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
-    @AppStorage("autoProcessTransactionsEnabled") private var autoProcessTransactionsEnabled = false
-    @AppStorage("autoReduceBalancesEnabled") private var autoReduceBalancesEnabled = false
 
     @State private var storageStatus: String?
     @State private var storageStatusIsSuccess = false
@@ -16,6 +14,7 @@ struct SettingsView: View {
     @State private var showingImporter = false
     @State private var showingExporter = false
     @State private var exportDocument = JSONDocument()
+    @State private var showingExecutionManagement = false
 
     var body: some View {
         NavigationStack {
@@ -26,7 +25,6 @@ struct SettingsView: View {
                     VStack(spacing: 24) {
                         appearanceCard
                         activitiesCard
-                        automationCard
                         storageCard
                         dataManagementCard
                         diagnosticsCard
@@ -43,6 +41,9 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingDiagnostics) {
                 DiagnosticsRunnerView(isPresented: $showingDiagnostics)
+            }
+            .sheet(isPresented: $showingExecutionManagement) {
+                ExecutionManagementView()
             }
             // Removed Income Schedules; now lives under Transfers
             .alert("Delete All Data?", isPresented: $showingDeleteAllConfirm) {
@@ -157,45 +158,6 @@ struct SettingsView: View {
                         Text("\(activitiesMaxItems)")
                             .foregroundStyle(.secondary)
                     }
-                }
-            }
-        }
-        .glassCard()
-    }
-
-    private var automationCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Automation")
-                    .font(.system(.title3, design: .rounded, weight: .semibold))
-                Spacer()
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [ModernTheme.tertiaryAccent.opacity(0.45), ModernTheme.primaryAccent.opacity(0.5)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: 68, height: 4)
-                    .opacity(0.7)
-            }
-            Toggle(isOn: $autoProcessTransactionsEnabled) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Process Transactions Automatically")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    Text("Runs whenever the app launches.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Toggle(isOn: $autoReduceBalancesEnabled) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Reduce Balances Automatically")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    Text("Adjusts balances when the app becomes active.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -322,6 +284,39 @@ struct SettingsView: View {
                                     .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
                             )
                     )
+            }
+            Button {
+                showingExecutionManagement = true
+            } label: {
+                Label("Execution Management", systemImage: "clock.badge.xmark")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
+                    )
+            }
+            NavigationLink(destination: ExecutionLogsView()) {
+                Label("Execution Logs", systemImage: "calendar.badge.clock")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                            )
+                    )
+                    .foregroundStyle(.primary)
             }
         }
         .glassCard()

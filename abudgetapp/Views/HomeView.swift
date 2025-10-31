@@ -3017,7 +3017,7 @@ private struct TransactionPreviewSheet: View {
                     if let eventId = deletingEventId {
                         Task {
                             await accountsStore.deleteTransactionEvent(transactionId: record.id, eventId: eventId)
-                            dismiss()
+                            deletingEventId = nil
                         }
                     }
                 }
@@ -3025,7 +3025,7 @@ private struct TransactionPreviewSheet: View {
                     deletingEventId = nil
                 }
             } message: {
-                Text("This will remove this execution event. If it's the last event, the entire transaction will be deleted.")
+                Text("This will remove this execution event from the transaction's history.")
             }
         }
     }
@@ -3135,7 +3135,7 @@ private struct IncomePreviewSheet: View {
                     if let eventId = deletingEventId, let schedule = context.incomeSchedule {
                         Task {
                             await incomeSchedulesStore.deleteEvent(scheduleId: schedule.id, eventId: eventId)
-                            dismiss()
+                            deletingEventId = nil
                         }
                     }
                 }
@@ -3143,7 +3143,7 @@ private struct IncomePreviewSheet: View {
                     deletingEventId = nil
                 }
             } message: {
-                Text("This will remove this execution event. If it's the last event, the entire schedule will be deleted.")
+                Text("This will remove this execution event from the schedule's history.")
             }
         }
     }
