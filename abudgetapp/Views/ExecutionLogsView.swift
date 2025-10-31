@@ -15,6 +15,7 @@ struct ExecutionLogsView: View {
                         if executionLogs.isEmpty {
                             emptyState
                         } else {
+                            allLogsSection
                             logsSections
                         }
 
@@ -64,6 +65,58 @@ struct ExecutionLogsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(40)
+    }
+
+    private var allLogsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: { toggleSection("all") }) {
+                HStack(spacing: 12) {
+                    Image(systemName: expandedSections.contains("all") ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ModernTheme.primaryAccent)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("All Logs")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        Text("\(executionLogs.count) \(executionLogs.count == 1 ? "execution" : "executions")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(executionLogs.count > 0 ? "Latest: " + dateFormatter(executionLogs[0].executedAt) : "—")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+
+            if expandedSections.contains("all") {
+                Divider()
+                    .padding(.horizontal, 14)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(executionLogs, id: \.id) { log in
+                        allLogsEntryRow(log: log)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                .fill(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: ModernTheme.elementCornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.2 : 0.14), lineWidth: 0.8)
+                )
+        )
+        .padding(.horizontal, 20)
     }
 
     private var logsSections: some View {
@@ -149,6 +202,47 @@ struct ExecutionLogsView: View {
                 }
 
                 Spacer()
+            }
+            .padding(10)
+            .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
+            .cornerRadius(8)
+        }
+    }
+
+    private func allLogsEntryRow(log: ExecutionLog) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(log.processName)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(ModernTheme.primaryAccent)
+                    }
+                    HStack(spacing: 8) {
+                        Text(dateFormatter(log.executedAt))
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        if log.wasAutomatic {
+                            Label("Auto", systemImage: "bolt.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                        } else {
+                            Label("Manual", systemImage: "hand.tap.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(log.itemCount)")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                    Text(log.itemCount == 1 ? "item" : "items")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(10)
             .background(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3))
